@@ -46,9 +46,9 @@ pageClass: demo-landing
     <div class="demo-tile-art rogue-art" aria-hidden="true">
       <i>→</i><i>†</i><i>✦</i><i>◇</i>
     </div>
-    <span>Programmed beats · pushes · traps</span>
+    <span>Three-beat plans · previews · traps</span>
     <h2>Cinder Vault</h2>
-    <p>Program simultaneous turns, vault obstacles, and push enemies into spikes, pits, gates, and explosions.</p>
+    <p>Preview three-action paths, resolve every entity simultaneously, and push enemies into spikes, pits, gates, and explosions.</p>
     <b>Play the Roguelike →</b>
   </a>
 
