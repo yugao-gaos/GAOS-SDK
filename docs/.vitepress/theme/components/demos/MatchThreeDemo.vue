@@ -59,6 +59,7 @@ const agentPlaying = ref(false);
 const message = ref('');
 const decision = ref('Waiting for your move');
 const combo = ref(0);
+const boardElement = ref<HTMLElement | null>(null);
 let random = createRng(seed.value);
 let runToken = 0;
 
@@ -108,6 +109,11 @@ function gridStep(direction: number) {
     : 'calc(-100% - var(--match-gap))';
 }
 
+function fallOffset(rows: number) {
+  if (rows <= 0) return '0px';
+  return `calc(-${rows * 100}% ${' - var(--match-gap)'.repeat(rows)})`;
+}
+
 function startSwapMotion(a: number, b: number, rejected: boolean) {
   swapRejected.value = rejected;
   swapMotions.value = {
@@ -122,9 +128,20 @@ function motionStyle(index: number) {
   return {
     '--swap-x': swap?.x ?? '0px',
     '--swap-y': swap?.y ?? '0px',
-    '--fall-offset': `${fallRows * -100}%`,
+    '--fall-offset': fallOffset(fallRows),
     '--fall-duration': `${Math.min(520, 250 + fallRows * 52)}ms`,
   };
+}
+
+function nextPaint() {
+  return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+async function waitForBoardMotion() {
+  await nextTick();
+  await nextPaint();
+  const animations = boardElement.value?.getAnimations({ subtree: true }) ?? [];
+  await Promise.allSettled(animations.map((animation) => animation.finished));
 }
 
 function matches(values: number[]) {
@@ -254,8 +271,7 @@ async function resolveBoard(token: number) {
     const gained = found.size * 10 * combo.value;
     score.value += gained;
     message.value = combo.value > 1 ? `Cascade ×${combo.value} · puzzle state updated` : `Match · +${gained}`;
-    await nextTick();
-    await wait(280);
+    await waitForBoardMotion();
     if (token !== runToken) return;
     const next = Array<number>(width * height).fill(-1);
     const fallDistances: Record<number, number> = {};
@@ -281,8 +297,7 @@ async function resolveBoard(token: number) {
     board.value = next;
     clearing.value = new Set();
     falling.value = fallDistances;
-    await nextTick();
-    await wait(Math.min(540, 270 + Math.max(0, ...Object.values(fallDistances)) * 52));
+    await waitForBoardMotion();
     falling.value = {};
     await nextTick();
     found = matches(board.value);
@@ -298,8 +313,7 @@ async function playSwap(a: number, b: number, actor: 'human' | 'agent') {
   swapCells(next, a, b);
   const valid = matches(next).size > 0;
   startSwapMotion(a, b, !valid);
-  await nextTick();
-  await wait(valid ? 280 : 520);
+  await waitForBoardMotion();
   if (token !== runToken) return;
   if (!valid) {
     swapMotions.value = {};
@@ -390,7 +404,7 @@ reset();
           <div><span>Score</span><strong>{{ score.toLocaleString() }}</strong></div>
         </div>
         <div class="goal-track"><div :style="{ width: `${objectiveProgress}%` }"></div></div>
-        <div class="match-board" :aria-busy="locked">
+        <div ref="boardElement" class="match-board" :aria-busy="locked">
           <button
             v-for="(gem, index) in board"
             :key="index"
@@ -413,7 +427,7 @@ reset();
             :disabled="locked || agentPlaying || moves <= 0 || objectiveComplete || (locks[index] ?? 0) > 0"
             @click="chooseCell(index)"
           >
-            <span class="gem-shape"></span>
+            <span class="gem-piece"><span class="gem-shape"></span></span>
             <span v-if="(locks[index] ?? 0) > 0" class="puzzle-overlay lock-mark">{{ locks[index] }}</span>
             <span v-if="voids.has(index)" class="puzzle-overlay void-mark">VOID</span>
             <span v-if="level.relic && relicRow * width + level.relic.column === index && !relicDelivered" class="puzzle-overlay relic-mark">KEY</span>
