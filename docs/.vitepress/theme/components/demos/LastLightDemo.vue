@@ -19,9 +19,30 @@ const sockets: MapPoint[] = [
   { x: 55, y: 12 }, { x: 56, y: 88 }, { x: 69, y: 31 }, { x: 69, y: 70 }, { x: 84, y: 35 },
 ];
 const towerInfo = {
-  rifle: { name: 'Rifle nest', cost: 35, glyph: 'R', range: 20 },
-  floodlight: { name: 'Floodlight', cost: 30, glyph: 'F', range: 18 },
-  molotov: { name: 'Molotov post', cost: 50, glyph: 'M', range: 23 },
+  rifle: {
+    name: 'Rifle nest',
+    cost: 35,
+    range: 20,
+    sprite: withBase('/images/last-light/tower-rifle.png'),
+    description: 'Fires at the zombie closest to the safehouse.',
+    stats: '2 damage · Fast',
+  },
+  floodlight: {
+    name: 'Floodlight',
+    cost: 30,
+    range: 18,
+    sprite: withBase('/images/last-light/tower-floodlight.png'),
+    description: 'Slows every zombie in its glow to 55% speed. Deals no damage.',
+    stats: 'Area slow · No damage',
+  },
+  molotov: {
+    name: 'Molotov post',
+    cost: 50,
+    range: 23,
+    sprite: withBase('/images/last-light/tower-molotov.png'),
+    description: 'Scorches up to 3 zombies with each throw.',
+    stats: '2 damage · 3 targets',
+  },
 };
 
 const zombies = ref<Zombie[]>([]);
@@ -124,11 +145,35 @@ function towerFiring(socketIndex: number) {
   ));
 }
 
+function towerAt(socketIndex: number) {
+  return towers.value.find((tower) => tower.socket === socketIndex);
+}
+
+function towerAimAngle(tower: Tower) {
+  if (tower.kind === 'floodlight') return 0;
+  const target = nearestTargets(sockets[tower.socket], towerInfo[tower.kind].range)[0];
+  if (!target) return 0;
+  const from = sockets[tower.socket];
+  // The source art faces left, so zero degrees keeps towers aimed at the breach.
+  return Math.atan2(target.point.y - from.y, target.point.x - from.x) * 180 / Math.PI - 180;
+}
+
+function isZombieSlowed(zombie: Zombie) {
+  const point = zombiePoint(zombie);
+  return towers.value.some((tower) => {
+    if (tower.kind !== 'floodlight') return false;
+    const socket = sockets[tower.socket];
+    return Math.hypot(point.x - socket.x, point.y - socket.y) <= towerInfo.floodlight.range;
+  });
+}
+
 function build(socket: number, kind = selectedTower.value) {
   if (paused.value || towers.value.some((tower) => tower.socket === socket) || scrap.value < towerInfo[kind].cost || gameOver.value || victory.value) return;
   scrap.value -= towerInfo[kind].cost;
   towers.value.push({ socket, kind, cooldown: 0 });
-  message.value = `${towerInfo[kind].name} constructed for ${towerInfo[kind].cost} scrap.`;
+  message.value = kind === 'floodlight'
+    ? 'Floodlight online: zombies in its glow move at 55% speed.'
+    : `${towerInfo[kind].name} constructed for ${towerInfo[kind].cost} scrap.`;
 }
 
 function spawnZombie() {
@@ -195,11 +240,7 @@ function runTowers() {
 function moveZombies() {
   for (const zombie of zombies.value) {
     const point = zombiePoint(zombie);
-    const slowed = towers.value.some((tower) => {
-      if (tower.kind !== 'floodlight') return false;
-      const socket = sockets[tower.socket];
-      return Math.hypot(point.x - socket.x, point.y - socket.y) <= towerInfo.floodlight.range;
-    });
+    const slowed = isZombieSlowed(zombie);
     const screamerBoost = zombies.value.some((other) => other.type === 'Screamer' && other.id !== zombie.id && Math.hypot(zombiePoint(other).x - point.x, zombiePoint(other).y - point.y) < 12);
     zombie.progress += zombie.speed * (slowed ? .55 : 1) * (screamerBoost ? 1.25 : 1);
     if (zombie.progress >= 100) {
@@ -297,6 +338,18 @@ reset();
             <span v-if="breachPulse" :key="breachPulse" class="breach-hit" aria-hidden="true"></span>
           </span>
           <span class="breach">BREACH</span>
+          <span
+            v-for="tower in towers.filter((placed) => placed.kind === 'floodlight')"
+            :key="`range-${tower.socket}`"
+            class="tower-range floodlight-range"
+            :style="{
+              left: `${sockets[tower.socket].x}%`,
+              top: `${sockets[tower.socket].y}%`,
+              width: `${towerInfo.floodlight.range * 2}%`,
+              height: `${towerInfo.floodlight.range * 2}%`,
+            }"
+            aria-hidden="true"
+          ></span>
           <button
             v-for="(socket, index) in sockets"
             :key="index"
@@ -306,21 +359,30 @@ reset();
               firing: towerFiring(index),
             }"
             :style="{ left: `${socket.x}%`, top: `${socket.y}%` }"
+            :aria-label="towerAt(index)
+              ? `${towerInfo[towerAt(index)!.kind].name} at defense socket ${index + 1}`
+              : `Build ${towerInfo[selectedTower].name} at defense socket ${index + 1}`"
             @click="build(index)"
           >
             <span
-              v-if="towers.find((tower) => tower.socket === index)"
+              v-if="towerAt(index)"
               class="tower-sprite"
-              :class="towers.find((tower) => tower.socket === index)!.kind"
+              :class="towerAt(index)!.kind"
               aria-hidden="true"
-            ><i></i><b>{{ towerInfo[towers.find((tower) => tower.socket === index)!.kind].glyph }}</b></span>
+            >
+              <img
+                :src="towerInfo[towerAt(index)!.kind].sprite"
+                alt=""
+                :style="{ transform: `rotate(${towerAimAngle(towerAt(index)!)}deg)` }"
+              />
+            </span>
             <span v-else>+</span>
           </button>
           <span
             v-for="zombie in zombies"
             :key="zombie.id"
             class="zombie"
-            :class="zombie.type.toLowerCase()"
+            :class="[zombie.type.toLowerCase(), { slowed: isZombieSlowed(zombie) }]"
             :style="zombieStyle(zombie)"
             role="img"
             :aria-label="`${zombie.type}, ${zombie.hp} of ${zombie.maxHp} health`"
@@ -357,8 +419,21 @@ reset();
         </div>
         <div class="game-message">{{ message }}</div>
         <div class="build-tray">
-          <button v-for="(info, kind) in towerInfo" :key="kind" :class="{ selected: selectedTower === kind }" @click="selectedTower = kind">
-            <b>{{ info.glyph }}</b><span>{{ info.name }}</span><small>{{ info.cost }} scrap</small>
+          <button
+            v-for="(info, kind) in towerInfo"
+            :key="kind"
+            :class="{ selected: selectedTower === kind }"
+            :aria-pressed="selectedTower === kind"
+            :title="`${info.name}: ${info.description}`"
+            @click="selectedTower = kind"
+          >
+            <img :src="info.sprite" alt="" aria-hidden="true" />
+            <span class="build-copy">
+              <span class="tower-name">{{ info.name }}</span>
+              <span class="tower-cost">{{ info.cost }} scrap</span>
+              <small class="tower-description">{{ info.description }}</small>
+              <small class="tower-stats">{{ info.stats }}</small>
+            </span>
           </button>
         </div>
       </div>
@@ -386,17 +461,19 @@ reset();
 .defense-map::after{position:absolute;z-index:10;inset:0;pointer-events:none;border-radius:inherit;background:radial-gradient(ellipse at center,transparent 48%,rgba(2,5,7,.5) 100%);box-shadow:inset 0 0 0 1px rgba(255,220,158,.08);content:''}
 .map-atmosphere{position:absolute;z-index:1;inset:0;pointer-events:none;background:linear-gradient(90deg,rgba(2,10,19,.28),transparent 47%,rgba(255,151,55,.07)),repeating-linear-gradient(112deg,transparent 0 13%,rgba(206,226,184,.025) 13.2% 13.4%,transparent 13.6% 26%);mix-blend-mode:screen}
 .road-edge{position:absolute;z-index:2;height:18px;transform-origin:left center;border-top:1px dashed rgba(238,211,156,.43);border-bottom:2px solid rgba(28,23,20,.78);background:linear-gradient(#50483a,#302c26);box-shadow:0 5px 10px rgba(0,0,0,.3),inset 0 2px rgba(255,228,169,.06);pointer-events:none}
-.tower-socket{position:absolute;z-index:4;display:grid;width:46px;height:46px;place-items:center;transform:translate(-50%,-50%);border:2px dashed rgba(231,224,201,.35);border-radius:50%;color:#d4c6a4;background:rgba(21,31,25,.8);box-shadow:0 8px 13px rgba(0,0,0,.3);cursor:pointer;transition:border-color .2s ease,box-shadow .2s ease,filter .2s ease}.tower-socket:hover{border-color:#f2c071;box-shadow:0 0 0 5px rgba(240,180,95,.1),0 8px 13px rgba(0,0,0,.35)}.tower-socket.built{border-style:solid;border-color:#e7b45f;color:#fff2d1;background:#42392a;box-shadow:0 0 18px rgba(240,180,95,.3),0 8px 14px rgba(0,0,0,.4)}
-.tower-sprite{position:relative;display:grid;width:36px;height:36px;place-items:center;border-radius:50%;background:radial-gradient(circle at 45% 35%,#656454,#282d29 68%);box-shadow:inset 0 0 0 2px #121715,0 3px 6px rgba(0,0,0,.5)}.tower-sprite::before{position:absolute;width:19px;height:19px;border:2px solid #c6934d;border-radius:50%;background:#3b3a31;content:''}.tower-sprite i{position:absolute;z-index:2;display:block}.tower-sprite b{z-index:3;color:#fff1ca;font-size:.48rem;text-shadow:0 1px 2px #000}.tower-sprite.rifle i{left:17px;width:22px;height:5px;transform-origin:2px center;border-radius:3px;background:linear-gradient(#ddd1ad,#665940);box-shadow:0 2px 2px rgba(0,0,0,.5)}.tower-sprite.floodlight i{top:2px;width:28px;height:28px;border-radius:50%;background:conic-gradient(from 155deg,transparent 0 70deg,rgba(255,234,153,.9) 72deg 112deg,transparent 114deg);filter:drop-shadow(0 0 5px #ffe59b)}.tower-sprite.molotov i{top:-8px;width:11px;height:18px;border-radius:70% 30% 64% 36%;background:radial-gradient(circle at 55% 70%,#fff6ad 0 18%,#ff9d39 38%,#d33b20 72%,transparent 74%);filter:drop-shadow(0 0 5px #ff8f37);animation:flame-flicker .38s ease-in-out infinite alternate}.tower-socket.firing .tower-sprite.rifle i{animation:rifle-recoil .22s ease-out}.tower-socket.firing .tower-sprite{filter:brightness(1.35)}
+.tower-range{position:absolute;z-index:3;transform:translate(-50%,-50%);border-radius:50%;pointer-events:none}.floodlight-range{border:1px solid rgba(255,224,132,.38);background:radial-gradient(circle,rgba(255,231,155,.2),rgba(255,213,100,.08) 58%,transparent 72%);box-shadow:inset 0 0 22px rgba(255,229,147,.12);animation:floodlight-breathe 1.8s ease-in-out infinite}
+.tower-socket{position:absolute;z-index:4;display:grid;width:46px;height:46px;place-items:center;transform:translate(-50%,-50%);border:2px dashed rgba(231,224,201,.35);border-radius:50%;color:#d4c6a4;background:rgba(21,31,25,.8);box-shadow:0 8px 13px rgba(0,0,0,.3);cursor:pointer;transition:width .2s ease,height .2s ease,border-color .2s ease,box-shadow .2s ease,filter .2s ease}.tower-socket:hover{border-color:#f2c071;box-shadow:0 0 0 5px rgba(240,180,95,.1),0 8px 13px rgba(0,0,0,.35)}.tower-socket.built{width:68px;height:68px;border-style:solid;border-color:rgba(231,180,95,.72);color:#fff2d1;background:rgba(44,38,29,.66);box-shadow:0 0 18px rgba(240,180,95,.25),0 8px 14px rgba(0,0,0,.4)}
+.tower-sprite{position:relative;display:grid;width:64px;height:64px;place-items:center;border-radius:50%;filter:drop-shadow(0 5px 5px rgba(0,0,0,.65));transition:filter .18s ease}.tower-sprite img{display:block;width:100%;height:100%;object-fit:contain;transition:transform .28s ease-out}.tower-sprite.floodlight{filter:drop-shadow(0 0 8px rgba(255,225,132,.55)) drop-shadow(0 5px 5px rgba(0,0,0,.65))}.tower-sprite.molotov{filter:drop-shadow(0 0 5px rgba(255,126,47,.35)) drop-shadow(0 5px 5px rgba(0,0,0,.65))}.tower-socket.firing .tower-sprite{filter:brightness(1.32) drop-shadow(0 0 7px rgba(255,221,132,.8))}
 .zombie{position:absolute;z-index:5;display:grid;width:30px;height:34px;place-items:center;transform:translate(-50%,-50%);transition:left .1s linear,top .1s linear}.zombie-sprite{position:relative;display:block;width:18px;height:22px;transform-origin:center bottom;border:1px solid rgba(218,231,177,.72);border-radius:45% 55% 43% 47%;background:linear-gradient(105deg,#91a467,#52643e);box-shadow:0 4px 7px rgba(0,0,0,.62);animation:zombie-lurch .72s ease-in-out infinite alternate}.zombie-sprite::before{position:absolute;left:50%;top:-7px;width:10px;height:10px;transform:translateX(-50%) rotate(-8deg);border:1px solid #b8c987;border-radius:50% 44% 55% 45%;background:#778b56;box-shadow:inset -3px -2px rgba(33,47,24,.28);content:''}.zombie-sprite::after{position:absolute;left:-7px;top:5px;width:31px;height:5px;transform:rotate(-12deg);border-radius:50%;background:linear-gradient(90deg,#4d5d39 0 23%,transparent 24% 76%,#4d5d39 77%);content:''}.zombie-sprite span::before,.zombie-sprite span::after{position:absolute;bottom:-6px;width:6px;height:10px;border-radius:2px;background:#3d4931;content:''}.zombie-sprite span::before{left:2px;transform:rotate(9deg)}.zombie-sprite span::after{right:2px;transform:rotate(-7deg)}
 .zombie.runner .zombie-sprite{border-color:#e1d67b;background:linear-gradient(110deg,#b0aa55,#6c672c);animation-duration:.34s}.zombie.runner .zombie-sprite::after{transform:rotate(-25deg)}.zombie.brute{width:38px;height:42px}.zombie.brute .zombie-sprite{width:27px;height:29px;border-color:#baaa7c;background:linear-gradient(110deg,#76694c,#403a2d);animation-duration:.9s}.zombie.brute .zombie-sprite::before{top:-9px;width:14px;height:14px;background:#6b6045}.zombie.brute .zombie-sprite::after{left:-8px;top:8px;width:41px;height:8px}.zombie.screamer .zombie-sprite{border-color:#d4a4c6;background:linear-gradient(110deg,#90647e,#533b59);box-shadow:0 0 12px rgba(197,112,172,.38),0 4px 7px rgba(0,0,0,.62)}.zombie.screamer::before{position:absolute;inset:0;border:1px solid rgba(222,128,188,.5);border-radius:50%;content:'';animation:scream-pulse 1.1s ease-out infinite}
+.zombie.slowed .zombie-sprite{animation-duration:1.25s;filter:brightness(1.28) sepia(.2);box-shadow:0 0 10px rgba(255,230,146,.7),0 4px 7px rgba(0,0,0,.62)}.zombie.slowed::after{position:absolute;inset:-3px;border:1px solid rgba(255,232,155,.62);border-radius:50%;content:'';animation:slow-pulse 1.15s ease-out infinite}
 .zombie-health{position:absolute;right:0;bottom:-3px;left:0;height:4px;overflow:hidden;border:1px solid #170f0f;border-radius:2px;background:#291e1e;box-shadow:0 2px 3px rgba(0,0,0,.5)}.zombie-health span{display:block;height:100%;background:linear-gradient(90deg,#b33939,#ef7154);transition:width .16s ease}
 .safehouse,.breach{position:absolute;z-index:4;top:50%;display:grid;place-items:center;transform:translate(-50%,-50%);font-size:.55rem;font-weight:900}.safehouse{left:94.5%;width:66px;height:66px;border:3px solid #f1c36d;color:#2a1708;background:linear-gradient(135deg,#c57935,#7a3e21);box-shadow:0 0 32px rgba(255,174,71,.46),inset 0 0 18px rgba(255,216,117,.32)}.safehouse::before,.safehouse::after{position:absolute;background:#3f271b;content:''}.safehouse::before{top:7px;width:40px;height:7px;box-shadow:0 43px #3f271b}.safehouse::after{left:7px;width:7px;height:40px;box-shadow:43px 0 #3f271b}.safehouse>i{position:absolute;inset:-16px;border:1px solid rgba(255,195,91,.24);border-radius:50%;animation:safehouse-glow 2.1s ease-in-out infinite}.safehouse>b{z-index:1}.breach{left:5.5%;color:#ff9681;text-shadow:0 0 12px rgba(217,70,54,.65)}
 .breach-hit{position:absolute;z-index:4;width:80px;height:80px;border:4px solid #ff5e3d;border-radius:50%;animation:breach-blast .56s ease-out both}
 .combat-effects{position:absolute;z-index:7;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}.combat-effects *{vector-effect:non-scaling-stroke}.rifle-trail{stroke:#ffe8a3;stroke-width:2;stroke-linecap:round;stroke-dasharray:.1 .9;filter:drop-shadow(0 0 3px #ffb445);animation:rifle-tracer .2s linear both}.rifle-round{fill:#fff7c8;filter:drop-shadow(0 0 3px #ffcb62)}.muzzle-flash{fill:#fff3a6;transform-box:fill-box;transform-origin:center;filter:drop-shadow(0 0 5px #ff8b32);animation:muzzle-pop .22s ease-out both}.molotov-arc{fill:none;stroke:rgba(255,192,92,.62);stroke-width:1.5;stroke-linecap:round;stroke-dasharray:.05 .08;animation:arc-fade .58s ease-out both}.molotov-round{fill:#ffd05c;stroke:#ff6a27;stroke-width:2;filter:drop-shadow(0 0 5px #ff6a27)}
 .impact-sprite{--impact:#ffe7a0;position:absolute;z-index:8;width:10px;height:10px;transform:translate(-50%,-50%);pointer-events:none}.impact-sprite::before{position:absolute;inset:-7px;border:2px solid var(--impact);border-radius:50%;box-shadow:0 0 9px var(--impact);content:'';animation:impact-ring .48s ease-out both}.impact-sprite::after{position:absolute;inset:-3px;border-radius:50%;background:radial-gradient(circle,#fff 0 16%,var(--impact) 20% 42%,transparent 67%);filter:drop-shadow(0 0 5px var(--impact));content:'';animation:impact-core .46s ease-out both}.impact-sprite.molotov{--impact:#ff702c}.impact-sprite.molotov::before{inset:-18px;border-width:3px}.impact-sprite.molotov::after{inset:-13px;background:radial-gradient(circle,#fff5a1 0 10%,#ff9a32 25%,#bd321d 49%,transparent 70%)}.impact-sprite i{position:absolute;z-index:2;left:4px;top:3px;width:3px;height:9px;transform:rotate(calc(var(--particle) * 60deg));transform-origin:50% 2px;border-radius:2px;background:var(--impact);box-shadow:0 0 4px var(--impact);animation:impact-particle .52s cubic-bezier(.12,.7,.2,1) both}.impact-sprite.lethal::after{animation:lethal-burst .82s ease-out both}
-.build-tray{display:flex;justify-content:center;gap:.55rem;margin-top:.8rem}.build-tray button{display:grid;grid-template-columns:auto 1fr;min-width:145px;align-items:center;border:1px solid var(--game-line);border-radius:10px;padding:.5rem;color:var(--game-ink);background:rgba(255,255,255,.04);cursor:pointer;text-align:left}.build-tray button.selected{border-color:var(--game-accent);background:rgba(240,180,95,.1)}.build-tray b{grid-row:1/3;display:grid;width:28px;height:28px;margin-right:.5rem;place-items:center;border-radius:50%;background:#bb7538}.build-tray span{font-size:.65rem}.build-tray small{color:var(--game-muted);font-size:.52rem}
-@keyframes zombie-lurch{0%{transform:rotate(-7deg) translateY(1px)}100%{transform:rotate(8deg) translateY(-1px)}}@keyframes scream-pulse{0%{transform:scale(.4);opacity:.8}100%{transform:scale(1.65);opacity:0}}@keyframes safehouse-glow{50%{transform:scale(1.08);border-color:rgba(255,204,110,.48);box-shadow:0 0 18px rgba(255,168,61,.22)}}@keyframes flame-flicker{to{transform:scale(.82,1.08) rotate(7deg);filter:drop-shadow(0 0 8px #ff8f37)}}@keyframes rifle-recoil{35%{transform:translateX(-5px)}100%{transform:none}}@keyframes rifle-tracer{0%{stroke-dashoffset:1;opacity:0}20%{opacity:1}100%{stroke-dashoffset:0;opacity:0}}@keyframes muzzle-pop{0%{transform:scale(.2);opacity:0}35%{transform:scale(1.9);opacity:1}100%{transform:scale(.3);opacity:0}}@keyframes arc-fade{0%,40%{opacity:.75}100%{opacity:0;stroke-dashoffset:-.5}}@keyframes impact-ring{0%{transform:scale(.2);opacity:0}35%{opacity:1}100%{transform:scale(2.4);opacity:0}}@keyframes impact-core{0%{transform:scale(.25);opacity:0}32%{transform:scale(1.35);opacity:1}100%{transform:scale(.5);opacity:0}}@keyframes impact-particle{0%{opacity:1}100%{transform:rotate(calc(var(--particle) * 60deg)) translateY(-24px) scale(.2);opacity:0}}@keyframes lethal-burst{0%{transform:scale(.2);opacity:0}28%{transform:scale(1.7);opacity:1}100%{transform:scale(3);filter:blur(5px);opacity:0}}@keyframes breach-blast{0%{transform:scale(.25);opacity:1}100%{transform:scale(1.8);border-width:0;opacity:0}}
-@media(prefers-reduced-motion:reduce){.tower-sprite.molotov i,.zombie-sprite,.zombie.screamer::before,.safehouse>i{animation:none}.combat-effects,.impact-sprite,.breach-hit{display:none}}
-@media(max-width:650px){.defense-map{height:360px}.safehouse{left:90%;transform:translate(-50%,-50%) scale(.82)}.breach{left:9%}.tower-socket{width:40px;height:40px}.tower-sprite{transform:scale(.86)}.build-tray{flex-direction:column}.build-tray button{width:100%;min-height:44px}}
+.build-tray{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.55rem;margin-top:.8rem}.build-tray button{display:grid;grid-template-columns:56px minmax(0,1fr);gap:.55rem;min-height:118px;align-items:center;border:1px solid var(--game-line);border-radius:12px;padding:.58rem;color:var(--game-ink);background:rgba(255,255,255,.04);cursor:pointer;text-align:left;transition:border-color .18s ease,background .18s ease,transform .18s ease}.build-tray button:hover{transform:translateY(-1px);border-color:rgba(240,180,95,.5)}.build-tray button.selected{border-color:var(--game-accent);background:linear-gradient(135deg,rgba(240,180,95,.14),rgba(240,180,95,.05))}.build-tray button>img{display:block;width:56px;height:56px;object-fit:contain;filter:drop-shadow(0 4px 4px rgba(0,0,0,.55))}.build-copy{display:flex;min-width:0;flex-direction:column;gap:.14rem}.tower-name{font-size:.68rem;font-weight:760}.tower-cost{color:#f0b45f;font-size:.52rem}.tower-description{color:#c5c8bd;font-size:.5rem;line-height:1.35}.tower-stats{margin-top:.12rem;color:#eee1bd;font-size:.47rem;font-weight:700;text-transform:uppercase;letter-spacing:.035em}
+@keyframes zombie-lurch{0%{transform:rotate(-7deg) translateY(1px)}100%{transform:rotate(8deg) translateY(-1px)}}@keyframes scream-pulse{0%{transform:scale(.4);opacity:.8}100%{transform:scale(1.65);opacity:0}}@keyframes slow-pulse{0%{transform:scale(.55);opacity:.8}100%{transform:scale(1.25);opacity:0}}@keyframes floodlight-breathe{50%{opacity:.55;filter:brightness(1.22)}}@keyframes safehouse-glow{50%{transform:scale(1.08);border-color:rgba(255,204,110,.48);box-shadow:0 0 18px rgba(255,168,61,.22)}}@keyframes rifle-tracer{0%{stroke-dashoffset:1;opacity:0}20%{opacity:1}100%{stroke-dashoffset:0;opacity:0}}@keyframes muzzle-pop{0%{transform:scale(.2);opacity:0}35%{transform:scale(1.9);opacity:1}100%{transform:scale(.3);opacity:0}}@keyframes arc-fade{0%,40%{opacity:.75}100%{opacity:0;stroke-dashoffset:-.5}}@keyframes impact-ring{0%{transform:scale(.2);opacity:0}35%{opacity:1}100%{transform:scale(2.4);opacity:0}}@keyframes impact-core{0%{transform:scale(.25);opacity:0}32%{transform:scale(1.35);opacity:1}100%{transform:scale(.5);opacity:0}}@keyframes impact-particle{0%{opacity:1}100%{transform:rotate(calc(var(--particle) * 60deg)) translateY(-24px) scale(.2);opacity:0}}@keyframes lethal-burst{0%{transform:scale(.2);opacity:0}28%{transform:scale(1.7);opacity:1}100%{transform:scale(3);filter:blur(5px);opacity:0}}@keyframes breach-blast{0%{transform:scale(.25);opacity:1}100%{transform:scale(1.8);border-width:0;opacity:0}}
+@media(prefers-reduced-motion:reduce){.zombie-sprite,.zombie.screamer::before,.zombie.slowed::after,.floodlight-range,.safehouse>i{animation:none}.tower-sprite img{transition:none}.combat-effects,.impact-sprite,.breach-hit{display:none}}
+@media(max-width:650px){.defense-map{height:360px}.safehouse{left:90%;transform:translate(-50%,-50%) scale(.82)}.breach{left:9%}.tower-socket{width:40px;height:40px}.tower-socket.built{width:56px;height:56px}.tower-sprite{width:53px;height:53px}.build-tray{grid-template-columns:1fr}.build-tray button{width:100%;min-height:92px}}
 </style>
