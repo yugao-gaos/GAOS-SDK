@@ -24,17 +24,6 @@ features:
     details: The SDK owns how reusable mechanics behave. Your product retains characters, levels, objectives, tuning, authentication, and presentation.
 ---
 
-<div class="hero-video">
-  <iframe
-    src="https://www.youtube-nocookie.com/embed/gOUGajF9Vug"
-    title="GAOS visual preview"
-    loading="lazy"
-    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-    referrerpolicy="strict-origin-when-cross-origin"
-    allowfullscreen
-  ></iframe>
-</div>
-
 **Deterministic game mechanisms and multiplayer infrastructure for agent-ready
 games.**
 
@@ -124,12 +113,24 @@ metrics.
 
 ## Built with GAOS
 
-<div class="ownership-card">
-  <h3><a href="https://zonoid.ai">Zonoid</a></h3>
-  <p><strong>The first production game built with Gaming AGI Open SDK.</strong></p>
-  <p>Zonoid is a strategy game for humans and AI agents, built around prediction, planning, and judgment.</p>
-  <p>GAOS provides the reusable toolkit; Zonoid's product content stays separate from the SDK.</p>
-  <p><strong><a href="https://zonoid.ai">Visit Zonoid →</a></strong></p>
+<div class="ownership-card zonoid-showcase">
+  <div class="zonoid-showcase__copy">
+    <h3><a href="https://zonoid.ai">Zonoid</a></h3>
+    <p><strong>The first production game built with Gaming AGI Open SDK.</strong></p>
+    <p>Zonoid is a strategy game for humans and AI agents, built around prediction, planning, and judgment.</p>
+    <p>GAOS provides the reusable toolkit; Zonoid's product content stays separate from the SDK.</p>
+    <p><strong><a href="https://zonoid.ai">Visit Zonoid →</a></strong></p>
+  </div>
+  <div class="zonoid-showcase__video">
+    <iframe
+      src="https://www.youtube-nocookie.com/embed/gOUGajF9Vug"
+      title="Zonoid Benchmark"
+      loading="lazy"
+      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+      referrerpolicy="strict-origin-when-cross-origin"
+      allowfullscreen
+    ></iframe>
+  </div>
 </div>
 
 [How we built GAOS and Zonoid with GPT-5.6 Sol →](/building-with-gpt-5-6-sol)

@@ -374,6 +374,27 @@ reset();
             <li><b>2</b><span>Match beside locks, void, or below the key.</span></li>
             <li><b>3</b><span>Solve the objective before moves expire.</span></li>
           </ol>
+          <section class="special-token-guide" aria-labelledby="special-token-title">
+            <h3 id="special-token-title">Special tokens</h3>
+            <ul>
+              <li>
+                <span class="token-swatch token-lock">Lock <b>2</b></span>
+                <p>Cannot be swapped. A match on or beside it removes one lock layer.</p>
+              </li>
+              <li>
+                <span class="token-swatch token-void">Void</span>
+                <p>Spreads after every valid move. A match on or beside it clears that cell.</p>
+              </li>
+              <li>
+                <span class="token-swatch token-key">Key</span>
+                <p>Make a match below it in the same column to move it down one row.</p>
+              </li>
+              <li>
+                <span class="token-swatch token-exit">Exit</span>
+                <p>Guide the Key onto this destination to complete the relic chamber.</p>
+              </li>
+            </ul>
+          </section>
           <div class="game-message" role="status">{{ message }}</div>
         </div>
       </div>
@@ -410,4 +431,16 @@ reset();
 .corrupted { box-shadow:inset 0 0 0 3px rgba(156,65,196,.6), inset 0 0 22px rgba(105,24,130,.8); }
 .puzzle-locked .gem-shape { opacity:.45; filter:grayscale(.3); }
 .exit-cell { background:rgba(73,193,158,.12); }
+.special-token-guide { margin-top:.9rem; border-top:1px solid var(--game-line); padding-top:.8rem; }
+.special-token-guide h3 { margin:0 0 .65rem; color:var(--game-muted); font-size:.62rem; font-weight:850; letter-spacing:.1em; text-transform:uppercase; }
+.special-token-guide ul { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.55rem; margin:0; padding:0; list-style:none; }
+.special-token-guide li { display:grid; grid-template-columns:58px 1fr; align-items:start; gap:.55rem; border:1px solid var(--game-line); border-radius:10px; padding:.6rem; background:rgba(255,255,255,.025); }
+.special-token-guide p { margin:0; color:var(--game-muted); font-size:.63rem; line-height:1.45; }
+.token-swatch { display:grid; min-height:34px; place-items:center; border-radius:8px; color:white; font-size:.52rem; font-weight:900; letter-spacing:.05em; text-transform:uppercase; }
+.token-swatch b { margin-left:.2rem; font-size:.6rem; }
+.token-lock { border:2px solid rgba(190,235,255,.78); background:rgba(73,142,172,.5); }
+.token-void { color:#e0a8ff; background:radial-gradient(circle,#7d2bac,#21112d 70%); }
+.token-key { color:#2a1a0b; background:#f3b94f; box-shadow:0 0 10px rgba(255,198,90,.35); }
+.token-exit { border:1px solid rgba(140,241,212,.5); color:#8cf1d4; background:rgba(73,193,158,.12); }
+@media(max-width:560px){.special-token-guide ul{grid-template-columns:1fr}}
 </style>
