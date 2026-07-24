@@ -3,7 +3,7 @@ import { computed, nextTick, onUnmounted, ref } from 'vue';
 import { withBase } from 'vitepress';
 import { manhattan, wait, type Point } from './game-utils';
 
-type CardKind = 'step' | 'vault' | 'bash' | 'hook' | 'bolt' | 'guard';
+type CardKind = 'step' | 'vault' | 'bash' | 'hook' | 'bolt' | 'guard' | 'wait';
 type Card = { kind: CardKind; name: string; text: string; glyph: string };
 type Enemy = Point & { id: string; name: string; hp: number; maxHp: number; damage: number };
 type Plan = { card: Card; target: Point; summary: string };
@@ -34,6 +34,7 @@ type MovementResolution = {
 
 const size = 6;
 const maxActions = 3;
+const handSize = 4;
 const cards: Card[] = [
   { kind: 'step', name: 'Step', text: 'Move one tile.', glyph: '→' },
   { kind: 'vault', name: 'Vault', text: 'Jump over an obstacle.', glyph: '⌁' },
@@ -42,6 +43,7 @@ const cards: Card[] = [
   { kind: 'bolt', name: 'Cinder Bolt', text: 'Damage a foe or ignite a barrel.', glyph: '✦' },
   { kind: 'guard', name: 'Guard', text: 'Gain two shield.', glyph: '◇' },
 ];
+const waitCard: Card = { kind: 'wait', name: 'Wait', text: 'Take no action this beat.', glyph: '·' };
 
 const seed = ref(616);
 const room = ref(1);
@@ -56,6 +58,9 @@ const plate = ref<number | null>(null);
 const gate = ref<number | null>(null);
 const gateOpen = ref(false);
 const queue = ref<Plan[]>([]);
+const hand = ref<Card[]>([]);
+const drawPile = ref<Card[]>([]);
+const discardPile = ref<Card[]>([]);
 const selectedKind = ref<CardKind | null>(null);
 const hoveredIndex = ref<number | null>(null);
 const resolving = ref(false);
@@ -74,7 +79,7 @@ const lastEvent = ref('Entered the vault');
 let runToken = 0;
 
 const actionsLeft = computed(() => maxActions - queue.value.length);
-const selectedCard = computed(() => cards.find((card) => card.kind === selectedKind.value) ?? null);
+const selectedCard = computed(() => hand.value.find((card) => card.kind === selectedKind.value) ?? null);
 const projectedState = computed(() => simulatePlans(queue.value));
 const virtualHero = computed(() => projectedState.value.hero);
 const projectedEnemies = computed(() => projectedState.value.enemies);
@@ -121,6 +126,10 @@ function indexAt(point: Point) {
 
 function pointAt(index: number) {
   return { x: index % size, y: Math.floor(index / size) };
+}
+
+function cellName(point: Point) {
+  return `${String.fromCharCode(65 + point.x)}${point.y + 1}`;
 }
 
 function inside(point: Point) {
@@ -264,6 +273,15 @@ function hasClearLine(origin: Point, target: Point, projected = projectedEnemies
   });
 }
 
+function predictiveLineTargets(origin: Point, state: ProjectedState, allowBarrelTarget: boolean) {
+  return lineDirections().flatMap(([dx, dy]) => [1, 2, 3]
+    .map((distance) => ({ x: origin.x + dx * distance, y: origin.y + dy * distance }))
+    .filter((target) => inside(target)
+      && !terrainBlocked(target)
+      && (allowBarrelTarget || !barrels.value.has(indexAt(target)))
+      && hasClearLine(origin, target, state.enemies)));
+}
+
 function addTrajectory(segments: TrajectorySegment[], state: ProjectedState, plan: Plan, beat: number, ghost: boolean) {
   const from = { ...state.hero };
   const kind = plan.card.kind;
@@ -271,7 +289,7 @@ function addTrajectory(segments: TrajectorySegment[], state: ProjectedState, pla
     segments.push({ kind: 'move', beat, from, to: { ...plan.target }, ghost });
     return;
   }
-  if (kind === 'guard') return;
+  if (kind === 'guard' || kind === 'wait') return;
   segments.push({ kind: 'attack', beat, from, to: { ...plan.target }, ghost });
   if (kind !== 'bash' && kind !== 'hook') return;
   const enemy = projectedEnemyAt(plan.target, state.enemies);
@@ -304,6 +322,7 @@ function segmentCoordinates(segment: TrajectorySegment) {
 }
 
 function addPreview(previews: Map<number, Preview>, origin: Point, card: Card, target: Point, beat: number, ghost: boolean) {
+  if (card.kind === 'wait') return;
   let points: Point[] = [];
   let kind: Preview['kind'] = 'attack';
   if (card.kind === 'step') {
@@ -385,6 +404,54 @@ function spawnRoom(number: number) {
   gateOpen.value = false;
 }
 
+function nextRandom() {
+  seed.value = (seed.value * 1664525 + 1013904223) >>> 0;
+  return seed.value / 4294967296;
+}
+
+function shuffleCards(source: Card[]) {
+  const shuffled = [...source];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(nextRandom() * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+  return shuffled;
+}
+
+function refillDrawPile() {
+  if (drawPile.value.length || !discardPile.value.length) return;
+  drawPile.value = shuffleCards(discardPile.value);
+  discardPile.value = [];
+}
+
+function drawToHand() {
+  while (hand.value.length < handSize) {
+    refillDrawPile();
+    const card = drawPile.value.shift();
+    if (!card) break;
+    hand.value.push(card);
+  }
+}
+
+function resetDeck() {
+  hand.value = [];
+  discardPile.value = [];
+  drawPile.value = shuffleCards(cards);
+  drawToHand();
+}
+
+function returnPlansToHand(plans: Plan[]) {
+  hand.value.push(...plans.map((plan) => plan.card).filter((card) => card.kind !== 'wait'));
+}
+
+function discardPlans(plans: Plan[]) {
+  discardPile.value.push(...plans.map((plan) => plan.card).filter((card) => card.kind !== 'wait'));
+}
+
+function waitPlan(summary = 'Wait · no card programmed'): Plan {
+  return { card: waitCard, target: { x: hero.value.x, y: hero.value.y }, summary };
+}
+
 function reset() {
   runToken += 1;
   room.value = 1;
@@ -403,6 +470,7 @@ function reset() {
   delayedHitEnemyIds.value = new Set();
   heroHit.value = false;
   collisionCells.value = new Set();
+  resetDeck();
   spawnRoom(1);
   message.value = 'Program up to three actions, preview the paths, then commit.';
   decision.value = 'Waiting for a plan';
@@ -413,6 +481,7 @@ function legalTargets(card: Card): Point[] {
   if (queue.value.length >= maxActions || resolving.value) return [];
   const state = projectedState.value;
   const origin = state.hero;
+  if (card.kind === 'wait') return [];
   if (card.kind === 'guard') return [{ ...origin }];
   if (card.kind === 'step') {
     return lineDirections().map(([dx, dy]) => ({ x: origin.x + dx, y: origin.y + dy }))
@@ -427,12 +496,15 @@ function legalTargets(card: Card): Point[] {
         && !isBlockedInProjectedState(landing, state, false) ? [landing] : [];
     });
   }
-  if (card.kind === 'bash') return state.enemies.filter((enemy) => manhattan(origin, enemy) === 1);
-  if (card.kind === 'hook') return state.enemies.filter((enemy) => hasClearLine(origin, enemy, state.enemies));
-  return [
-    ...state.enemies.filter((enemy) => hasClearLine(origin, enemy, state.enemies)),
-    ...[...barrels.value].map(pointAt).filter((barrel) => hasClearLine(origin, barrel)),
-  ];
+  if (card.kind === 'bash') {
+    return lineDirections()
+      .map(([dx, dy]) => ({ x: origin.x + dx, y: origin.y + dy }))
+      .filter((target) => inside(target)
+        && !terrainBlocked(target)
+        && !barrels.value.has(indexAt(target)));
+  }
+  if (card.kind === 'hook') return predictiveLineTargets(origin, state, false);
+  return predictiveLineTargets(origin, state, true);
 }
 
 function chooseCard(card: Card) {
@@ -446,6 +518,7 @@ function chooseTile(point: Point) {
   const card = selectedCard.value;
   if (!card || !targetCells.value.has(indexAt(point))) return;
   queue.value.push({ card, target: { ...point }, summary: `${card.name} → ${String.fromCharCode(65 + point.x)}${point.y + 1}` });
+  hand.value = hand.value.filter((item) => item.kind !== card.kind);
   selectedKind.value = null;
   hoveredIndex.value = null;
   message.value = queue.value.length === maxActions
@@ -455,7 +528,8 @@ function chooseTile(point: Point) {
 
 function removePlan(index: number) {
   if (!resolving.value) {
-    queue.value.splice(index);
+    const returned = queue.value.splice(index);
+    returnPlansToHand(returned);
     selectedKind.value = null;
     hoveredIndex.value = null;
     message.value = `Beat ${index + 1} and the actions after it were cancelled.`;
@@ -471,6 +545,7 @@ function cancelSelection() {
 
 function clearPlan() {
   if (resolving.value) return;
+  returnPlansToHand(queue.value);
   queue.value = [];
   selectedKind.value = null;
   hoveredIndex.value = null;
@@ -527,38 +602,58 @@ function pushEnemy(enemy: Enemy, dx: number, dy: number): boolean {
   return true;
 }
 
-function executePlayer(plan: Plan, blockedByCollision = false) {
+function executePlayer(plan: Plan, blockedByCollision = false): boolean {
   const card = plan.card.kind;
+  let resolved = true;
   if (card === 'step' || card === 'vault') {
     if (!blockedByCollision && !isBlocked(plan.target, false)) {
       hero.value = { ...hero.value, ...plan.target };
-      lastEvent.value = `${plan.card.name} reached ${String.fromCharCode(65 + plan.target.x)}${plan.target.y + 1}.`;
+      lastEvent.value = `${plan.card.name} reached ${cellName(plan.target)}.`;
+    } else {
+      resolved = false;
+      lastEvent.value = `${plan.card.name} was interrupted before reaching ${cellName(plan.target)}.`;
     }
   } else if (card === 'guard') {
     hero.value = { ...hero.value, shield: hero.value.shield + 2 };
     lastEvent.value = 'Guard raised two shield.';
+  } else if (card === 'wait') {
+    lastEvent.value = 'The Wayfarer waited.';
   } else if (card === 'bash') {
     const enemy = enemyAt(plan.target);
     if (enemy && manhattan(hero.value, enemy) === 1) pushEnemy(enemy, enemy.x - hero.value.x, enemy.y - hero.value.y);
+    else {
+      resolved = false;
+      lastEvent.value = `Bash found no enemy at ${cellName(plan.target)}.`;
+    }
   } else if (card === 'hook') {
     const enemy = enemyAt(plan.target);
-    if (enemy) {
+    if (enemy && hasClearLine(hero.value, enemy, enemies.value)) {
       const dx = Math.sign(hero.value.x - enemy.x);
       const dy = Math.sign(hero.value.y - enemy.y);
-      pushEnemy(enemy, dx, dy);
-      lastEvent.value = `${enemy.name} was pulled off its line.`;
+      if (pushEnemy(enemy, dx, dy)) lastEvent.value = `${enemy.name} was pulled off its line.`;
+    } else {
+      resolved = false;
+      lastEvent.value = `Hook found no enemy at ${cellName(plan.target)}.`;
     }
   } else {
-    if (barrels.value.has(indexAt(plan.target))) explodeBarrel(plan.target);
-    else {
+    if (!hasClearLine(hero.value, plan.target, enemies.value)) {
+      resolved = false;
+      lastEvent.value = `Cinder Bolt lost line of sight to ${cellName(plan.target)}.`;
+    } else if (barrels.value.has(indexAt(plan.target))) {
+      explodeBarrel(plan.target);
+    } else {
       const enemy = enemyAt(plan.target);
       if (enemy) {
         enemies.value = enemies.value.map((item) => item.id === enemy.id ? { ...item, hp: item.hp - 2 } : item).filter((item) => item.hp > 0);
         lastEvent.value = `Cinder Bolt dealt 2 damage to ${enemy.name}.`;
+      } else {
+        resolved = false;
+        lastEvent.value = `Cinder Bolt found no enemy at ${cellName(plan.target)}.`;
       }
     }
   }
   message.value = lastEvent.value;
+  return resolved;
 }
 
 function enemyIntent(enemy: Enemy) {
@@ -650,7 +745,9 @@ function attackLungeStyle(sourceId: string) {
 }
 
 function prepareAnimations(plan: Plan, intents: EnemyIntent[], movement: MovementResolution) {
-  heroMotion.value = plan.card.kind === 'step' || plan.card.kind === 'vault'
+  heroMotion.value = plan.card.kind === 'wait'
+    ? null
+    : plan.card.kind === 'step' || plan.card.kind === 'vault'
     ? movement.blockHero ? 'collision' : 'move'
     : plan.card.kind === 'guard'
       ? 'guard'
@@ -710,9 +807,14 @@ async function commitTurn() {
   selectedKind.value = null;
   hoveredIndex.value = null;
   const token = runToken;
-  const plans = [...queue.value];
-  decision.value = `Committed ${plans.length} action${plans.length === 1 ? '' : 's'} against enemy responses`;
-  for (let beat = 0; beat < plans.length && token === runToken; beat += 1) {
+  const committedPlans = [...queue.value];
+  const plans = [...committedPlans];
+  while (plans.length < maxActions) plans.push(waitPlan());
+  queue.value = [...plans];
+  const waitCount = maxActions - committedPlans.length;
+  decision.value = `Committed ${committedPlans.length} card${committedPlans.length === 1 ? '' : 's'}${waitCount ? ` and ${waitCount} Wait` : ''}`;
+  let interruptionSummary = '';
+  for (let beat = 0; beat < maxActions && token === runToken; beat += 1) {
     const plan = plans[beat];
     const intents: EnemyIntent[] = enemies.value.map((enemy) => ({ enemy: { ...enemy }, intent: enemyIntent(enemy) }));
     const movement = resolveMovementConflicts(plan, intents);
@@ -721,15 +823,29 @@ async function commitTurn() {
     await nextTick();
     prepareAnimations(plan, intents, movement);
     message.value = `Beat ${beat + 1}: ${plan.card.name} and every enemy response resolve together.`;
-    executePlayer(plan, movement.blockHero);
+    const playerResolved = executePlayer(plan, movement.blockHero);
+    const playerEvent = lastEvent.value;
     executeEnemies(intents, movement.blockedEnemyIds);
+    let collisionEvent = '';
     if (movement.collisionCells.size) {
       const cells = [...movement.collisionCells].map((index) => {
         const point = pointAt(index);
         return `${String.fromCharCode(65 + point.x)}${point.y + 1}`;
       });
-      lastEvent.value = `Movement collision at ${cells.join(', ')}. Every contender held position.`;
+      collisionEvent = `Movement collision at ${cells.join(', ')}. Every contender held position.`;
+      lastEvent.value = collisionEvent;
       message.value = lastEvent.value;
+    }
+    if (!playerResolved && plan.card.kind !== 'wait') {
+      for (let futureBeat = beat + 1; futureBeat < maxActions; futureBeat += 1) {
+        plans[futureBeat] = waitPlan('Wait · program interrupted');
+      }
+      queue.value = [...plans];
+      const reason = movement.blockHero && collisionEvent ? collisionEvent : playerEvent;
+      interruptionSummary = `Program interrupted: ${reason} Later cards became Wait.`;
+      lastEvent.value = interruptionSummary;
+      message.value = lastEvent.value;
+      decision.value = `Program interrupted on beat ${beat + 1}; enemies continue through beat ${maxActions}`;
     }
     await nextTick();
     await wait(620);
@@ -739,6 +855,9 @@ async function commitTurn() {
   activeBeat.value = null;
   clearAnimations();
   queue.value = [];
+  discardPlans(committedPlans);
+  drawToHand();
+  if (interruptionSummary) lastEvent.value = `${interruptionSummary} Enemy beats still completed.`;
   hero.value = { ...hero.value, shield: 0 };
   turn.value += 1;
   resolving.value = false;
@@ -760,36 +879,49 @@ async function commitTurn() {
 async function agentTurn() {
   if (resolving.value || defeated.value || roomCleared.value || won.value) return;
   queue.value = [];
-  const bash = cards.find((card) => card.kind === 'bash')!;
-  const bolt = cards.find((card) => card.kind === 'bolt')!;
-  const guard = cards.find((card) => card.kind === 'guard')!;
-  const step = cards.find((card) => card.kind === 'step')!;
-  while (queue.value.length < maxActions) {
+  const available = [...hand.value];
+  const takeCard = (card: Card, target: Point, summary: string) => {
+    queue.value.push({ card, target: { ...target }, summary });
+    available.splice(available.findIndex((item) => item.kind === card.kind), 1);
+  };
+  while (queue.value.length < maxActions && available.length) {
     const origin = virtualHero.value;
-    const adjacentEnemy = enemies.value.find((enemy) => manhattan(origin, enemy) === 1);
-    const barrelTarget = [...barrels.value]
-      .map(pointAt)
-      .find((barrel) => hasClearLine(origin, barrel) && !queue.value.some((plan) => plan.card.kind === 'bolt' && indexAt(plan.target) === indexAt(barrel)));
-    if (adjacentEnemy) {
-      queue.value.push({ card: bash, target: { x: adjacentEnemy.x, y: adjacentEnemy.y }, summary: 'Bash toward a hazard' });
+    const bash = available.find((card) => card.kind === 'bash');
+    const adjacentEnemy = projectedEnemies.value.find((enemy) => manhattan(origin, enemy) === 1);
+    if (bash && adjacentEnemy) {
+      takeCard(bash, adjacentEnemy, 'Bash toward a hazard');
       continue;
     }
-    if (barrelTarget) {
-      queue.value.push({ card: bolt, target: barrelTarget, summary: 'Ignite environmental chain' });
+    const bolt = available.find((card) => card.kind === 'bolt');
+    const barrelTarget = bolt
+      ? legalTargets(bolt).find((target) => barrels.value.has(indexAt(target))
+        && !queue.value.some((plan) => plan.card.kind === 'bolt' && indexAt(plan.target) === indexAt(target)))
+      : undefined;
+    if (bolt && barrelTarget) {
+      takeCard(bolt, barrelTarget, 'Ignite environmental chain');
       continue;
     }
-    if (hero.value.hp <= 4 && !queue.value.some((plan) => plan.card.kind === 'guard')) {
-      queue.value.push({ card: guard, target: { ...origin }, summary: 'Protect against incoming attacks' });
+    const guard = available.find((card) => card.kind === 'guard');
+    if (guard && hero.value.hp <= 4) {
+      takeCard(guard, origin, 'Protect against incoming attacks');
       continue;
     }
-    const target = legalTargets(step).sort((a, b) => Math.min(...enemies.value.map((enemy) => manhattan(a, enemy))) - Math.min(...enemies.value.map((enemy) => manhattan(b, enemy))))[0];
-    if (target) {
-      queue.value.push({ card: step, target, summary: 'Reposition for the next beat' });
+    const step = available.find((card) => card.kind === 'step');
+    const target = step
+      ? legalTargets(step).sort((a, b) => Math.min(...enemies.value.map((enemy) => manhattan(a, enemy))) - Math.min(...enemies.value.map((enemy) => manhattan(b, enemy))))[0]
+      : undefined;
+    if (step && target) {
+      takeCard(step, target, 'Reposition for the next beat');
       continue;
     }
-    queue.value.push({ card: guard, target: { ...origin }, summary: 'Hold position' });
+    const fallback = available
+      .map((card) => ({ card, target: legalTargets(card)[0] }))
+      .find(({ target }) => !!target);
+    if (!fallback?.target) break;
+    takeCard(fallback.card, fallback.target, `${fallback.card.name} from shuffled hand`);
   }
-  decision.value = `Agent programmed ${queue.value.length} actions using hazards and telegraphs`;
+  hand.value = available;
+  decision.value = `Agent programmed ${queue.value.length} cards from the shuffled hand`;
   await wait(350);
   await commitTurn();
 }
@@ -854,7 +986,7 @@ reset();
           <div class="energy-pips" :title="`${actionsLeft} actions left`">
             <span v-for="pip in maxActions" :key="pip" :class="{ full: pip <= actionsLeft }">◆</span>
           </div>
-          <div class="deck-counts"><span>Enemies respond each beat</span></div>
+          <div class="deck-counts"><span>Draw {{ drawPile.length }} · Discard {{ discardPile.length }}</span></div>
         </div>
 
         <div class="rogue-board" :class="{ 'is-resolving': resolving }">
@@ -1023,22 +1155,31 @@ reset();
           <template v-if="roomCleared"><strong>Chamber solved</strong><span>Rest: +3 health and +1 maximum health</span><button @click="nextRoom">Descend</button></template>
           <template v-else><strong>{{ won ? 'Vault conquered' : 'Run ended' }}</strong><button @click="reset">Start another run</button></template>
         </div>
-        <div v-else class="rogue-hand">
-          <button
-            v-for="card in cards"
-            :key="card.kind"
-            class="action-card"
-            :class="{ selected: selectedKind === card.kind, exhausted: queue.length >= maxActions }"
-            :disabled="resolving || autoplay || queue.length >= maxActions"
-            @click="chooseCard(card)"
-          >
-            <b class="card-glyph">{{ card.glyph }}</b><strong>{{ card.name }}</strong><small>{{ card.text }}</small>
-          </button>
+        <div v-else class="rogue-card-zone">
+          <div class="deck-strip">
+            <span><b>{{ hand.length }}</b> Hand</span>
+            <span><b>{{ drawPile.length }}</b> Draw</span>
+            <span><b>{{ discardPile.length }}</b> Discard</span>
+          </div>
+          <div class="rogue-hand">
+            <button
+              v-for="card in hand"
+              :key="card.kind"
+              class="action-card"
+              :class="{ selected: selectedKind === card.kind, exhausted: queue.length >= maxActions }"
+              :disabled="resolving || autoplay || queue.length >= maxActions"
+              @click="chooseCard(card)"
+            >
+              <b class="card-glyph">{{ card.glyph }}</b><strong>{{ card.name }}</strong><small>{{ card.text }}</small>
+            </button>
+          </div>
         </div>
         <div v-if="!roomCleared && !won && !defeated" class="plan-controls">
           <button :disabled="resolving || autoplay || !selectedKind" @click="cancelSelection">Cancel selection</button>
           <button :disabled="resolving || autoplay || !queue.length" @click="clearPlan">Clear plan</button>
-          <button class="commit-plan" :disabled="resolving || autoplay || !queue.length" @click="commitTurn">Commit {{ queue.length }} action{{ queue.length === 1 ? '' : 's' }}</button>
+          <button class="commit-plan" :disabled="resolving || autoplay || !queue.length" @click="commitTurn">
+            Commit {{ queue.length }} card{{ queue.length === 1 ? '' : 's' }}<template v-if="actionsLeft"> + {{ actionsLeft }} Wait</template>
+          </button>
         </div>
       </div>
 
@@ -1047,7 +1188,8 @@ reset();
         <div class="agent-decision"><span>Latest decision</span><p>{{ decision }}</p></div>
         <div class="agent-decision battle-log"><span>Resolution log</span><p>{{ lastEvent }}</p></div>
         <div class="agent-metrics">
-          <div><span>Queued</span><strong>{{ queue.length }} / {{ maxActions }}</strong></div><div><span>Actions left</span><strong>{{ actionsLeft }}</strong></div><div><span>Enemies</span><strong>{{ enemies.length }}</strong></div>
+          <div><span>Queued</span><strong>{{ queue.length }} / {{ maxActions }}</strong></div><div><span>Hand</span><strong>{{ hand.length }}</strong></div><div><span>Draw</span><strong>{{ drawPile.length }}</strong></div>
+          <div><span>Discard</span><strong>{{ discardPile.length }}</strong></div><div><span>Actions left</span><strong>{{ actionsLeft }}</strong></div><div><span>Enemies</span><strong>{{ enemies.length }}</strong></div>
         </div>
         <div class="game-actions">
           <button class="primary-action" :disabled="resolving || won || defeated || roomCleared" @click="toggleAutoplay">{{ autoplay ? 'Take control' : 'Watch agent' }}</button>
@@ -1064,10 +1206,10 @@ reset();
         <p>Build a three-beat plan, check your colored trajectory, then commit. Enemy responses stay hidden until every entity resolves together on each beat.</p>
       </div>
       <ol>
-        <li><b>Choose a card.</b><span>Legal targets glow. Hover a target to preview its path before adding it.</span></li>
-        <li><b>Program up to three beats.</b><span>Solid blue arrows show movement. Dashed orange arrows show attacks. Ghosts appear only for enemies you force to move with Bash or Hook.</span></li>
-        <li><b>Plan for uncertainty.</b><span>Normal enemy movement is not predicted. It may change positions or invalidate a later target during execution.</span></li>
-        <li><b>Commit the turn.</b><span>Actions resolve simultaneously. If multiple movers choose the same tile, they collide and all remain in place.</span></li>
+        <li><b>Draw and choose.</b><span>Your four-card hand comes from a shuffled deck. Used cards discard, then reshuffle when the draw pile empties.</span></li>
+        <li><b>Program three beats.</b><span>Commit fewer than three cards and the empty beats become Wait. Enemies still act on all three beats.</span></li>
+        <li><b>Plan for uncertainty.</b><span>Attacks may target predicted empty cells. If a card is interrupted or misses, every later player card becomes Wait.</span></li>
+        <li><b>Resolve together.</b><span>Player and enemy actions are simultaneous. Movers choosing the same tile collide and remain in place.</span></li>
       </ol>
       <div class="hazard-legend">
         <span><i class="legend-spike"></i><b>Spikes</b> deal damage</span>
@@ -1132,6 +1274,10 @@ reset();
 .token-actor.motion-guard{animation:token-guard .52s ease-out}
 .token-actor.motion-collision{animation:token-collision .58s ease-out}
 .token-actor img.hit-react{animation:token-hit .32s .08s ease-out both}.token-actor img.hit-react.hit-delayed{animation-delay:.3s}
+.rogue-card-zone{margin-top:.65rem}.rogue-card-zone .rogue-hand{margin-top:.4rem}
+.deck-strip{display:flex;align-items:center;justify-content:center;gap:.45rem}
+.deck-strip span{display:flex;align-items:center;gap:.3rem;border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:.3rem .55rem;color:var(--game-muted);background:rgba(255,255,255,.035);font-size:.56rem;font-weight:800;text-transform:uppercase}
+.deck-strip b{color:#ffc778;font-size:.68rem}
 .plan-controls{display:flex;align-items:center;justify-content:flex-end;gap:.5rem;margin-top:.65rem}
 .plan-controls button{border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:.58rem .85rem;color:var(--game-muted);background:#28202c;cursor:pointer;font-size:.62rem;font-weight:800}
 .plan-controls button:disabled{cursor:not-allowed;opacity:.35}
