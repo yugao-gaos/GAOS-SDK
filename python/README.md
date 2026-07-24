@@ -1,9 +1,14 @@
 # GAOS Turn-Based Grid Toolkit for Python
 
-Gymnasium-style client for the AgiLabs Arena session API — the environment
-wrapper for the hosted Arena API.
-Zero runtime dependencies; duck-type-compatible with Gymnasium and
-`verifiers`-style harnesses.
+Hosted client, Gymnasium-compatible environment API, evaluation helpers, and
+portable replay tools for protocol-compatible Arena sessions. The package has
+zero runtime dependencies and is duck-type-compatible with Gymnasium and
+`verifiers`-style harnesses without importing either.
+
+This Python distribution does not contain the TypeScript mechanism engine,
+local `TurnReducer` runtime, replay re-simulation, model-provider drivers, or
+agent CLI launchers. It is the research and hosted-integration surface for a
+game whose authoritative reducer runs in a compatible host.
 
 ## Portable replay
 
@@ -20,8 +25,9 @@ canonical_bytes = serialize_replay_jsonl(artifact)
 ```
 
 `validate_replay_artifact` performs transport-level checks without executing
-game code. Reducer re-simulation remains product-owned; select the historical
-adapter declared in `artifact["header"]["game"]["adapter"]`.
+game code. Reducer re-simulation requires the TypeScript engine plus the
+product-owned historical adapter declared in
+`artifact["header"]["game"]["adapter"]`.
 
 The client speaks the stable `agilabs.turns` v1 envelope on `/v1/sessions`.
 Each command carries the session cursor, participant, and a deterministic
@@ -80,7 +86,11 @@ standard-library HTTP thread; configure `timeout` to bound that work.
 ```python
 from agilabs_arena import ArenaEnv
 
-env = ArenaEnv("od-l1", base_url="http://localhost:8899", play_method="human")
+env = ArenaEnv(
+    "od-l1",
+    base_url="http://localhost:8899",
+    play_method="autonomous_local",
+)
 obs, info = env.reset()
 print(obs["grid"])          # text grid — row per line, token per cell
 print(obs["legal_actions"]) # ["Action 2", "Action 4", "Action 8", "Action 9"] …

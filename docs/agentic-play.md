@@ -1,6 +1,6 @@
 # Agentic play
 
-The SDK is AI-native because agents can discover and operate a deterministic
+The SDK is agent-playable because agents can discover and operate a deterministic
 environment without a renderer, a particular model provider, or product-owned
 control code.
 
@@ -255,8 +255,9 @@ export function createEnvironment({ seed }) {
 
 ## Python
 
-`ArenaEnv` is Gym-style and now exposes `action_definitions` plus
-`concrete_actions`. It accepts a concrete action object directly:
+`ArenaEnv` exposes a Gymnasium-compatible environment API without requiring
+Gymnasium at runtime. It includes `action_definitions` and
+`concrete_actions`, and accepts a concrete action object directly:
 
 ```python
 from agilabs_arena import ArenaEnv, run_agent_episode
@@ -269,7 +270,10 @@ result = run_agent_episode(
 ```
 
 `run_agent_episode` and `evaluate_agent_episodes` accept any duck-typed
-Gym-style environment, not only `ArenaEnv`.
+environment with Gymnasium-compatible `reset()` and `step()` methods, not only
+`ArenaEnv`. Python does not include the local TypeScript mechanism engine,
+reducer runtime, model drivers, or CLI launchers; see the
+[language capability matrix](/quickstart#choose-your-language).
 
 ## Evaluation actions versus semantic actions
 

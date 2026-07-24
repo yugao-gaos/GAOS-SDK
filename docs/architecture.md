@@ -13,12 +13,12 @@ integrating game or benchmark.
 
 | Entry point | Purpose | Runtime assumptions |
 | --- | --- | --- |
-| package root | GAOS-hosted Arena client and Arena observation types | `fetch` |
+| package root | hosted Arena adapter and Arena observation types | `fetch` |
 | `./protocol` | Generic turn envelopes, cursors, idempotency, simultaneous intents, game registry | JSON-serializable values |
 | `./engine` | Game mechanisms, layouts, settlement, solver, replay, scoring, agent environment and tools | Injected world/reducer policy |
 | `./agent` | Provider-neutral driver contract and keyed HTTP model drivers | `fetch` and a provider key |
 | `./agent-cli` | CLI discovery, launch recipes, MCP configuration, subprocess lifecycle | Node.js |
-| Python distribution | Hosted client, Gym-style environment, agent evaluation helpers | Python 3.10+, standard library only at runtime |
+| Python distribution | hosted client, Gymnasium-compatible environment API, evaluation helpers and portable replay utilities | Python 3.10+, standard library only at runtime |
 
 Choose the narrowest entry point your integration needs. A deterministic game
 engine should not need the hosted Arena adapter; an MCP server should not need
@@ -26,6 +26,14 @@ to depend on a model provider.
 
 [Browse the capability map](/capabilities) for supported game shapes, or use
 the mechanism matrix below to locate the relevant engine module.
+
+The TypeScript and Python distributions are complementary, not equivalent.
+TypeScript owns the local mechanism engine, reducers, solvers, agent
+environments, replay re-simulation, model drivers, and CLI integrations.
+Python owns the hosted client, a Gymnasium-compatible API without a Gymnasium
+runtime dependency, duck-typed evaluation helpers, and portable replay
+parsing, validation, and serialization. See the
+[language capability matrix](/quickstart#choose-your-language).
 
 ## Mechanism map
 
@@ -95,7 +103,7 @@ that cell is a wall, a shield, a character, or a visual-only effect. The SDK
 may settle a trigger in authored order. The product decides what the condition
 means and which mutation follows.
 
-## Why this is AI-native
+## Why this is agent-playable
 
 Agent support is part of the engine contract, not a UI automation layer:
 
@@ -103,8 +111,9 @@ Agent support is part of the engine contract, not a UI automation layer:
 2. The environment exposes complete, concrete legal actions.
 3. Seat-scoped agents receive only their redacted observation and legal actions.
 4. Illegal model output is rejected before reaching the reducer.
-5. Every decision produces a versioned `gaos.replay` artifact suitable for
-   cross-platform replay.
+5. Every decision can be recorded in a versioned environment transcript.
+   Products can package compatible runs as `gaos.replay` artifacts with pinned
+   game and adapter metadata for cross-platform exchange.
 6. The same cases can be evaluated across local policies, keyed models, or
    MCP-capable CLIs.
 

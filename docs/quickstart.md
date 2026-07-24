@@ -11,13 +11,34 @@ verification.
   mechanism suite to create deeper interactive tasks without building a game
   runtime from scratch.
 
-You can also use the engine by itself or connect to a GAOS-hosted game. All
-paths come from the same package and converge on the same deterministic core.
+You can also use the TypeScript engine by itself or connect either language to
+a protocol-compatible host. All paths converge on the same deterministic game
+contract, but the two distributions intentionally expose different scopes.
 
 The current repository and package names remain in use until the coordinated
 [naming roadmap](/roadmap) is ready.
 
-## Install TypeScript
+## Choose your language
+
+| Capability | TypeScript SDK | Python SDK |
+| --- | --- | --- |
+| Hosted Arena client | Yes | Yes |
+| Local mechanism engine and `TurnReducer` runtime | Yes | No |
+| Local single- and multi-agent environments | Yes | No local engine; hosted `ArenaEnv` and generic evaluation helpers |
+| Portable replay parse, validation, and serialization | Yes | Yes |
+| Replay re-simulation through a pinned reducer | Yes | No |
+| Model-provider drivers and agent CLI launchers | Yes | No |
+| Gymnasium-compatible environment API | No | Yes, without a Gymnasium runtime dependency |
+
+Choose **TypeScript** to build a game, local benchmark runtime, solver, or
+provider-integrated agent loop. Choose **Python** to control a compatible
+hosted game from research and evaluation code, or to exchange portable replay
+artifacts. The Python distribution does not contain a second implementation of
+the TypeScript mechanism engine.
+
+[Start with the Python SDK surface →](/python)
+
+## Install the TypeScript SDK
 
 The package is published through GitHub Packages. Add a project or user
 `.npmrc`, then authenticate with a GitHub token that has `read:packages`:
@@ -130,7 +151,7 @@ For multi-wave consequences, use [`runSettlementCascade`](/settlement). For
 the detailed mechanism catalog, ordering rules, edge cases, and product adapter
 boundaries, see the [mechanism reference](/mechanisms/).
 
-## Make your reducer agent-ready
+## Build a runnable reducer
 
 Implement three deterministic operations: initialize state, apply an action,
 and project a turn view. Imperfect-information games may additionally project
@@ -139,36 +160,55 @@ a view for one seat.
 ```ts
 import {
   AgentEnvironment,
+  runAgentEpisode,
   type TurnReducer,
+  type TurnView,
 } from '@yugao-gaos/turn-based-grid-sdk/engine';
 
-const reducer: TurnReducer<MyLevel, MyState, MyView> = {
-  init: (level, seed) => createState(level, seed),
-  apply: (state, action) => applyAction(state, action),
-  view: (state) => observeState(state),
-  viewFor: (state, seat) => observeStateForSeat(state, seat),
+type Level = { goal: number };
+type State = { position: number; goal: number; actionsUsed: number };
+
+const reducer: TurnReducer<Level, State> = {
+  init: (level) => ({
+    position: 0,
+    goal: level.goal,
+    actionsUsed: 0,
+  }),
+  apply: (state, action) => {
+    if (action.id !== 'advance') throw new Error('illegal action');
+    return {
+      ...state,
+      position: state.position + 1,
+      actionsUsed: state.actionsUsed + 1,
+    };
+  },
+  view: (state): TurnView => ({
+    actions: [{ id: 'advance', params: 'none' }],
+    status: state.position >= state.goal ? 'won' : 'playing',
+    hud: { actionsUsed: state.actionsUsed },
+  }),
 };
 
 const environment = new AgentEnvironment({
   reducer,
-  level,
+  level: { goal: 3 },
   seed: 42,
-  seat: 'north',
 });
 
-let turn = environment.reset();
-while (!turn.done) {
-  turn = environment.step(await choose(turn.observation, turn.legalActions));
-}
-
-console.log(environment.transcript());
+const episode = await runAgentEpisode(
+  environment,
+  (turn) => turn.legalActions[0]!,
+);
+console.log(episode.transcript.result);
 ```
 
-`MyView` extends the SDK's `TurnView`; its action definitions are expanded
-into fully parameterized legal actions before an agent chooses. Continue with
+This example is complete: the same `reducer.init`, `reducer.apply`, and
+`reducer.view` calls can power a human renderer without
+`AgentEnvironment`. Action definitions are expanded into fully parameterized
+legal actions before an agent chooses. For imperfect information, add
+`viewFor(state, seat)` and pass a `seat` to the environment. Continue with
 [information partitions](/mechanisms/information-partitions) and
-[Agentic play](/agentic-play). Perfect-information games may omit both
-`viewFor` and `seat`.
+[Agentic play](/agentic-play).
 
 ## Connect to a hosted Arena
 
@@ -191,18 +231,10 @@ const next = await arena.submitAction(session.sessionId, { id: 'Action 4' });
 console.log(next.grid);
 ```
 
-Persist `session.binding` before a request that may need an exact retry. After
-a process restart, call `restoreSessionBinding(binding)` and reuse the original
-`submissionId`; `getSessionBinding(sessionId)` returns the latest JSON-safe
-snapshot. To prevent an old retry key from being paired with a newly fetched
-cursor, a fresh client requires either the original `cursor` or a restored
-binding when `submissionId` is explicit.
-
-Requests time out after 30 seconds by default; set `timeoutMs: 0` to disable
-that bound. The third argument can also inject `fetch` or a shared
-`AbortSignal`. Dynamic path segments are URL-encoded, and API errors expose the
-HTTP status plus the raw `responseBody` when an upstream returns non-JSON
-diagnostics.
+For exact retry after a restart, persist the session binding and reuse the
+original submission ID. The [turn protocol v1 guide](/protocol-v1) covers
+cursors, idempotency, pending envelopes, timeouts, and low-level transport
+behavior.
 
 ## Next steps
 
@@ -210,4 +242,4 @@ diagnostics.
 - Browse the [complete mechanism reference](/mechanisms/).
 - Integrate [same-turn recursive settlement](/settlement).
 - Connect [model drivers, tools, and agent CLIs](/agentic-play).
-- Use the [Python client and Gym-style environment](/python).
+- Use the [Python SDK and Gymnasium-compatible environment API](/python).
