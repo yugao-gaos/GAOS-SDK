@@ -406,6 +406,16 @@
   transition: transform 150ms ease, border-color 150ms ease, background 150ms ease;
 }
 
+.game-demo button {
+  touch-action: manipulation;
+}
+
+.game-demo button:focus-visible,
+.seed-control input:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--game-accent) 78%, white);
+  outline-offset: 3px;
+}
+
 .game-actions button:hover:not(:disabled) {
   transform: translateY(-1px);
   border-color: rgba(255, 255, 255, 0.25);
@@ -1388,6 +1398,12 @@
     border-top: 1px solid var(--game-line);
     border-left: 0;
   }
+
+  .game-actions button,
+  .human-control-button,
+  .table-actions button {
+    min-height: 44px;
+  }
 }
 
 @media (max-width: 480px) {
@@ -1410,6 +1426,16 @@
     font-size: 0.9rem;
   }
 
+  .game-demo--match .game-stage {
+    padding-right: 0.75rem;
+    padding-left: 0.75rem;
+  }
+
+  .match-board {
+    gap: 2px;
+    padding: 6px;
+  }
+
   .gem-cell {
     border-radius: 8px;
   }
@@ -1421,6 +1447,17 @@
 
   .human-play-steps {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .game-demo *,
+  .demo-tile,
+  .mechanism-card {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
 

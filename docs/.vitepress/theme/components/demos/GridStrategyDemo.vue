@@ -309,8 +309,8 @@ reset();
 </template>
 
 <style scoped>
-.turn-ribbon { display:flex; gap:.5rem; overflow-x:auto; padding:.9rem 1.4rem; border-bottom:1px solid var(--game-line); background:rgba(0,0,0,.18); }
-.turn-chip { display:grid; grid-template-columns:auto auto; grid-template-rows:auto auto; min-width:96px; align-items:center; gap:0 .45rem; border:1px solid rgba(255,255,255,.1); border-radius:12px; padding:.45rem .6rem; background:rgba(255,255,255,.04); }
+.turn-ribbon { display:flex; gap:.5rem; overflow-x:auto; overscroll-behavior-inline:contain; padding:.9rem 1.4rem; border-bottom:1px solid var(--game-line); background:rgba(0,0,0,.18); scrollbar-color:rgba(255,255,255,.28) transparent; scrollbar-width:thin; scroll-snap-type:x proximity; }
+.turn-chip { display:grid; grid-template-columns:auto auto; grid-template-rows:auto auto; min-width:96px; align-items:center; gap:0 .45rem; border:1px solid rgba(255,255,255,.1); border-radius:12px; padding:.45rem .6rem; background:rgba(255,255,255,.04); scroll-snap-align:start; }
 .turn-chip.now { border-color:var(--game-accent); box-shadow:0 0 18px rgba(255,184,92,.18); }
 .turn-chip > b { grid-row:1/3; color:var(--game-muted); font-size:.55rem; }
 .turn-chip > i { display:grid; width:24px; height:24px; place-items:center; border-radius:50%; color:white; background:#89483a; font-style:normal; font-size:.65rem; }
@@ -326,5 +326,10 @@ reset();
 .hex-cell.active { filter:drop-shadow(0 0 9px #ffbb68); }
 .hex-cell small { position:absolute; right:20px; bottom:7px; color:rgba(255,255,255,.2); font-size:.42rem; }
 .hex-rock { color:rgba(240,210,160,.42); font-size:1.6rem; }
-@media(max-width:580px){.hex-board{width:330px;height:330px;transform:scale(.76);transform-origin:top center;margin-bottom:-70px}.turn-chip{min-width:78px}}
+@media(max-width:580px){
+  .turn-ribbon{padding:.75rem}
+  .turn-chip{min-width:82px}
+  .hex-stage{min-height:480px;overflow:hidden;padding-right:.75rem;padding-left:.75rem}
+  .hex-board{width:440px;height:390px;margin-right:0;margin-bottom:-109px;margin-left:calc(50% - 220px);transform:scale(.72);transform-origin:top center}
+}
 </style>

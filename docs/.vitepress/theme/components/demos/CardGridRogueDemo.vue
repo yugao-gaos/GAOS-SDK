@@ -469,5 +469,11 @@ reset();
 .environment-mark{z-index:1;max-width:80%;color:rgba(255,231,194,.65);font-size:.48rem;font-weight:800;text-transform:uppercase}
 .rogue-cell.wall{background:#302c31}.rogue-cell.spike{background:repeating-linear-gradient(45deg,#33242a 0 8px,#5b3035 8px 10px)}.rogue-cell.pit{background:radial-gradient(circle,#050408 20%,#1c1520 65%)}.rogue-cell.barrel{background:radial-gradient(circle,#843d26,#2a1920 60%)}.rogue-cell.plate{box-shadow:inset 0 0 0 3px #b8894d}.rogue-cell.gate{background:repeating-linear-gradient(90deg,#4d4745 0 5px,#171419 5px 10px)}.rogue-cell.gate.open{opacity:.38}
 .rogue-actor em{position:absolute;left:-9px;top:-9px;display:grid;width:22px;height:22px;place-items:center;transform:rotate(-45deg);border-radius:50%;color:#24131c;background:#ffc778;font-size:.65rem;font-style:normal}
-@media(max-width:620px){.beat-ribbon{padding:.6rem}.beat-ribbon span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+@media(max-width:620px){
+  .beat-ribbon{padding:.6rem}
+  .beat-ribbon span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rogue-hand{justify-content:flex-start;overflow-x:auto;overscroll-behavior-inline:contain;padding:.4rem 0 .8rem;scrollbar-color:rgba(255,255,255,.25) transparent;scrollbar-width:thin;scroll-snap-type:x proximity}
+  .action-card{width:92px;flex:0 0 92px;scroll-snap-align:start}
+  .end-turn-card{width:58px;min-width:58px;flex:0 0 58px;scroll-snap-align:start}
+}
 </style>

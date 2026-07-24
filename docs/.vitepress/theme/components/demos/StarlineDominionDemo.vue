@@ -132,7 +132,7 @@ function agentOrder(owner: Exclude<Owner, 'neutral'>) {
 }
 
 function advance() {
-  if (paused.value || winner.value) return;
+  if (paused.value || winner.value || (typeof document !== 'undefined' && document.hidden)) return;
   for (let step = 0; step < speed.value; step += 1) {
     tick.value += 1;
     if (tick.value % 10 === 0) {
