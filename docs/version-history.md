@@ -22,12 +22,13 @@ In development.
   reducer recheck, and a direct TabletopLabs `results.replayFormat` constant.
 - Lossless adapter from the existing `TranscriptHeader`/`TranscriptAction`
   pair, allowing Arena and creator-platform results to share verifier tooling.
-- Public documentation and capability map reposition GAOS around the complete
-  tabletop suite, with grids documented as one optional mechanism family.
+- Public documentation and capability map present GAOS as a general game SDK,
+  with tabletop games as one supported family and grids as one optional
+  mechanism.
 
 [Portable replay specification →](/mechanisms/replay)
 
-## Tabletop mechanism suite
+## Composable game mechanisms
 
 ### v0.16.0 — portals and multi-agent play
 

@@ -1,4 +1,4 @@
-# Reusable tabletop mechanism engine
+# Reusable game-mechanism engine
 
 Import the engine through the dedicated package subpath:
 

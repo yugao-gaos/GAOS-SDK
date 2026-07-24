@@ -1,10 +1,11 @@
 # Capabilities
 
-GAOS is a composable deterministic tabletop SDK. A game can use one mechanism
-family by itself or combine several through a product-owned `TurnReducer`.
-Boards are optional: card games, drafting games, hidden-role games, abstract
-graph games, and hybrid board/zone games use the same reducer, agent, and replay
-contracts.
+GAOS is a general-purpose SDK for deterministic, verifiable,
+agent-compatible games. A game can use one mechanism family by itself or
+combine several through a product-owned `TurnReducer`. Tabletop and board games
+are supported application families, not the SDK boundary. Card games, drafting
+games, hidden-role games, abstract graph games, tactics games, simulations, and
+hybrids can use the same reducer, agent, and replay contracts.
 
 ## Capability map
 
@@ -63,7 +64,7 @@ Portals move entities across heterogeneous containers—for example, a token can
 leave a hex board, enter a hidden bag, then emerge on a graph node. Capacity,
 group movement, transformations, cycles, and arrivals resolve atomically.
 
-## Card and tabletop composition
+## Cards, zones, and collections
 
 The zone primitive is intentionally lower-level than a card-game framework.
 Products compose it with:

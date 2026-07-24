@@ -1,11 +1,11 @@
-# GAOS SDK — next-version batch: from grid engine to tabletop mechanism suite
+# GAOS SDK — next-version batch: from grid engine to composable game SDK
 
 Status: implemented through v0.16 · Target: v0.13 → v1.0 arc · Baseline: v0.12.0 export surface
 
 ## Goal
 
-Evolve the SDK from a turn-based **grid** engine into a turn-based **tabletop
-mechanism suite** in which every mechanism family is optional and composable:
+Evolve the SDK from a turn-based **grid** engine into a composable **game
+mechanism SDK** in which every mechanism family is optional and composable:
 
 - grid-only games (today's shape) keep working unchanged;
 - card-only games use zones, keywords, and priority windows with no spatial

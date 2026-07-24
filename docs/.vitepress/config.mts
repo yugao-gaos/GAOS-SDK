@@ -2,7 +2,7 @@ import { defineConfig } from 'vitepress';
 
 export default defineConfig({
   title: 'Gaming AGI Open SDK',
-  description: 'Deterministic tabletop mechanisms for human and AI agents.',
+  description: 'Deterministic game mechanisms for human and AI agents.',
   base: '/GAOS-TurnBasedGrid-SDK/',
   cleanUrls: true,
   lastUpdated: true,
@@ -16,7 +16,7 @@ export default defineConfig({
     }],
     ['meta', {
       property: 'og:description',
-      content: 'Deterministic tabletop mechanisms for human and AI agents.',
+      content: 'Deterministic game mechanisms for human and AI agents.',
     }],
     ['meta', {
       property: 'og:image',
@@ -26,13 +26,13 @@ export default defineConfig({
     ['meta', { property: 'og:image:height', content: '909' }],
     ['meta', {
       property: 'og:image:alt',
-      content: 'Gaming AGI Open SDK — deterministic tabletop mechanisms for humans and AI agents.',
+      content: 'Gaming AGI Open SDK — deterministic game mechanisms for humans and AI agents.',
     }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
     ['meta', { name: 'twitter:title', content: 'Gaming AGI Open SDK' }],
     ['meta', {
       name: 'twitter:description',
-      content: 'Deterministic tabletop mechanisms for human and AI agents.',
+      content: 'Deterministic game mechanisms for human and AI agents.',
     }],
     ['meta', {
       name: 'twitter:image',
@@ -40,20 +40,30 @@ export default defineConfig({
     }],
     ['meta', {
       name: 'twitter:image:alt',
-      content: 'Gaming AGI Open SDK — deterministic tabletop mechanisms for humans and AI agents.',
+      content: 'Gaming AGI Open SDK — deterministic game mechanisms for humans and AI agents.',
     }],
   ],
   themeConfig: {
     siteTitle: 'Gaming AGI Open SDK',
     nav: [
+      { text: 'Home', link: '/' },
       { text: 'Play demos', link: '/demos/' },
-      { text: 'Mission', link: '/mission' },
-      { text: 'Capabilities', link: '/capabilities' },
-      { text: 'Guide', link: '/quickstart' },
-      { text: 'Mechanisms', link: '/mechanisms/' },
-      { text: 'Agentic play', link: '/agentic-play' },
-      { text: 'History', link: '/version-history' },
-      { text: 'Discord', link: 'https://discord.gg/vdvUgcqPU' },
+      {
+        text: 'Build',
+        items: [
+          { text: 'Quickstart', link: '/quickstart' },
+          { text: 'Mechanisms', link: '/mechanisms/' },
+          { text: 'Agentic play', link: '/agentic-play' },
+        ],
+      },
+      {
+        text: 'About',
+        items: [
+          { text: 'Mission', link: '/mission' },
+          { text: 'Capabilities', link: '/capabilities' },
+          { text: 'Version history', link: '/version-history' },
+        ],
+      },
     ],
     sidebar: [
       {

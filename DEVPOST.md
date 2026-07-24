@@ -13,8 +13,8 @@ are evaluated by the same standards to help advance AGI.
 ## Project description — ready to paste
 
 GAOS (Gaming AGI Open SDK) is an Apache-2.0 TypeScript and Python toolkit for
-building deterministic tabletop games that humans and AI agents can play
-through the same authoritative rules. Optional mechanism families cover
+building deterministic games that humans and AI agents can play through the
+same authoritative rules. Optional mechanism families cover
 sequential and simultaneous turns; square, hex, graph, and multi-board
 layouts; decks, hands, bags, dealing, hidden information, priorities,
 durations, portals, settlement, scoring, solving, and portable replay. Its
@@ -40,13 +40,13 @@ contract while reducing reaction speed, network latency, and request order as
 accidental advantages. Boards test spatial reasoning; cards and hidden zones
 test uncertainty and memory; simultaneous play tests prediction, coordination,
 and opponent modeling. GAOS grew from the grid-based Zonoid Labs AGI Arena and
-expanded into a product-neutral tabletop suite.
+expanded into a product-neutral game SDK.
 
 ## What it does
 
-GAOS is an open-source TypeScript and Python toolkit for deterministic tabletop
-games. One authoritative engine provides turn order, simultaneous collection,
-hidden information, zones and card composition, square/hex/graph layouts,
+GAOS is an open-source TypeScript and Python toolkit for deterministic games.
+One authoritative engine provides turn order, simultaneous collection, hidden
+information, zones and card composition, square/hex/graph layouts,
 movement, recursive settlement, portals, resources, scoring, solving, and
 portable multi-level replay verification. Agent environments, model drivers,
 MCP tools, and extensible CLIs add legal actions, seeded episodes, self-play,
@@ -80,7 +80,7 @@ extensions provider-neutral.
 ## Accomplishments that we're proud of
 
 We shipped a public Apache-2.0 repository, a documented v0.16.0 release,
-prebuilt npm and Python packages, a broad tabletop mechanism reference,
+prebuilt npm and Python packages, a broad game-mechanism reference,
 portable replay, solver and scoring support, MCP tools, and extensible model
 and CLI drivers. Its deterministic engine is backed by 219 TypeScript and 25
 Python tests, excluding live integration skips. Most importantly, humans,

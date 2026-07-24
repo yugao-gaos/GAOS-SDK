@@ -1,7 +1,7 @@
 [project]
 name = "gaos-turn-based-grid-sdk"
 version = "0.17.0"
-description = "Python client and Gymnasium-style environment for the GAOS tabletop mechanism suite"
+description = "Python client and Gymnasium-style environment for the GAOS game SDK"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"

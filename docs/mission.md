@@ -92,7 +92,7 @@ can expose strategies and edge cases; agents can be evaluated on the same
 evolving challenges. Enjoyment does not guarantee scientific validity, but it
 helps the environment stay alive rather than becoming a solved worksheet.
 
-## Why use structured tabletop state
+## Why use structured game state
 
 Benchmarks need stable identities and exact transitions, not necessarily a
 square grid. GAOS models state through typed actions and named containers:

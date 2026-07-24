@@ -6,10 +6,11 @@ GAOS stands for **Gaming AGI Open SDK**.
 where humans and AI agents compete on equal terms and are evaluated by the same
 standards to help advance AGI.**
 
-GAOS is a deterministic tabletop mechanism suite, turn protocol, verification
-format, and agent runtime. Grids are one optional spatial module alongside
-hex/graph layouts, zones, cards, hidden information, portals, turn systems,
-settlement, and multi-agent evaluation.
+GAOS is a general-purpose SDK for deterministic, verifiable, agent-compatible
+games. Its composable mechanism suite, turn protocol, replay format, and agent
+runtime support many game families; grids are one optional spatial module
+alongside hex/graph layouts, zones, cards, hidden information, portals, turn
+systems, settlement, and multi-agent evaluation.
 
 The repository contains six layers:
 
@@ -49,8 +50,8 @@ toolkit with TypeScript and Python releases.
 
 The pre-existing Zonoid platform is outside the submission scope, but was
 central to production. As the game evolved, GAOS generalized its initial
-spatial engine into reusable tabletop, multiplayer, verification, and agent
-capabilities; Zonoid then validated them in a live product. Judges can register at
+spatial engine into reusable game-mechanism, multiplayer, verification, and
+agent capabilities; Zonoid then validated them in a live product. Judges can register at
 [zonoid.ai](https://zonoid.ai) and download the game without rebuilding its
 platform source. The [GPT-5.6 Sol case study](docs/building-with-gpt-5-6-sol.md)
 records Codex's role in extraction, design, implementation, review, publishing,

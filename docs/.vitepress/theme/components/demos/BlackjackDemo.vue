@@ -219,9 +219,6 @@ resetTable();
 
     <div class="game-layout">
       <div class="game-stage blackjack-stage">
-        <div class="table-bank">
-          <span>Bankroll</span><strong>{{ chips }}</strong><small>chips</small>
-        </div>
         <div class="card-zone dealer-zone">
           <div class="hand-label">Dealer <strong>{{ revealDealer ? dealerValue : dealer[0]?.value }}</strong></div>
           <div class="playing-hand">
@@ -254,6 +251,10 @@ resetTable();
             </div>
           </div>
           <div class="hand-label">Your hand <strong>{{ playerValue }}</strong></div>
+        </div>
+
+        <div class="table-bank">
+          <span>Bankroll</span><strong>{{ chips }}</strong><small>chips</small>
         </div>
 
         <div class="table-actions">

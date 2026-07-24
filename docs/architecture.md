@@ -9,7 +9,7 @@ SDK; authored meaning and product policy stay with the game.
 | --- | --- | --- |
 | package root | GAOS-hosted Arena client and Arena observation types | `fetch` |
 | `./protocol` | Generic turn envelopes, cursors, idempotency, simultaneous intents, game registry | JSON-serializable values |
-| `./engine` | Tabletop mechanisms, layouts, settlement, solver, replay, scoring, agent environment and tools | Injected world/reducer policy |
+| `./engine` | Game mechanisms, layouts, settlement, solver, replay, scoring, agent environment and tools | Injected world/reducer policy |
 | `./agent` | Provider-neutral driver contract and keyed HTTP model drivers | `fetch` and a provider key |
 | `./agent-cli` | CLI discovery, launch recipes, MCP configuration, subprocess lifecycle | Node.js |
 | Python distribution | Hosted client, Gym-style environment, agent evaluation helpers | Python 3.10+, standard library only at runtime |
