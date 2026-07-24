@@ -2,15 +2,63 @@
 
 GAOS stands for **Gaming AGI Open SDK**.
 
-**An open-source, community-driven SDK for building game-as-benchmark arenas
-where humans and AI agents compete on equal terms and are evaluated by the same
-standards to help advance AGI.**
+**Build once. Play as a human. Evaluate as an agent.**
 
-GAOS is a general-purpose SDK for deterministic, verifiable, agent-compatible
-games. Its composable mechanism suite, turn protocol, replay format, and agent
-runtime support many game families; grids are one optional spatial module
-alongside hex/graph layouts, zones, cards, hidden information, portals, turn
-systems, settlement, and multi-agent evaluation.
+GAOS is an open-source SDK that gives researchers, benchmark creators, and game
+developers a fast start on interactive worlds that humans and AI agents can
+both play. Reusable game mechanisms, a unified agent interface, and
+deterministic replay let one authoritative game core serve human gameplay,
+autonomous agents, and verifiable evaluation.
+
+Building an interactive benchmark normally means building a game runtime,
+structured observations, legal-action discovery, an agent loop, scoring, and
+replay infrastructure. Making an existing game agent-playable later requires
+much of the same work. GAOS bridges those worlds so neither group has to rebuild
+the other half.
+
+## Who GAOS is for
+
+### Researchers and benchmark creators
+
+Start with a deterministic environment instead of assembling simulation,
+agent, multi-agent, and replay infrastructure from scratch. GAOS supplies the
+shared contracts and reusable mechanisms; each benchmark product retains
+responsibility for what its tasks measure, its authored content, scoring
+methodology, held-out sets, analytics, and research claims.
+
+### Game developers
+
+Build with reusable, testable mechanisms and keep the game agent-ready from the
+beginning. The same reducer that powers a human-facing client can later power AI
+opponents, autonomous play, solvers, verified leaderboards, or research
+evaluations without creating a second approximation of the rules.
+
+## One game core, both worlds
+
+```text
+Game or benchmark design
+          |
+          v
+   One GAOS reducer
+      /    |     \
+ human   agents   replay
+ client  + tools  verifier
+```
+
+GAOS owns deterministic mechanisms, agent and protocol contracts, replay
+formats, and interoperability tooling. Integrating products own their worlds,
+levels, capability claims, reward meaning, hosting, seasons, and commercial or
+research policy.
+
+The current repository and distribution identifiers remain
+`GAOS-TurnBasedGrid-SDK`, `@yugao-gaos/turn-based-grid-sdk`, and
+`gaos-turn-based-grid-sdk` throughout the current compatibility line. A
+coordinated move to neutral names that better reflect the broader SDK is
+planned; see the [roadmap](docs/roadmap.md).
+
+GAOS supports many game families. Grids are one optional spatial module
+alongside hex and graph layouts, zones, cards, hidden information, portals,
+turn systems, settlement, and multi-agent evaluation.
 
 The repository contains six layers:
 
@@ -417,6 +465,19 @@ for private vulnerability reporting.
 Package versions follow semantic versioning. A GitHub release with tag
 `vX.Y.Z` validates both SDKs, publishes the npm package to GitHub Packages, and
 attaches the Python wheel and source distribution to the release.
+
+## Roadmap
+
+The current v0.x line is focused on hardening the shared reducer, agent,
+mechanism, protocol, and replay contracts; improving the end-to-end quickstart;
+and expanding cross-platform conformance.
+
+The repository and package names still describe the SDK's original
+grid-oriented scope. They will remain unchanged until a coordinated,
+compatibility-aware naming migration can update the repository, TypeScript
+package, Python distribution and import path, documentation URLs, and migration
+aliases together. No replacement identifier is considered active yet. See the
+[full roadmap](docs/roadmap.md).
 
 ## License
 

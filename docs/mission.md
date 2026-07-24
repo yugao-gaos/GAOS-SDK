@@ -17,6 +17,21 @@ rules, measurable outcomes, and replayable evidence. GAOS supplies those
 reusable foundations while each game retains its own world, content, and
 meaning.
 
+## The bridge
+
+GAOS serves two creator communities through the same technical core:
+
+- researchers and benchmark creators get a quick start on interactive
+  environments, agent execution, deterministic evidence, and reusable game
+  mechanisms; and
+- game developers get reusable rules that remain ready for AI opponents,
+  autonomous play, solvers, verified competition, and research use.
+
+The SDK does not decide what an integrating benchmark measures. Capability
+claims, authored tasks, scoring meaning, human analytics, held-out evaluation,
+publication, and commercial policy remain the responsibility of that benchmark
+product. GAOS makes those products faster to build and easier to interoperate.
+
 ## What we mean by a benchmark
 
 A useful game benchmark is not one level, one model score, or one leaderboard.

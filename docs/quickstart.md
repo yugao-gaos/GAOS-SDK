@@ -1,7 +1,21 @@
 # Quickstart
 
-Use the engine by itself, connect to a GAOS-hosted game, or wrap your own
-reducer as an agent environment. All three paths come from the same package.
+GAOS gives game developers and interactive-benchmark creators the same starting
+point: one reducer that can power human play, agent play, and replay
+verification.
+
+- **Building a game?** Start with the mechanism family closest to your game,
+  then wrap the finished reducer with `AgentEnvironment` when you want an AI
+  player, solver, tournament, or evaluation.
+- **Building a benchmark?** Start with the environment contract and use the
+  mechanism suite to create deeper interactive tasks without building a game
+  runtime from scratch.
+
+You can also use the engine by itself or connect to a GAOS-hosted game. All
+paths come from the same package and converge on the same deterministic core.
+
+The current repository and package names remain in use until the coordinated
+[naming roadmap](/roadmap) is ready.
 
 ## Install TypeScript
 

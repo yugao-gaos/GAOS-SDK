@@ -1,7 +1,13 @@
 # Architecture map
 
-The SDK is organized around one boundary: reusable behavior belongs in the
-SDK; authored meaning and product policy stay with the game.
+GAOS bridges game development and agent evaluation through one authoritative
+reducer. A human-facing client, an autonomous agent, a solver, and a replay
+verifier consume the same rules instead of maintaining separate
+implementations.
+
+The ownership boundary remains deliberate: reusable behavior belongs in the
+SDK; authored meaning, benchmark methodology, and product policy stay with the
+integrating game or benchmark.
 
 ## Package entry points
 
@@ -79,6 +85,8 @@ and ordinary gameplay from drifting into separate rule implementations.
 
 - characters, abilities, items, dialogue, levels, objectives and game modes;
 - board tokens, numeric tuning, thresholds and reward policy;
+- benchmark capability claims, task suites, held-out content, analytics and
+  publication methodology;
 - prompts, matchmaking, authentication, persistence and anti-cheat rules; and
 - rendering, animation, sound, seasonal content and server-only policy.
 

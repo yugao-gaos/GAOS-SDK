@@ -3,7 +3,7 @@ layout: home
 
 hero:
   name: Gaming AGI Open SDK
-  tagline: A deterministic game SDK for benchmarks where humans and AI agents play by the same rules.
+  tagline: Build once. Play as a human. Evaluate as an agent.
   actions:
     - theme: brand
       text: Start building
@@ -16,41 +16,65 @@ hero:
       link: /version-history
 
 features:
-  - title: Deterministic by construction
-    details: Resolve turn order, hidden information, zones, portals, movement, consequence cascades, lockstep inputs, and scoring with replayable outcomes.
-  - title: AI-native, not AI-attached
-    details: Expose concrete legal actions, deterministic seeds, transcripts, batch evaluation, model drivers, and MCP-capable CLI launchers from one environment contract.
-  - title: Product-neutral mechanisms
-    details: The SDK owns how reusable mechanics behave. Your product retains characters, levels, objectives, tuning, authentication, and presentation.
+  - title: For researchers
+    details: Start interactive benchmarks with structured observations, concrete legal actions, deterministic execution, agent environments, and replay verification already connected.
+  - title: For game developers
+    details: Build with reusable mechanisms and keep the same game core ready for human clients, AI opponents, autonomous play, solvers, and verified competition.
+  - title: One shared workflow
+    details: The SDK owns reusable infrastructure. Each product retains its content, capability claims, scoring meaning, held-out design, hosting, and presentation.
 ---
 
-**Deterministic game mechanisms and multiplayer infrastructure for agent-ready
-games.**
+**An open-source SDK that bridges game development and agent evaluation.**
 
-## Our mission
+## Build the game and the agent surface together
 
-**Make interactive games a shared, inspectable proving ground for human and
-machine intelligence—where both act through the same rules, face the same
-consequences, and can be compared through reproducible play rather than
-persuasive outputs alone.**
+Building an interactive benchmark normally requires a game runtime, structured
+observations, legal-action discovery, agent execution, scoring, and replay
+infrastructure. Adding agent play to an existing game later requires much of
+the same work.
 
-Games measure behavior across a sequence of consequential choices. Structured
-boards, graphs, zones, actions, and seeded state keep that behavior inspectable
-without requiring one genre or representation. Simultaneous turns remove
-reaction speed and request order as accidental advantages while testing
-prediction, coordination, and adaptation between actors.
+GAOS provides one starting point for both worlds. Researchers can focus on what
+their benchmark measures. Game developers can build human-facing games without
+closing the door on AI opponents, autonomous agents, verified leaderboards, or
+research use later.
 
-[Why games—and why simultaneous turn-based play—make strong benchmarks →](/mission)
+<div class="ownership-grid">
+  <div class="ownership-card">
+    <h3>Researchers and benchmark creators</h3>
+    <p>Start with deterministic mechanisms, unified agent actions, single- and multi-agent environments, model and CLI adapters, transcripts, and portable replay verification.</p>
+    <p>Your benchmark still owns its tasks, capability claims, scoring methodology, held-out content, analytics, and publication.</p>
+  </div>
+  <div class="ownership-card">
+    <h3>Game developers</h3>
+    <p>Build reusable, testable rules once. The same reducer can power a renderer today and agents, solvers, tournaments, or benchmark products later.</p>
+    <p>Your game still owns its world, characters, levels, tuning, presentation, hosting, and commercial policy.</p>
+  </div>
+</div>
+
+```text
+Game or benchmark design
+          |
+          v
+   One GAOS reducer
+      /    |     \
+ human   agents   replay
+ client  + tools  verifier
+```
+
+[Start with the quickstart →](/quickstart)
 
 [See every supported game shape and mechanism family →](/capabilities)
+
+[Read the mission and benchmark thesis →](/mission)
 
 [Join the GAOS Discord community →](https://discord.gg/vdvUgcqPU)
 
 ## One reducer, every way to play
 
-The same injected deterministic reducer can power local play, hosted sessions,
-solvers, replay checks, model agents, CLI agents, and evaluation runs. There is
-no second, approximate implementation just for automation.
+The same injected deterministic reducer can power human-facing local play,
+hosted sessions, solvers, replay checks, model agents, CLI agents, and
+evaluation runs. There is no second, approximate rules implementation just for
+automation.
 
 ```text
 Product reducer + authored content
@@ -154,3 +178,11 @@ product decides **where it is used and what it means**.
 [Read the complete mechanism reference →](/mechanisms/)
 
 [See the architecture map →](/architecture)
+
+## Naming roadmap
+
+The current repository and package identifiers retain the SDK's original
+grid-oriented names for compatibility. A coordinated move to neutral names is
+planned, but no replacement identifier is active yet.
+
+[Read the compatibility-aware naming roadmap →](/roadmap)

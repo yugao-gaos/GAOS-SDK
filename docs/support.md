@@ -37,6 +37,11 @@ names such as `TurnReducer`, `solveLevel`, and
 remain scheduled for the separate v1.0 boundary, where package naming will also
 be reconsidered.
 
+The project plans to migrate the repository and distributions to coordinated,
+neutral names rather than rename one surface at a time. Current identifiers
+remain authoritative until that compatibility plan is published. See the
+[roadmap](/roadmap) for the intended migration scope.
+
 ## Runtime support
 
 - TypeScript output targets ES2022 and uses ESM package entry points.

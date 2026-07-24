@@ -2,7 +2,7 @@ import { defineConfig } from 'vitepress';
 
 export default defineConfig({
   title: 'Gaming AGI Open SDK',
-  description: 'Deterministic game mechanisms for human and AI agents.',
+  description: 'Build once. Play as a human. Evaluate as an agent.',
   base: '/GAOS-TurnBasedGrid-SDK/',
   cleanUrls: true,
   lastUpdated: true,
@@ -16,7 +16,7 @@ export default defineConfig({
     }],
     ['meta', {
       property: 'og:description',
-      content: 'Deterministic game mechanisms for human and AI agents.',
+      content: 'An open-source SDK bridging game development and agent evaluation through one deterministic game core.',
     }],
     ['meta', {
       property: 'og:image',
@@ -26,13 +26,13 @@ export default defineConfig({
     ['meta', { property: 'og:image:height', content: '909' }],
     ['meta', {
       property: 'og:image:alt',
-      content: 'Gaming AGI Open SDK — deterministic game mechanisms for humans and AI agents.',
+      content: 'Gaming AGI Open SDK — build once, play as a human, evaluate as an agent.',
     }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
     ['meta', { name: 'twitter:title', content: 'Gaming AGI Open SDK' }],
     ['meta', {
       name: 'twitter:description',
-      content: 'Deterministic game mechanisms for human and AI agents.',
+      content: 'Build once. Play as a human. Evaluate as an agent.',
     }],
     ['meta', {
       name: 'twitter:image',
@@ -40,7 +40,7 @@ export default defineConfig({
     }],
     ['meta', {
       name: 'twitter:image:alt',
-      content: 'Gaming AGI Open SDK — deterministic game mechanisms for humans and AI agents.',
+      content: 'Gaming AGI Open SDK — build once, play as a human, evaluate as an agent.',
     }],
   ],
   themeConfig: {
@@ -61,6 +61,7 @@ export default defineConfig({
         items: [
           { text: 'Mission', link: '/mission' },
           { text: 'Capabilities', link: '/capabilities' },
+          { text: 'Roadmap', link: '/roadmap' },
           { text: 'Version history', link: '/version-history' },
         ],
       },
@@ -144,6 +145,7 @@ export default defineConfig({
         text: 'Project',
         items: [
           { text: 'Built with GPT-5.6 Sol', link: '/building-with-gpt-5-6-sol' },
+          { text: 'Roadmap', link: '/roadmap' },
           { text: 'Support and compatibility', link: '/support' },
           { text: 'Version history', link: '/version-history' },
           { text: 'Batch implementation review', link: '/rfcs/implementation-review' },
@@ -162,7 +164,7 @@ export default defineConfig({
     },
     outline: { level: [2, 3], label: 'On this page' },
     footer: {
-      message: 'Reusable mechanics in the toolkit. Product content stays in the product.',
+      message: 'One game core for human play, agent play, and verifiable evaluation.',
       copyright: 'Gaming AGI Open SDK',
     },
   },
