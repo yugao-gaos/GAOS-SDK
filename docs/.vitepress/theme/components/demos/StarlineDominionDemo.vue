@@ -21,6 +21,15 @@ const initialPlanets: Planet[] = [
   { id: 'rift', name: 'Rift', x: 69, y: 78, owner: 'neutral', strength: 9, production: 2 },
   { id: 'enemy', name: 'Nyx', x: 90, y: 50, owner: 'agent', strength: 34, production: 3 },
 ];
+const planetImages: Record<string, string> = {
+  home: 'aster',
+  mine: 'morrow',
+  forge: 'forge',
+  relay: 'relay',
+  crown: 'crown',
+  rift: 'rift',
+  enemy: 'nyx',
+};
 
 const planets = ref<Planet[]>([]);
 const fleets = ref<Fleet[]>([]);
@@ -91,7 +100,7 @@ function orbitStyle(index: number, count: number) {
 }
 
 function planetImage(id: string) {
-  return withBase(`/images/starline-dominion/${id}.png`);
+  return withBase(`/images/starline-dominion/${planetImages[id]}.png`);
 }
 
 function connected(a: string, b: string) {
