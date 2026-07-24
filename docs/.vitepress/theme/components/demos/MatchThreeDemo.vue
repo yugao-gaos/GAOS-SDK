@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from 'vue';
+import { computed, nextTick, onUnmounted, ref } from 'vue';
 import { createRng, wait } from './game-utils';
 
 type Swap = { a: number; b: number; value: number };
@@ -47,6 +47,9 @@ const score = ref(0);
 const moves = ref(0);
 const selected = ref<number | null>(null);
 const clearing = ref(new Set<number>());
+const swapMotions = ref<Record<number, { x: string; y: string }>>({});
+const swapRejected = ref(false);
+const falling = ref<Record<number, number>>({});
 const locks = ref<Record<number, number>>({});
 const voids = ref(new Set<number>());
 const relicRow = ref(-1);
@@ -96,6 +99,32 @@ function neighbors(index: number) {
 
 function swapCells(values: number[], a: number, b: number) {
   [values[a], values[b]] = [values[b], values[a]];
+}
+
+function gridStep(direction: number) {
+  if (direction === 0) return '0px';
+  return direction > 0
+    ? 'calc(100% + var(--match-gap))'
+    : 'calc(-100% - var(--match-gap))';
+}
+
+function startSwapMotion(a: number, b: number, rejected: boolean) {
+  swapRejected.value = rejected;
+  swapMotions.value = {
+    [a]: { x: gridStep((b % width) - (a % width)), y: gridStep(row(b) - row(a)) },
+    [b]: { x: gridStep((a % width) - (b % width)), y: gridStep(row(a) - row(b)) },
+  };
+}
+
+function motionStyle(index: number) {
+  const swap = swapMotions.value[index];
+  const fallRows = falling.value[index] ?? 0;
+  return {
+    '--swap-x': swap?.x ?? '0px',
+    '--swap-y': swap?.y ?? '0px',
+    '--fall-offset': `${fallRows * -100}%`,
+    '--fall-duration': `${Math.min(520, 250 + fallRows * 52)}ms`,
+  };
 }
 
 function matches(values: number[]) {
@@ -180,6 +209,9 @@ function reset() {
   moves.value = level.value.moves;
   selected.value = null;
   clearing.value = new Set();
+  swapMotions.value = {};
+  swapRejected.value = false;
+  falling.value = {};
   combo.value = 0;
   locked.value = false;
   message.value = level.value.subtitle;
@@ -222,19 +254,37 @@ async function resolveBoard(token: number) {
     const gained = found.size * 10 * combo.value;
     score.value += gained;
     message.value = combo.value > 1 ? `Cascade ×${combo.value} · puzzle state updated` : `Match · +${gained}`;
-    await wait(170);
+    await nextTick();
+    await wait(280);
     if (token !== runToken) return;
-    const next = [...board.value];
-    for (const index of found) next[index] = -1;
+    const next = Array<number>(width * height).fill(-1);
+    const fallDistances: Record<number, number> = {};
     for (let x = 0; x < width; x += 1) {
-      const column: number[] = [];
-      for (let y = height - 1; y >= 0; y -= 1) if (next[y * width + x] >= 0) column.push(next[y * width + x]);
-      while (column.length < height) column.push(Math.floor(random() * gemNames.length));
-      for (let y = height - 1; y >= 0; y -= 1) next[y * width + x] = column[height - 1 - y];
+      let destinationRow = height - 1;
+      for (let sourceRow = height - 1; sourceRow >= 0; sourceRow -= 1) {
+        const source = sourceRow * width + x;
+        if (found.has(source)) continue;
+        const destination = destinationRow * width + x;
+        next[destination] = board.value[source]!;
+        const distance = destinationRow - sourceRow;
+        if (distance > 0) fallDistances[destination] = distance;
+        destinationRow -= 1;
+      }
+      const refillCount = destinationRow + 1;
+      while (destinationRow >= 0) {
+        const destination = destinationRow * width + x;
+        next[destination] = Math.floor(random() * gemNames.length);
+        fallDistances[destination] = refillCount;
+        destinationRow -= 1;
+      }
     }
     board.value = next;
     clearing.value = new Set();
-    await wait(170);
+    falling.value = fallDistances;
+    await nextTick();
+    await wait(Math.min(540, 270 + Math.max(0, ...Object.values(fallDistances)) * 52));
+    falling.value = {};
+    await nextTick();
     found = matches(board.value);
   }
 }
@@ -246,17 +296,22 @@ async function playSwap(a: number, b: number, actor: 'human' | 'agent') {
   const token = runToken;
   const next = [...board.value];
   swapCells(next, a, b);
-  board.value = next;
-  await wait(110);
-  if (!matches(board.value).size) {
-    const reverted = [...board.value];
-    swapCells(reverted, a, b);
-    board.value = reverted;
+  const valid = matches(next).size > 0;
+  startSwapMotion(a, b, !valid);
+  await nextTick();
+  await wait(valid ? 280 : 520);
+  if (token !== runToken) return;
+  if (!valid) {
+    swapMotions.value = {};
+    swapRejected.value = false;
     message.value = 'That swap makes no match.';
     if (actor === 'human') decision.value = 'Illegal action rejected';
     locked.value = false;
     return;
   }
+  board.value = next;
+  swapMotions.value = {};
+  swapRejected.value = false;
   moves.value -= 1;
   await resolveBoard(token);
   if (token !== runToken) return;
@@ -321,7 +376,7 @@ reset();
     <header class="game-hero">
       <div>
         <span class="game-eyebrow">Puzzle chamber {{ levelIndex + 1 }} of {{ levels.length }} · seed {{ seed }}</span>
-        <h2>Prism Vault</h2>
+        <h2>Prism Match</h2>
         <p>{{ level.name }} — {{ level.subtitle }}</p>
       </div>
       <div class="game-status-pill" :data-active="agentPlaying">{{ stateLabel }}</div>
@@ -345,12 +400,16 @@ reset();
               {
                 selected: selected === index,
                 clearing: clearing.has(index),
+                swapping: Boolean(swapMotions[index]),
+                'swap-rejected': Boolean(swapMotions[index]) && swapRejected,
+                falling: Boolean(falling[index]),
                 'puzzle-locked': (locks[index] ?? 0) > 0,
                 corrupted: voids.has(index),
                 'relic-cell': level.relic && relicRow * width + level.relic.column === index && !relicDelivered,
                 'exit-cell': level.relic && (height - 1) * width + level.relic.column === index,
               },
             ]"
+            :style="motionStyle(index)"
             :disabled="locked || agentPlaying || moves <= 0 || objectiveComplete || (locks[index] ?? 0) > 0"
             @click="chooseCell(index)"
           >

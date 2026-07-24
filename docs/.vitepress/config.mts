@@ -70,7 +70,7 @@ export default defineConfig({
         text: 'Playable demos',
         items: [
           { text: 'Demo arcade', link: '/demos/' },
-          { text: 'Prism Vault — Match-3', link: '/demos/match-3' },
+          { text: 'Prism Match — Match-3', link: '/demos/match-3' },
           { text: 'Midnight House — Blackjack', link: '/demos/blackjack' },
           { text: 'Ashfall Crossing — Strategy', link: '/demos/grid-strategy' },
           { text: 'Cinder Vault — Roguelike', link: '/demos/card-grid-roguelike' },

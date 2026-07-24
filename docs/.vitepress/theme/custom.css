@@ -506,9 +506,10 @@
 }
 
 .match-board {
+  --match-gap: clamp(4px, 0.7vw, 8px);
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: clamp(4px, 0.7vw, 8px);
+  gap: var(--match-gap);
   width: min(560px, 100%);
   margin: auto;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -547,6 +548,83 @@
 .gem-cell.clearing {
   transform: scale(0.2) rotate(20deg);
   opacity: 0;
+}
+
+.gem-cell.swapping {
+  z-index: 2;
+}
+
+.gem-cell.swapping .gem-shape {
+  animation: gem-swap 280ms cubic-bezier(0.2, 0.78, 0.3, 1) both;
+}
+
+.gem-cell.swap-rejected .gem-shape {
+  animation: gem-swap-rejected 500ms cubic-bezier(0.3, 0.75, 0.25, 1) both;
+}
+
+.gem-cell.falling .gem-shape {
+  animation: gem-fall var(--fall-duration) cubic-bezier(0.18, 0.72, 0.24, 1.08) both;
+}
+
+.gem-cell.clearing::before,
+.gem-cell.clearing::after {
+  position: absolute;
+  z-index: 4;
+  width: 12%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: #fff4b8;
+  box-shadow:
+    25px -18px 0 #8cf1ff,
+    -22px -13px 0 #e6b2ff,
+    19px 22px 0 #c4f58b,
+    -24px 20px 0 #ffb765;
+  content: "";
+  pointer-events: none;
+  animation: gem-spark 280ms ease-out both;
+}
+
+.gem-cell.clearing::after {
+  transform: rotate(45deg);
+  animation-name: gem-spark-alt;
+}
+
+@keyframes gem-swap {
+  from { translate: 0 0; transform: rotate(45deg) scale(1); }
+  55% { translate: var(--swap-x) var(--swap-y); transform: rotate(45deg) scale(1.12); }
+  to { translate: var(--swap-x) var(--swap-y); transform: rotate(45deg) scale(1); }
+}
+
+@keyframes gem-swap-rejected {
+  0%, 100% { translate: 0 0; transform: rotate(45deg) scale(1); }
+  46%, 54% { translate: var(--swap-x) var(--swap-y); transform: rotate(45deg) scale(1.08); }
+}
+
+@keyframes gem-fall {
+  from {
+    translate: 0 var(--fall-offset);
+    transform: rotate(45deg) scale(0.9);
+    opacity: 0.35;
+  }
+  78% {
+    translate: 0 4%;
+    transform: rotate(45deg) scale(1.03, 0.97);
+  }
+  to {
+    translate: 0 0;
+    transform: rotate(45deg) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes gem-spark {
+  from { transform: scale(0.4); opacity: 1; }
+  to { transform: scale(1.8); opacity: 0; }
+}
+
+@keyframes gem-spark-alt {
+  from { transform: rotate(45deg) scale(0.4); opacity: 1; }
+  to { transform: rotate(75deg) scale(1.65); opacity: 0; }
 }
 
 .gem-cell:disabled {
@@ -1451,6 +1529,7 @@
   }
 
   .match-board {
+    --match-gap: 2px;
     gap: 2px;
     padding: 6px;
   }

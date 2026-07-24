@@ -17,7 +17,7 @@ pageClass: demo-landing
       <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
     </div>
     <span>Patterns · blockers · relic routes</span>
-    <h2>Prism Vault</h2>
+    <h2>Prism Match</h2>
     <p>Three authored match-3 puzzle chambers with locks, keys, spreading void, and objective-aware search.</p>
     <b>Play Match-3 →</b>
   </a>
