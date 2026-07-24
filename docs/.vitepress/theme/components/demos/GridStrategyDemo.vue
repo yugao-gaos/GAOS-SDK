@@ -348,10 +348,6 @@ async function toggleAutoplay() {
   if (autoplay.value) await maybeRunAgent();
 }
 
-function mark(role: Unit['role']) {
-  return role === 'Ranger' ? 'R' : role === 'Vanguard' ? 'V' : 'W';
-}
-
 function portrait(unit: Unit) {
   return withBase(`/images/units/${unit.side}-${unit.role.toLowerCase()}.jpg`);
 }
@@ -379,7 +375,7 @@ reset();
         :class="[entry.side, { now: index === 0 }]"
       >
         <b>{{ index === 0 ? 'NOW' : entry.forecastAt }}</b>
-        <i>{{ mark(entry.role) }}</i>
+        <img class="turn-chip__avatar" :src="portrait(entry)" alt="" aria-hidden="true">
         <small>{{ entry.role }}</small>
       </span>
     </div>
@@ -522,8 +518,8 @@ reset();
 .turn-chip { display:grid; grid-template-columns:auto auto; grid-template-rows:auto auto; min-width:96px; align-items:center; gap:0 .45rem; border:1px solid rgba(255,255,255,.1); border-radius:12px; padding:.45rem .6rem; background:rgba(255,255,255,.04); scroll-snap-align:start; }
 .turn-chip.now { border-color:var(--game-accent); box-shadow:0 0 18px rgba(255,184,92,.18); }
 .turn-chip > b { grid-row:1/3; color:var(--game-muted); font-size:.55rem; }
-.turn-chip > i { display:grid; width:24px; height:24px; place-items:center; border-radius:50%; color:white; background:#89483a; font-style:normal; font-size:.65rem; }
-.turn-chip.hollow > i { background:#3b497f; }
+.turn-chip__avatar { display:block; width:28px; height:28px; object-fit:cover; border:2px solid #ffbd71; border-radius:50%; background:#89483a; box-shadow:0 3px 8px rgba(0,0,0,.35); }
+.turn-chip.hollow .turn-chip__avatar { border-color:#a9baff; background:#3b497f; }
 .turn-chip small { color:var(--game-muted); font-size:.53rem; }
 .hex-stage { min-height:560px; }
 .hex-board { position:relative; width:440px; height:390px; margin:0 auto; }
