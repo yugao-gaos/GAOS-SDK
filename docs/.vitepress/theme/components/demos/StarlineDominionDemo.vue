@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { withBase } from 'vitepress';
 
 type Owner = 'human' | 'agent' | 'neutral';
 type Planet = { id: string; name: string; x: number; y: number; owner: Owner; strength: number; production: number };
@@ -87,6 +88,10 @@ function orbitStyle(index: number, count: number) {
     '--angle': `${index * 360 / count}deg`,
     '--orbit-radius': `${37 + Math.min(5, count) * .7}px`,
   };
+}
+
+function planetImage(id: string) {
+  return withBase(`/images/starline-dominion/${id}.png`);
 }
 
 function connected(a: string, b: string) {
@@ -307,7 +312,8 @@ reset();
                 :style="orbitStyle(ship - 1, garrisonShipCount(node.strength))"
               ></span>
             </span>
-            <i class="planet-surface"></i><strong>{{ node.name }}</strong><b>{{ node.strength }}</b><small>+{{ node.production }}</small>
+            <img class="planet-art" :src="planetImage(node.id)" alt="" draggable="false" />
+            <strong>{{ node.name }}</strong><b>{{ node.strength }}</b><small>+{{ node.production }}</small>
           </button>
           <div class="map-legend" aria-hidden="true"><span></span> Each triangle represents part of an army</div>
         </div>
@@ -317,16 +323,6 @@ reset();
         <div class="agent-console__head"><span class="agent-orb" :class="{ thinking: !paused }"></span><div><strong>Graph commander</strong><small>Production · travel time · capture pressure</small></div></div>
         <div class="agent-decision"><span>Latest decision</span><p>{{ decision }}</p></div>
         <div class="agent-metrics"><div><span>Tick</span><strong>{{ tick }}</strong></div><div><span>Fleets</span><strong>{{ fleets.length }}</strong></div><div><span>Speed</span><strong>×{{ speed }}</strong></div></div>
-        <section class="how-to-play" aria-labelledby="starline-how-to-play">
-          <h3 id="starline-how-to-play">How to play</h3>
-          <ol>
-            <li><b>Select</b> one of your blue planets.</li>
-            <li><b>Send</b> half its army to any connected planet—including another blue planet.</li>
-            <li><b>Intercept</b> enemy fleets on the same lane; the stronger fleet continues with its survivors.</li>
-            <li><b>Conquer</b> Nyx, the red command world. Owned planets produce ships every 10 ticks.</li>
-          </ol>
-          <p><span class="guide-swatch human"></span> You <span class="guide-swatch neutral"></span> Neutral <span class="guide-swatch agent"></span> Nyx</p>
-        </section>
         <div class="game-actions">
           <button class="primary-action" :disabled="!!winner" @click="autoplayHuman = !autoplayHuman">{{ autoplayHuman ? 'Take command' : 'Watch both factions' }}</button>
           <button @click="paused = !paused">{{ paused ? 'Resume' : 'Pause' }}</button>
@@ -335,6 +331,16 @@ reset();
         </div>
       </aside>
     </div>
+    <section class="how-to-play" aria-labelledby="starline-how-to-play">
+      <h3 id="starline-how-to-play">How to play</h3>
+      <ol>
+        <li><b>Select</b> one of your blue planets.</li>
+        <li><b>Send</b> half its army to any connected planet—including another blue planet.</li>
+        <li><b>Intercept</b> enemy fleets on the same lane; the stronger fleet continues with its survivors.</li>
+        <li><b>Conquer</b> Nyx, the red command world. Owned planets produce ships every 10 ticks.</li>
+      </ol>
+      <p><span class="guide-swatch human"></span> You <span class="guide-swatch neutral"></span> Neutral <span class="guide-swatch agent"></span> Nyx</p>
+    </section>
   </section>
 </template>
 
@@ -344,11 +350,12 @@ reset();
 .star-map{position:relative;width:min(760px,100%);height:520px;margin:auto;overflow:hidden;border:1px solid rgba(124,225,255,.12);border-radius:22px;background:radial-gradient(circle at 25% 30%,rgba(255,255,255,.13) 0 1px,transparent 2px),radial-gradient(circle at 70% 60%,rgba(255,255,255,.12) 0 1px,transparent 2px),#090e1c;background-size:53px 47px,71px 61px}
 .star-edge{position:absolute;height:2px;transform-origin:left center;background:linear-gradient(90deg,rgba(110,177,220,.12),rgba(124,225,255,.48),rgba(110,177,220,.12));pointer-events:none}
 .planet-node{position:absolute;z-index:2;display:grid;width:76px;height:76px;place-items:center;transform:translate(-50%,-50%);border:0;border-radius:50%;color:white;background:transparent;cursor:pointer}
-.planet-node .planet-surface{position:absolute;inset:7px;border:2px solid #777;border-radius:50%;background:radial-gradient(circle at 32% 28%,#aaa,#3d4654 68%);box-shadow:0 0 18px rgba(255,255,255,.12)}
-.planet-node.human .planet-surface{border-color:#70d8ff;background:radial-gradient(circle at 32% 28%,#a5efff,#176f9e 68%);box-shadow:0 0 24px rgba(90,206,255,.38)}
-.planet-node.agent .planet-surface{border-color:#ff788f;background:radial-gradient(circle at 32% 28%,#ffb0b7,#9b2745 68%);box-shadow:0 0 24px rgba(255,87,116,.34)}
-.planet-node.selected,.planet-node.legal{filter:drop-shadow(0 0 10px #fff)}.planet-node.legal .planet-surface{border-style:dashed}
-.planet-node strong,.planet-node b,.planet-node small{z-index:1}.planet-node strong{position:absolute;top:72px;font-size:.62rem}.planet-node b{font-size:1rem}.planet-node small{position:absolute;right:5px;top:4px;display:grid;width:22px;height:22px;place-items:center;border-radius:50%;background:#172133;font-size:.5rem}
+.planet-node::before{position:absolute;z-index:0;inset:5px;border:2px solid rgba(181,192,211,.6);border-radius:50%;content:"";box-shadow:0 0 18px rgba(255,255,255,.12);transition:border-color .15s ease,box-shadow .15s ease}
+.planet-node.human::before{border-color:#70d8ff;box-shadow:0 0 25px rgba(90,206,255,.52)}
+.planet-node.agent::before{border-color:#ff788f;box-shadow:0 0 25px rgba(255,87,116,.5)}
+.planet-node.selected,.planet-node.legal{filter:drop-shadow(0 0 10px #fff)}.planet-node.legal::before{border-style:dashed}
+.planet-art{position:absolute;z-index:1;width:82px;height:82px;max-width:none;object-fit:contain;pointer-events:none;user-select:none;filter:drop-shadow(0 4px 8px rgba(0,0,0,.55));transition:transform .18s ease}.planet-node:hover .planet-art,.planet-node.selected .planet-art{transform:scale(1.08)}
+.planet-node strong,.planet-node b,.planet-node small{z-index:2;text-shadow:0 1px 5px #000,0 0 3px #000}.planet-node strong{position:absolute;top:72px;font-size:.62rem}.planet-node b{font-size:1rem}.planet-node small{position:absolute;right:5px;top:4px;display:grid;width:22px;height:22px;place-items:center;border-radius:50%;background:rgba(8,14,28,.9);font-size:.5rem}
 .garrison-orbit{position:absolute;z-index:0;inset:0;color:#9aa6b8;pointer-events:none;animation:garrison-spin 18s linear infinite}.planet-node.human .garrison-orbit{color:#7ce1ff}.planet-node.agent .garrison-orbit{color:#ff8296}
 .garrison-ship{position:absolute;left:50%;top:50%;width:0;height:0;border-right:3px solid transparent;border-bottom:7px solid currentColor;border-left:3px solid transparent;filter:drop-shadow(0 0 3px currentColor);transform:translate(-50%,-50%) rotate(var(--angle)) translateY(calc(-1 * var(--orbit-radius))) rotate(90deg)}
 @keyframes garrison-spin{to{transform:rotate(360deg)}}
@@ -358,6 +365,6 @@ reset();
 .fleet-clash{position:absolute;z-index:4;width:12px;height:12px;transform:translate(-50%,-50%) rotate(45deg);background:#fff4bd;box-shadow:0 0 8px #fff,0 0 18px #ff8a5b,0 0 34px #ff526f;animation:clash-pop .7s ease-out forwards;pointer-events:none}.fleet-clash::before,.fleet-clash::after{position:absolute;inset:-7px 4px;content:"";background:inherit}.fleet-clash::after{transform:rotate(90deg)}
 @keyframes clash-pop{0%{opacity:0;transform:translate(-50%,-50%) scale(.25) rotate(45deg)}35%{opacity:1;transform:translate(-50%,-50%) scale(1.4) rotate(45deg)}100%{opacity:0;transform:translate(-50%,-50%) scale(2) rotate(45deg)}}
 .map-legend{position:absolute;right:12px;bottom:10px;display:flex;align-items:center;gap:6px;color:#8291aa;font-size:.55rem;letter-spacing:.02em}.map-legend span{width:0;height:0;border-right:3px solid transparent;border-bottom:8px solid #7ce1ff;border-left:3px solid transparent}
-.how-to-play{border:1px solid var(--game-line);border-radius:14px;padding:.9rem;background:rgba(124,225,255,.045)}.how-to-play h3{margin:0;color:#dff8ff;font-size:.78rem;letter-spacing:.08em;text-transform:uppercase}.how-to-play ol{margin:.65rem 0 0;padding-left:1.1rem;color:var(--game-muted);font-size:.68rem;line-height:1.45}.how-to-play li+li{margin-top:.35rem}.how-to-play li::marker{color:#7ce1ff;font-weight:800}.how-to-play b{color:var(--game-ink)}.how-to-play p{display:flex;align-items:center;gap:.35rem;margin:.7rem 0 0;color:#8795ad;font-size:.6rem}.guide-swatch{width:7px;height:7px;border-radius:50%;background:#8d98a9}.guide-swatch.human{background:#70d8ff}.guide-swatch.agent{margin-left:.2rem;background:#ff788f}
-@media(max-width:650px){.star-map{height:430px}.planet-node{width:62px;height:62px}.planet-node strong{top:60px}.garrison-ship{--orbit-radius:32px!important}.map-legend{display:none}}
+.how-to-play{width:calc(100% - 4rem);max-width:760px;margin:0 auto 2rem;border:1px solid var(--game-line);border-radius:18px;padding:1.35rem 1.5rem;background:rgba(124,225,255,.045)}.how-to-play h3{margin:0;color:#dff8ff;font-size:.78rem;letter-spacing:.08em;text-transform:uppercase}.how-to-play ol{margin:.8rem 0 0;padding-left:1.25rem;color:var(--game-muted);font-size:.72rem;line-height:1.5}.how-to-play li+li{margin-top:.45rem}.how-to-play li::marker{color:#7ce1ff;font-weight:800}.how-to-play b{color:var(--game-ink)}.how-to-play p{display:flex;align-items:center;gap:.35rem;margin:.9rem 0 0;color:#8795ad;font-size:.64rem}.guide-swatch{width:7px;height:7px;border-radius:50%;background:#8d98a9}.guide-swatch.human{background:#70d8ff}.guide-swatch.agent{margin-left:.2rem;background:#ff788f}
+@media(max-width:650px){.star-map{height:430px}.planet-node{width:62px;height:62px}.planet-art{width:68px;height:68px}.planet-node strong{top:60px}.garrison-ship{--orbit-radius:32px!important}.map-legend{display:none}.how-to-play{width:calc(100% - 2.4rem);margin-bottom:1.2rem;padding:1.1rem 1.2rem}}
 </style>
