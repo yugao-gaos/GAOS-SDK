@@ -394,35 +394,45 @@ resetTable();
       <div class="game-stage blackjack-stage">
         <div class="card-zone dealer-zone">
           <div class="hand-label">Dealer <strong>{{ revealDealer ? dealerValue : dealer[0]?.value }}</strong></div>
-          <div class="playing-hand">
+          <TransitionGroup name="card-deal" tag="div" class="playing-hand" appear>
             <div
               v-for="(card, index) in dealer"
               :key="`${card.rank}${card.suit}-${index}`"
               class="playing-card"
               :class="{ red: card.suit === '♥' || card.suit === '♦', hidden: index === 1 && !revealDealer }"
+              :style="{ '--deal-index': index }"
             >
-              <template v-if="index !== 1 || revealDealer"><b>{{ card.rank }}</b><span>{{ card.suit }}</span><em>{{ card.suit }}</em></template>
-              <div v-else class="card-back">GAOS</div>
+              <Transition name="card-reveal" mode="out-in">
+                <div v-if="index !== 1 || revealDealer" :key="`front-${card.rank}${card.suit}`" class="card-face">
+                  <b>{{ card.rank }}</b><span>{{ card.suit }}</span><em>{{ card.suit }}</em>
+                </div>
+                <div v-else key="back" class="card-back">GAOS</div>
+              </Transition>
             </div>
-          </div>
+          </TransitionGroup>
         </div>
 
-        <div class="table-message">{{ message }}</div>
-        <div class="bet-chip">BET<br><strong>{{ wager }}</strong></div>
+        <Transition name="table-message" mode="out-in">
+          <div :key="message" class="table-message">{{ message }}</div>
+        </Transition>
+        <Transition name="wager-pop" mode="out-in">
+          <div :key="wager" class="bet-chip">BET<br><strong>{{ wager }}</strong></div>
+        </Transition>
 
         <div class="card-zone player-zone">
-          <div class="playing-hand">
+          <TransitionGroup name="card-deal" tag="div" class="playing-hand" appear>
             <button
               v-for="(card, index) in player"
               :key="`${card.rank}${card.suit}-${index}`"
               class="playing-card player-card"
               :class="{ red: card.suit === '♥' || card.suit === '♦', 'glass-ace': glassAceIndex === index, targetable: targetingAce }"
+              :style="{ '--deal-index': index }"
               :disabled="!targetingAce"
               @click="chooseGlassAce(index)"
             >
               <b>{{ glassAceIndex === index ? 'A' : card.rank }}</b><span>{{ card.suit }}</span><em>{{ card.suit }}</em>
             </button>
-          </div>
+          </TransitionGroup>
           <div class="hand-label">Your hand <strong>{{ playerValue }}</strong></div>
         </div>
 
@@ -440,10 +450,11 @@ resetTable();
           </div>
           <div class="favor-hand">
             <button
-              v-for="card in favorHand"
+              v-for="(card, index) in favorHand"
               :key="card.kind"
               class="favor-card"
               :class="{ exhausted: favorUsed || card.cost > favor }"
+              :style="{ '--favor-index': index }"
               :disabled="phase !== 'player' || agentPlaying || favorUsed || card.cost > favor || twistChoices.length > 0 || targetingAce"
               @click="playFavor(card)"
             >
@@ -483,20 +494,89 @@ resetTable();
 </template>
 
 <style scoped>
-.blackjack-stage { min-height: 820px; }
+.blackjack-stage {
+  isolation:isolate;
+  min-height:820px;
+  overflow:hidden;
+}
+.blackjack-stage::before {
+  position:absolute;
+  z-index:-1;
+  width:70%;
+  aspect-ratio:1;
+  border:1px solid rgba(231,195,123,.08);
+  border-radius:50%;
+  background:radial-gradient(circle,rgba(49,151,110,.08),transparent 67%);
+  content:"";
+  filter:blur(2px);
+  animation:table-breathe 7s ease-in-out infinite;
+}
+.blackjack-stage::after {
+  position:absolute;
+  z-index:-1;
+  top:-35%;
+  left:-25%;
+  width:38%;
+  height:170%;
+  transform:rotate(18deg);
+  background:linear-gradient(90deg,transparent,rgba(231,195,123,.035),transparent);
+  content:"";
+  animation:table-glint 11s ease-in-out infinite;
+}
 .player-card { font: inherit; text-align:left; cursor:default; }
 .player-card.targetable { cursor:pointer; box-shadow:0 0 0 3px #f1c66d,0 8px 24px rgba(241,198,109,.34); }
 .player-card.glass-ace { border-color:#b8f3ff; box-shadow:0 0 20px rgba(150,230,255,.45); background:linear-gradient(145deg,#efffff,#b8dbe2); }
+.card-face { position:relative; width:100%; height:100%; }
+.card-deal-enter-active {
+  animation:card-deal-in .5s cubic-bezier(.2,.8,.2,1) both;
+  animation-delay:calc(var(--deal-index) * 70ms);
+}
+.card-deal-leave-active { transition:opacity .16s ease,transform .16s ease; }
+.card-deal-leave-to { transform:translateY(-8px) scale(.92); opacity:0; }
+.card-reveal-enter-active,.card-reveal-leave-active {
+  transition:transform .3s ease,opacity .3s ease;
+  transform-style:preserve-3d;
+}
+.card-reveal-enter-from { transform:rotateY(90deg) scale(.96); opacity:0; }
+.card-reveal-leave-to { transform:rotateY(-90deg) scale(.96); opacity:0; }
+.table-message-enter-active,.table-message-leave-active { transition:transform .2s ease,opacity .2s ease; }
+.table-message-enter-from { transform:translateY(5px); opacity:0; }
+.table-message-leave-to { transform:translateY(-5px); opacity:0; }
+.wager-pop-enter-active { animation:wager-pop .4s cubic-bezier(.2,.85,.3,1.25); }
+.wager-pop-leave-active { position:absolute; opacity:0; }
 .favor-zone { width:min(650px,100%); margin:.45rem auto .7rem; border:1px solid rgba(231,195,123,.2); border-radius:14px; padding:.7rem; background:rgba(5,16,12,.55); }
 .favor-head { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:.6rem; }
 .favor-head span,.favor-head strong { display:block; }.favor-head span { color:var(--game-muted); font-size:.56rem; font-weight:850; letter-spacing:.1em; text-transform:uppercase; }.favor-head strong { margin-top:.12rem; color:var(--game-ink); font-size:.68rem; }
 .favor-resource { display:flex; align-items:center; gap:.18rem; color:rgba(231,195,123,.16); }.favor-resource span.full { color:#f2c76d; filter:drop-shadow(0 0 5px rgba(242,199,109,.4)); }.favor-resource b { margin-left:.35rem; color:var(--game-muted); font-size:.58rem; }
 .favor-hand { display:flex; min-height:108px; justify-content:center; gap:.5rem; }
-.favor-card { position:relative; display:flex; width:31%; max-width:185px; flex-direction:column; align-items:center; border:1px solid rgba(231,195,123,.22); border-radius:10px; padding:.55rem .45rem; color:var(--game-ink); background:linear-gradient(145deg,rgba(231,195,123,.1),transparent 45%),#181b18; cursor:pointer; text-align:center; transition:transform .15s,border-color .15s; }
+.favor-card { position:relative; display:flex; width:31%; max-width:185px; flex-direction:column; align-items:center; border:1px solid rgba(231,195,123,.22); border-radius:10px; padding:.55rem .45rem; color:var(--game-ink); background:linear-gradient(145deg,rgba(231,195,123,.1),transparent 45%),#181b18; cursor:pointer; text-align:center; transition:transform .15s,border-color .15s; animation:favor-arrive .42s cubic-bezier(.2,.8,.2,1) both; animation-delay:calc(var(--favor-index) * 65ms); }
 .favor-card:hover:not(:disabled) { transform:translateY(-4px); border-color:#edc979; }.favor-card.exhausted { filter:grayscale(.6); opacity:.38; cursor:not-allowed; }
 .favor-card > b { color:#edc979; font-family:Georgia,serif; font-size:1.25rem; line-height:1; }.favor-card strong { margin-top:.3rem; color:var(--game-ink); font-family:Georgia,serif; font-size:.7rem; }.favor-card small { margin-top:.2rem; color:var(--game-muted); font-size:.52rem; line-height:1.3; }
 .favor-cost { position:absolute; left:6px; top:6px; display:grid; width:19px; height:19px; place-items:center; border-radius:50%; color:#21160a; background:#edc979; font-size:.55rem; font-weight:900; }
 .favor-discard-slot { display:grid; width:31%; max-width:185px; place-items:center; border:1px dashed rgba(255,255,255,.12); border-radius:10px; color:rgba(255,255,255,.2); font-size:.56rem; letter-spacing:.12em; }
 .twist-choice { display:flex; align-items:center; justify-content:center; gap:.6rem; margin:.35rem auto; color:var(--game-muted); font-size:.62rem; }.twist-choice button { display:grid; width:48px; height:62px; place-items:center; border:1px solid #fff; border-radius:7px; color:#16181d; background:#f5f1e8; cursor:pointer; }.twist-choice button.red { color:#b62638; }.twist-choice b { font-family:Georgia,serif; font-size:1rem; }.twist-choice i { font-style:normal; }
+@keyframes card-deal-in {
+  from { transform:translate(46px,-24px) rotate(7deg) scale(.88); opacity:0; }
+  to { opacity:1; }
+}
+@keyframes wager-pop {
+  0% { transform:scale(.72) rotate(-8deg); opacity:0; }
+  70% { transform:scale(1.08) rotate(2deg); opacity:1; }
+  100% { transform:none; }
+}
+@keyframes favor-arrive {
+  from { transform:translateY(10px) rotate(-1deg); opacity:0; }
+  to { opacity:1; }
+}
+@keyframes table-breathe {
+  0%,100% { transform:scale(.94); opacity:.45; }
+  50% { transform:scale(1.08); opacity:1; }
+}
+@keyframes table-glint {
+  0%,18% { transform:translateX(-30%) rotate(18deg); opacity:0; }
+  35% { opacity:1; }
+  55%,100% { transform:translateX(390%) rotate(18deg); opacity:0; }
+}
+@media(prefers-reduced-motion:reduce){.blackjack-stage::before,.blackjack-stage::after{animation:none}}
 @media(max-width:620px){.favor-hand{gap:.25rem}.favor-card{padding:.5rem .2rem}.favor-card small{display:none}.favor-head{align-items:flex-start;flex-direction:column}.blackjack-stage{min-height:760px}}
 </style>

@@ -1704,17 +1704,29 @@
   box-shadow: 0 9px 18px rgba(0, 0, 0, 0.35);
   font-family: Georgia, 'Times New Roman', serif;
   font-size: 2.2rem;
+  animation: midnight-card-float 5.2s ease-in-out infinite;
 }
 
 .blackjack-art i:nth-child(2) {
   z-index: 2;
   transform: translateY(-8px);
   color: #b62e3f;
+  animation-delay: -1.7s;
 }
 
 .blackjack-art i:nth-child(3) {
   transform: rotate(8deg);
   color: #b62e3f;
+  animation-delay: -3.4s;
+}
+
+.demo-tile--blackjack:hover .blackjack-art i {
+  animation-duration: 2.6s;
+}
+
+@keyframes midnight-card-float {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -7px; }
 }
 
 .strategy-art {
