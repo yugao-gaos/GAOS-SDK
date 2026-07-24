@@ -62,7 +62,7 @@ const selectedCard = computed(() => cards.find((card) => card.kind === selectedK
 const projectedState = computed(() => simulatePlans(queue.value));
 const virtualHero = computed(() => projectedState.value.hero);
 const projectedEnemies = computed(() => projectedState.value.enemies);
-const phantomEnemies = computed(() => projectedEnemies.value.filter((enemy) => (
+const phantomEnemies = computed(() => resolving.value ? [] : projectedEnemies.value.filter((enemy) => (
   enemy.x !== enemy.origin.x || enemy.y !== enemy.origin.y
 )));
 const won = computed(() => room.value === 3 && enemies.value.length === 0);
@@ -71,6 +71,7 @@ const roomCleared = computed(() => enemies.value.length === 0 && !won.value);
 const targetCells = computed(() => new Set(selectedCard.value ? legalTargets(selectedCard.value).map(indexAt) : []));
 const previewCells = computed(() => {
   const previews = new Map<number, Preview>();
+  if (resolving.value) return previews;
   const state = initialProjectedState();
   queue.value.forEach((plan, index) => {
     addPreview(previews, state.hero, plan.card, plan.target, index + 1, false);
@@ -83,6 +84,7 @@ const previewCells = computed(() => {
 });
 const trajectorySegments = computed(() => {
   const segments: TrajectorySegment[] = [];
+  if (resolving.value) return segments;
   const state = initialProjectedState();
   queue.value.forEach((plan, index) => {
     addTrajectory(segments, state, plan, index + 1, false);
@@ -97,19 +99,6 @@ const trajectorySegments = computed(() => {
   }
   return segments;
 });
-const enemyPreviewCells = computed(() => {
-  const previews = new Map<number, { attacks: number; moves: number }>();
-  for (const enemy of enemies.value) {
-    const intent = enemyIntent(enemy);
-    const index = indexAt(intent.target);
-    const preview = previews.get(index) ?? { attacks: 0, moves: 0 };
-    if (intent.kind === 'attack') preview.attacks += 1;
-    else if (intent.target.x !== enemy.x || intent.target.y !== enemy.y) preview.moves += 1;
-    previews.set(index, preview);
-  }
-  return previews;
-});
-
 function indexAt(point: Point) {
   return point.y * size + point.x;
 }
@@ -377,10 +366,6 @@ function addPreview(previews: Map<number, Preview>, origin: Point, card: Card, t
 
 function previewAt(index: number) {
   return previewCells.value.get(index);
-}
-
-function enemyPreviewAt(index: number) {
-  return enemyPreviewCells.value.get(index);
 }
 
 function tokenFor(enemy: Enemy) {
@@ -658,7 +643,7 @@ async function commitTurn() {
   hoveredIndex.value = null;
   const token = runToken;
   const plans = [...queue.value];
-  decision.value = `Committed ${plans.length} action${plans.length === 1 ? '' : 's'} against revealed enemy intents`;
+  decision.value = `Committed ${plans.length} action${plans.length === 1 ? '' : 's'} against enemy responses`;
   for (let beat = 0; beat < plans.length && token === runToken; beat += 1) {
     const plan = plans[beat];
     const intents: EnemyIntent[] = enemies.value.map((enemy) => ({ enemy: { ...enemy }, intent: enemyIntent(enemy) }));
@@ -666,7 +651,7 @@ async function commitTurn() {
     clearAnimations();
     await nextTick();
     prepareAnimations(plan, intents);
-    message.value = `Beat ${beat + 1}: ${plan.card.name} and every enemy intent resolve together.`;
+    message.value = `Beat ${beat + 1}: ${plan.card.name} and every enemy response resolve together.`;
     executePlayer(plan);
     executeEnemies(intents);
     await nextTick();
@@ -717,7 +702,7 @@ async function agentTurn() {
       continue;
     }
     if (hero.value.hp <= 4 && !queue.value.some((plan) => plan.card.kind === 'guard')) {
-      queue.value.push({ card: guard, target: { ...origin }, summary: 'Protect against revealed attacks' });
+      queue.value.push({ card: guard, target: { ...origin }, summary: 'Protect against incoming attacks' });
       continue;
     }
     const target = legalTargets(step).sort((a, b) => Math.min(...enemies.value.map((enemy) => manhattan(a, enemy))) - Math.min(...enemies.value.map((enemy) => manhattan(b, enemy))))[0];
@@ -767,12 +752,12 @@ reset();
       <div>
         <span class="game-eyebrow">Three-beat lockstep combat · chamber {{ room }} of 3</span>
         <h2>Cinder Vault</h2>
-        <p>Program up to three actions, preview every path, then watch each beat resolve simultaneously against revealed enemy intents.</p>
+        <p>Program up to three actions, preview every path, then watch each beat resolve simultaneously against enemy responses.</p>
       </div>
       <div class="game-status-pill" :data-active="autoplay">{{ won ? 'Run won' : defeated ? 'Run lost' : `Turn ${turn}` }}</div>
     </header>
 
-    <div class="beat-ribbon">
+    <div class="beat-ribbon" :class="{ resolving }">
       <button
         v-for="beat in maxActions"
         :key="beat"
@@ -792,11 +777,15 @@ reset();
           <div class="energy-pips" :title="`${actionsLeft} actions left`">
             <span v-for="pip in maxActions" :key="pip" :class="{ full: pip <= actionsLeft }">◆</span>
           </div>
-          <div class="deck-counts"><span>Enemy intents revealed</span></div>
+          <div class="deck-counts"><span>Enemies respond each beat</span></div>
         </div>
 
-        <div class="rogue-board">
-          <svg class="trajectory-layer" viewBox="0 0 6 6" aria-hidden="true">
+        <div class="rogue-board" :class="{ 'is-resolving': resolving }">
+          <div v-if="resolving && activeBeat !== null" class="resolution-banner">
+            <span>Resolving beat {{ activeBeat + 1 }}</span>
+            <strong>{{ queue[activeBeat]?.card.name }}</strong>
+          </div>
+          <svg v-if="!resolving" class="trajectory-layer" viewBox="0 0 6 6" aria-hidden="true">
             <defs>
               <marker id="move-arrow" markerWidth=".34" markerHeight=".34" refX=".28" refY=".17" orient="auto" markerUnits="userSpaceOnUse">
                 <path d="M0,0 L.34,.17 L0,.34 Z" />
@@ -850,11 +839,6 @@ reset();
               :class="[`trajectory-${previewAt(index - 1)!.kind}`, { ghost: previewAt(index - 1)!.ghost }]"
             ><strong v-if="previewAt(index - 1)!.endpoint">{{ previewAt(index - 1)!.beat }}</strong></span>
             <span
-              v-if="enemyPreviewAt(index - 1)"
-              class="enemy-target-marker"
-              :class="{ attacking: enemyPreviewAt(index - 1)!.attacks > 0 }"
-            >{{ enemyPreviewAt(index - 1)!.attacks ? '!' : '→' }}</span>
-            <span
               v-if="indexAt(hero) === index - 1"
               class="rogue-actor wayfarer token-actor"
               :class="heroMotion ? `motion-${heroMotion}` : ''"
@@ -872,7 +856,6 @@ reset();
             >
               <img :src="tokenFor(enemyAt(pointAt(index - 1))!)" :alt="enemyAt(pointAt(index - 1))!.name">
               <i>{{ enemyAt(pointAt(index - 1))!.hp }}</i>
-              <em>{{ enemyIntent(enemyAt(pointAt(index - 1))!).kind === 'attack' ? '!' : '→' }}</em>
             </span>
             <span v-else class="environment-mark">{{ tileLabel(index - 1) }}</span>
             <span
@@ -885,7 +868,7 @@ reset();
               <em>{{ phantomAt(pointAt(index - 1))!.movedAt }}</em>
             </span>
             <span
-              v-if="queue.length && indexAt(virtualHero) === index - 1 && indexAt(hero) !== index - 1"
+              v-if="!resolving && queue.length && indexAt(virtualHero) === index - 1 && indexAt(hero) !== index - 1"
               class="rogue-actor wayfarer token-actor phantom-actor phantom-wayfarer"
             >
               <img src="/images/cinder-vault/wayfarer.webp" alt="Projected Wayfarer">
@@ -939,13 +922,13 @@ reset();
       <div>
         <span class="game-eyebrow">Quick guide</span>
         <h3 id="cinder-how-to">How to play</h3>
-        <p>Build a three-beat plan, check the colored trajectory on the board, then commit. Enemies reveal their targets before you act, and every entity resolves together on each beat.</p>
+        <p>Build a three-beat plan, check the colored trajectory on the board, then commit. Enemy responses stay hidden until every entity resolves together on each beat.</p>
       </div>
       <ol>
         <li><b>Choose a card.</b><span>Legal targets glow. Hover a target to preview its path before adding it.</span></li>
         <li><b>Program up to three beats.</b><span>Solid blue arrows show movement. Dashed orange arrows show attacks. Ghost tokens show projected positions and remain valid future targets.</span></li>
-        <li><b>Read enemy intent.</b><span>Red arrows mark movement targets and red exclamation marks show incoming attacks.</span></li>
-        <li><b>Commit the turn.</b><span>Your action and every enemy intent animate simultaneously, one beat at a time.</span></li>
+        <li><b>Plan for uncertainty.</b><span>Enemy movement and attacks are hidden until the current beat starts resolving.</span></li>
+        <li><b>Commit the turn.</b><span>Your action and every enemy response animate simultaneously, one beat at a time.</span></li>
       </ol>
       <div class="hazard-legend">
         <span><i class="legend-spike"></i><b>Spikes</b> deal damage</span>
@@ -962,10 +945,14 @@ reset();
 .beat-ribbon button{min-height:48px;border:1px solid var(--game-line);border-radius:10px;color:var(--game-ink);background:rgba(255,255,255,.04);text-align:left;padding:.45rem .65rem;transition:border-color .18s ease,background .18s ease,transform .18s ease}
 .beat-ribbon button.planned{border-color:rgba(234,165,104,.34);background:rgba(234,165,104,.08);cursor:pointer}
 .beat-ribbon button.active{transform:translateY(-2px);border-color:#ffc778;background:rgba(255,199,120,.17);box-shadow:0 0 18px rgba(255,160,81,.22)}
+.beat-ribbon.resolving button:not(.active){opacity:.42}
 .beat-ribbon b,.beat-ribbon span{display:block}.beat-ribbon b{color:var(--game-accent);font-size:.55rem}.beat-ribbon span{margin-top:.2rem;color:var(--game-muted);font-size:.6rem}
 .environment-mark{z-index:1;max-width:80%;color:rgba(255,231,194,.65);font-size:.48rem;font-weight:800;text-transform:uppercase}
 .rogue-cell.wall{background:#302c31}.rogue-cell.spike{background:repeating-linear-gradient(45deg,#33242a 0 8px,#5b3035 8px 10px)}.rogue-cell.pit{background:radial-gradient(circle,#050408 20%,#1c1520 65%)}.rogue-cell.barrel{background:radial-gradient(circle,#843d26,#2a1920 60%)}.rogue-cell.plate{box-shadow:inset 0 0 0 3px #b8894d}.rogue-cell.gate{background:repeating-linear-gradient(90deg,#4d4745 0 5px,#171419 5px 10px)}.rogue-cell.gate.open{opacity:.38}
 .rogue-board{position:relative}
+.rogue-board.is-resolving{box-shadow:0 0 0 2px rgba(255,199,120,.28),0 18px 42px rgba(0,0,0,.38)}
+.resolution-banner{position:absolute;z-index:8;left:50%;top:10px;display:flex;align-items:center;gap:.45rem;transform:translateX(-50%);border:1px solid rgba(255,199,120,.44);border-radius:999px;padding:.32rem .65rem;color:#f7d9ac;background:rgba(28,18,24,.92);box-shadow:0 6px 18px rgba(0,0,0,.42);pointer-events:none;white-space:nowrap}
+.resolution-banner span{font-size:.54rem;font-weight:850;letter-spacing:.07em;text-transform:uppercase}.resolution-banner strong{color:#ffc778;font-size:.62rem}
 .rogue-cell.targetable{z-index:auto}
 .trajectory-layer{position:absolute;z-index:2;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
 .trajectory-layer line{fill:none;stroke-linecap:round;stroke-linejoin:round;stroke-width:3}
@@ -983,8 +970,6 @@ reset();
 .trajectory-marker{position:absolute;z-index:3;left:4px;top:4px;pointer-events:none;color:var(--trajectory-color)}
 .trajectory-marker strong{display:grid;width:22px;height:22px;place-items:center;border:2px solid #17131b;border-radius:50%;color:#16131a;background:var(--trajectory-color);box-shadow:0 0 12px color-mix(in srgb,var(--trajectory-color),transparent 35%);font-size:.62rem}
 .trajectory-move{--trajectory-color:#6dd8e5;color:var(--trajectory-color)}.trajectory-attack{--trajectory-color:#ff925f;color:var(--trajectory-color)}.trajectory-guard{--trajectory-color:#8bbcf0;color:var(--trajectory-color)}.trajectory-marker.ghost{opacity:.58}
-.enemy-target-marker{position:absolute;z-index:3;right:4px;top:4px;display:grid;width:18px;height:18px;place-items:center;border:1px solid rgba(255,255,255,.26);border-radius:50%;color:#2a1720;background:#d97168;box-shadow:0 0 10px rgba(217,113,104,.42);font-size:.58rem;font-weight:950}
-.enemy-target-marker.attacking{color:#fff;background:#bf3f48;animation:danger-pulse 1s ease-in-out infinite}
 .token-actor{transform:none;border-radius:50%;background:#211820;box-shadow:0 7px 15px rgba(0,0,0,.48),0 0 0 2px rgba(0,0,0,.3)}
 .token-actor img{display:block;width:100%;height:100%;border-radius:50%;object-fit:cover}
 .token-actor i{z-index:4;transform:none}
@@ -1013,7 +998,6 @@ reset();
 .hazard-legend i{display:block;width:12px;height:12px;border-radius:3px}.legend-spike{background:#8d4149}.legend-pit{background:#08060b;box-shadow:inset 0 0 0 2px #392a3d}.legend-barrel{background:#a84d2b}.legend-plate{box-shadow:inset 0 0 0 2px #c39050}
 @keyframes trajectory-dash{50%{filter:brightness(1.3)}}
 @keyframes attack-dashes{to{stroke-dashoffset:-14}}
-@keyframes danger-pulse{50%{transform:scale(1.18);box-shadow:0 0 16px rgba(239,74,80,.75)}}
 @keyframes phantom-pulse{50%{opacity:.78;filter:saturate(.9) brightness(1.3)}}
 @keyframes token-hop{0%{transform:translateY(12px) scale(.78);opacity:.25}55%{transform:translateY(-7px) scale(1.08)}100%{transform:none;opacity:1}}
 @keyframes token-strike{0%,100%{transform:none}38%{transform:scale(1.18) rotate(-8deg);filter:brightness(1.35)}70%{transform:scale(.94) rotate(3deg)}}
