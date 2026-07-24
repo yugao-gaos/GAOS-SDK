@@ -67,7 +67,7 @@ Session ID are collected in [DEVPOST.md](DEVPOST.md).
 
 - **Source:** https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK
 - **Documentation:** https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/
-- **Release:** https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.16.0
+- **Release:** https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.17.0
 - **Community:** https://discord.gg/vdvUgcqPU
 - **Live game and prebuilt download:** https://zonoid.ai
 
@@ -81,7 +81,7 @@ TypeScript / Node.js:
 mkdir gaos-judge
 cd gaos-judge
 npm init -y
-npm install 'https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/download/v0.16.0/yugao-gaos-turn-based-grid-sdk-0.16.0.tgz'
+npm install 'https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/download/v0.17.0/yugao-gaos-turn-based-grid-sdk-0.17.0.tgz'
 node --input-type=module -e "import { scoreStars } from '@yugao-gaos/turn-based-grid-sdk/engine'; console.log(scoreStars(6, { three: 6, two: 9 }))"
 ```
 
@@ -91,7 +91,7 @@ Python:
 
 ```sh
 python3 -m venv .venv
-.venv/bin/python -m pip install 'https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/download/v0.16.0/gaos_turn_based_grid_sdk-0.16.0-py3-none-any.whl'
+.venv/bin/python -m pip install 'https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/download/v0.17.0/gaos_turn_based_grid_sdk-0.17.0-py3-none-any.whl'
 .venv/bin/python -c "import agilabs_arena; print(agilabs_arena.__name__)"
 ```
 
@@ -215,6 +215,12 @@ self-identifying artifact and be verified by the same SDK tooling. Existing
 single-level `TranscriptHeader` + `TranscriptAction` data lifts through
 `transcriptToReplayArtifact`.
 
+The decoded artifact has a packaged
+[JSON Schema](schemas/gaos.replay-v1.schema.json), and TypeScript and Python
+share one [canonical JSONL fixture](fixtures/replay/gaos-replay-v1.golden.jsonl).
+Python consumers can use `parse_replay_jsonl`, `validate_replay_artifact`, and
+`serialize_replay_jsonl` from `agilabs_arena`.
+
 ## TypeScript
 
 The npm package is published through GitHub Packages. Configure the GitHub npm
@@ -233,7 +239,7 @@ Repositories with GitHub access can instead pin an exact release tag without
 configuring the npm registry:
 
 ```sh
-npm install 'git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.16.0'
+npm install 'git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.17.0'
 ```
 
 Use the hosted Arena client:
@@ -358,7 +364,7 @@ The distribution is named `gaos-turn-based-grid-sdk`; the stable import name
 remains `agilabs_arena` for compatibility with existing integrations.
 
 ```sh
-pip install gaos_turn_based_grid_sdk-0.16.0-py3-none-any.whl
+pip install gaos_turn_based_grid_sdk-0.17.0-py3-none-any.whl
 ```
 
 ```python

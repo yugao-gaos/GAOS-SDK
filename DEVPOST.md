@@ -79,7 +79,7 @@ extensions provider-neutral.
 
 ## Accomplishments that we're proud of
 
-We shipped a public Apache-2.0 repository, a documented v0.16.0 release,
+We shipped a public Apache-2.0 repository, a documented v0.17.0 release,
 prebuilt npm and Python packages, a broad game-mechanism reference,
 portable replay, solver and scoring support, MCP tools, and extensible model
 and CLI drivers. Its deterministic engine is backed by 219 TypeScript and 25
@@ -113,7 +113,7 @@ research data from Zonoid while keeping its product content outside the SDK.
   https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/
 - **Live game and prebuilt download:** https://zonoid.ai
 - **Latest SDK release:**
-  https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.16.0
+  https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.17.0
 - **Codex `/feedback` Session ID:**
   `019f8458-7a8d-7010-9227-500c99df5e04`
 - **License:** Apache License 2.0
@@ -155,7 +155,7 @@ Install the prebuilt public v0.9.2 release archive without a GitHub token:
 mkdir gaos-judge
 cd gaos-judge
 npm init -y
-npm install 'https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/download/v0.16.0/yugao-gaos-turn-based-grid-sdk-0.16.0.tgz'
+npm install 'https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/download/v0.17.0/yugao-gaos-turn-based-grid-sdk-0.17.0.tgz'
 ```
 
 Verify an engine import and deterministic score:
@@ -172,7 +172,7 @@ Install the prebuilt public wheel:
 
 ```sh
 python3 -m venv .venv
-.venv/bin/python -m pip install 'https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/download/v0.16.0/gaos_turn_based_grid_sdk-0.16.0-py3-none-any.whl'
+.venv/bin/python -m pip install 'https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/download/v0.17.0/gaos_turn_based_grid_sdk-0.17.0-py3-none-any.whl'
 .venv/bin/python -c "import agilabs_arena; print(agilabs_arena.__name__)"
 ```
 

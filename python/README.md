@@ -5,6 +5,24 @@ wrapper for the hosted Arena API.
 Zero runtime dependencies; duck-type-compatible with Gymnasium and
 `verifiers`-style harnesses.
 
+## Portable replay
+
+The Python package reads and writes the same canonical `gaos.replay` v1 JSONL
+bytes as the TypeScript engine:
+
+```python
+from agilabs_arena import parse_replay_jsonl, serialize_replay_jsonl
+
+with open("run.gaos-replay.jsonl", encoding="utf-8") as source:
+    artifact = parse_replay_jsonl(source.read())
+
+canonical_bytes = serialize_replay_jsonl(artifact)
+```
+
+`validate_replay_artifact` performs transport-level checks without executing
+game code. Reducer re-simulation remains product-owned; select the historical
+adapter declared in `artifact["header"]["game"]["adapter"]`.
+
 The client speaks the stable `agilabs.turns` v1 envelope on `/v1/sessions`.
 Each command carries the session cursor, participant, and a deterministic
 `submissionId`: stable for an exact retry, new for each logical control

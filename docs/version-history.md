@@ -4,15 +4,14 @@ GAOS evolves additively across the v0.x line. Products can adopt new mechanism
 families independently, while deprecated compatibility names remain available
 until the v1.0 boundary.
 
-::: tip Current source: v0.17.0 in development
-v0.16.0 remains the latest published release. Current source is building
-toward v0.17.0, beginning with an SDK-owned portable replay format shared by
-Arena, creator platforms, and independent benchmark tooling.
+::: tip Latest release: v0.17.0
+Portable replay artifacts, cross-language validation, and a broader playable
+game showcase are available in the current TypeScript and Python packages.
 :::
 
 ## v0.17.0 — portable benchmark replays
 
-In development.
+Released July 24, 2026.
 
 - SDK-owned `gaos.replay` v1 JSONL envelope for both single-level sessions and
   ordered multi-level runs.
@@ -20,11 +19,15 @@ In development.
   aggregate totals, and level-indexed actions.
 - Canonical serialization, strict parsing, transport validation, whole-run
   reducer recheck, and a direct TabletopLabs `results.replayFormat` constant.
+- Packaged JSON Schema, cross-language golden fixture, and zero-dependency
+  Python parsing, validation, and canonical serialization.
 - Lossless adapter from the existing `TranscriptHeader`/`TranscriptAction`
   pair, allowing Arena and creator-platform results to share verifier tooling.
 - Public documentation and capability map present GAOS as a general game SDK,
   with tabletop games as one supported family and grids as one optional
   mechanism.
+- Six playable browser demos cover card, puzzle, hex, graph, hybrid, and
+  real-time scheduled game loops.
 
 [Portable replay specification →](/mechanisms/replay)
 
@@ -110,7 +113,7 @@ Prepared July 23, 2026.
 
 ## Compatibility policy
 
-- v0.13 through v0.16 are additive.
+- v0.13 through v0.17 are additive.
 - Existing single-board and perfect-information reducers continue to work.
 - The old `Grid*` core names remain deprecated aliases through v0.x.
 - v1.0 removes those aliases and is the next intentional breaking boundary.

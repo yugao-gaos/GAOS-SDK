@@ -5,6 +5,17 @@ import { createRng, wait } from './game-utils';
 type Suit = '♠' | '♥' | '♦' | '♣';
 type Card = { rank: string; suit: Suit; value: number };
 type Phase = 'player' | 'dealer' | 'settled';
+type FavorKind = 'peek' | 'cut' | 'twist' | 'ace' | 'breath' | 'crown';
+type FavorCard = { kind: FavorKind; name: string; cost: number; glyph: string; text: string };
+
+const favorLibrary: FavorCard[] = [
+  { kind: 'peek', name: 'Candle Peek', cost: 1, glyph: '◉', text: 'Reveal the dealer hole card.' },
+  { kind: 'cut', name: 'Cut the Deck', cost: 1, glyph: '✂', text: 'Burn the next card before hitting.' },
+  { kind: 'twist', name: 'Twist of Fate', cost: 2, glyph: '⑵', text: 'Draw two cards and choose one.' },
+  { kind: 'ace', name: 'Glass Ace', cost: 2, glyph: 'A', text: 'Treat one selected card as an Ace.' },
+  { kind: 'breath', name: 'Last Breath', cost: 2, glyph: '↶', text: 'Cancel the next card that would bust.' },
+  { kind: 'crown', name: 'Crowned Hand', cost: 1, glyph: '♛', text: 'A three-card 21 receives a premium payout.' },
+];
 
 const seed = ref(1701);
 const chips = ref(250);
@@ -20,18 +31,29 @@ const decision = ref('Waiting for the deal');
 const agentPlaying = ref(false);
 const handsPlayed = ref(0);
 const wins = ref(0);
+const favor = ref(3);
+const favorDeck = ref<FavorCard[]>([]);
+const favorHand = ref<FavorCard[]>([]);
+const favorDiscard = ref<FavorCard[]>([]);
+const favorUsed = ref(false);
+const glassAceIndex = ref<number | null>(null);
+const targetingAce = ref(false);
+const lastBreathArmed = ref(false);
+const crownedHand = ref(false);
+const twistChoices = ref<Card[]>([]);
 let random = createRng(seed.value);
 let runToken = 0;
 
-const playerValue = computed(() => handValue(player.value));
+const playerValue = computed(() => handValue(player.value, glassAceIndex.value));
 const dealerValue = computed(() => handValue(dealer.value));
 const dealerUpValue = computed(() => dealer.value[0]?.value ?? 0);
-const canAct = computed(() => phase.value === 'player' && !agentPlaying.value);
+const canAct = computed(() => phase.value === 'player' && !agentPlaying.value && twistChoices.value.length === 0 && !targetingAce.value);
 const blackjack = computed(() => player.value.length === 2 && playerValue.value === 21);
+const favorPips = computed(() => Array.from({ length: 5 }, (_, index) => index < favor.value));
 
-function handValue(hand: Card[]) {
-  let value = hand.reduce((sum, card) => sum + card.value, 0);
-  let aces = hand.filter((card) => card.rank === 'A').length;
+function handValue(hand: Card[], forcedAceIndex: number | null = null) {
+  let value = hand.reduce((sum, card, index) => sum + (index === forcedAceIndex ? 11 : card.value), 0);
+  let aces = hand.filter((card, index) => card.rank === 'A' || index === forcedAceIndex).length;
   while (value > 21 && aces > 0) {
     value -= 10;
     aces -= 1;
@@ -44,18 +66,22 @@ function isSoft(hand: Card[]) {
   return hand.some((card) => card.rank === 'A') && raw === handValue(hand);
 }
 
+function shuffle<T>(values: T[]) {
+  const copy = [...values];
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const next = Math.floor(random() * (index + 1));
+    [copy[index], copy[next]] = [copy[next], copy[index]];
+  }
+  return copy;
+}
+
 function buildDeck() {
   const suits: Suit[] = ['♠', '♥', '♦', '♣'];
   const ranks = [
     ['A', 11], ['2', 2], ['3', 3], ['4', 4], ['5', 5], ['6', 6], ['7', 7],
     ['8', 8], ['9', 9], ['10', 10], ['J', 10], ['Q', 10], ['K', 10],
   ] as const;
-  const cards = suits.flatMap((suit) => ranks.map(([rank, value]) => ({ rank, suit, value })));
-  for (let index = cards.length - 1; index > 0; index -= 1) {
-    const next = Math.floor(random() * (index + 1));
-    [cards[index], cards[next]] = [cards[next], cards[index]];
-  }
-  return cards;
+  return shuffle(suits.flatMap((suit) => ranks.map(([rank, value]) => ({ rank, suit, value }))));
 }
 
 function draw() {
@@ -63,12 +89,43 @@ function draw() {
   return deck.value.pop()!;
 }
 
+function drawFavor() {
+  if (!favorDeck.value.length) {
+    favorDeck.value = shuffle(favorDiscard.value.length ? favorDiscard.value : favorLibrary);
+    favorDiscard.value = [];
+  }
+  return favorDeck.value.pop();
+}
+
+function refreshFavorHand() {
+  favorDiscard.value.push(...favorHand.value);
+  favorHand.value = [];
+  while (favorHand.value.length < 3) {
+    const card = drawFavor();
+    if (!card) break;
+    favorHand.value.push(card);
+  }
+}
+
+function resetHandAbilities() {
+  favorUsed.value = false;
+  glassAceIndex.value = null;
+  targetingAce.value = false;
+  lastBreathArmed.value = false;
+  crownedHand.value = false;
+  twistChoices.value = [];
+}
+
 function resetTable() {
   runToken += 1;
   agentPlaying.value = false;
   random = createRng(seed.value);
   deck.value = buildDeck();
+  favorDeck.value = shuffle(favorLibrary);
+  favorHand.value = [];
+  favorDiscard.value = [];
   chips.value = 250;
+  favor.value = 3;
   handsPlayed.value = 0;
   wins.value = 0;
   phase.value = 'settled';
@@ -79,55 +136,150 @@ function resetTable() {
 function startRound() {
   if (agentPlaying.value || phase.value !== 'settled') return;
   if (chips.value < bet.value) {
-    message.value = 'Not enough chips — resetting the table.';
+    message.value = 'Not enough chips — reset the table to begin again.';
     return;
   }
+  resetHandAbilities();
+  refreshFavorHand();
   wager.value = bet.value;
   chips.value -= wager.value;
   player.value = [draw(), draw()];
   dealer.value = [draw(), draw()];
   revealDealer.value = false;
   phase.value = 'player';
-  message.value = blackjack.value ? 'Blackjack!' : 'Hit, stand, or double.';
-  decision.value = `${legalActions().length} legal actions`;
+  message.value = blackjack.value ? 'Natural Blackjack!' : 'Play one House Favor, then hit, stand, or double.';
+  decision.value = `${legalActions().length} legal actions across Blackjack and Favor cards`;
   if (blackjack.value) void dealerTurn();
+}
+
+function playableFavorCards() {
+  if (phase.value !== 'player' || favorUsed.value) return [];
+  return favorHand.value.filter((card) => card.cost <= favor.value);
 }
 
 function legalActions() {
   if (phase.value !== 'player') return [];
   const actions = ['Hit', 'Stand'];
   if (player.value.length === 2 && chips.value >= wager.value) actions.push('Double');
+  actions.push(...playableFavorCards().map((card) => card.name));
   return actions;
 }
 
-async function hit(fromAgent = false) {
-  if (phase.value !== 'player' || (!fromAgent && agentPlaying.value)) return;
-  player.value.push(draw());
-  message.value = `Drew ${player.value.at(-1)!.rank}${player.value.at(-1)!.suit}.`;
+function consumeFavor(card: FavorCard) {
+  favor.value -= card.cost;
+  favorUsed.value = true;
+  favorHand.value = favorHand.value.filter((item) => item.kind !== card.kind);
+  favorDiscard.value.push(card);
+}
+
+async function chooseTwistCard(index: number, fromAgent = false) {
+  if (!twistChoices.value[index] || (!fromAgent && agentPlaying.value)) return;
+  const chosen = twistChoices.value[index];
+  const rejected = twistChoices.value[index === 0 ? 1 : 0];
+  player.value.push(chosen);
+  twistChoices.value = [];
+  message.value = `Twist chose ${chosen.rank}${chosen.suit}; ${rejected.rank}${rejected.suit} was discarded.`;
   if (playerValue.value > 21) settle('bust');
   else if (playerValue.value === 21) await dealerTurn();
 }
 
+async function playFavor(card: FavorCard, fromAgent = false) {
+  if (phase.value !== 'player' || favorUsed.value || card.cost > favor.value || (!fromAgent && agentPlaying.value)) return;
+  consumeFavor(card);
+  decision.value = `${fromAgent ? 'Agent' : 'Player'} played ${card.name} for ${card.cost} Favor`;
+  if (card.kind === 'peek') {
+    revealDealer.value = true;
+    message.value = `Candle Peek reveals ${dealer.value[1].rank}${dealer.value[1].suit}.`;
+  } else if (card.kind === 'cut') {
+    const burned = draw();
+    message.value = `Cut the Deck burned ${burned.rank}${burned.suit}.`;
+  } else if (card.kind === 'twist') {
+    twistChoices.value = [draw(), draw()];
+    message.value = 'Twist of Fate: choose one of the two drawn cards.';
+    if (fromAgent) {
+      const choiceValues = twistChoices.value.map((choice) => handValue([...player.value, choice], glassAceIndex.value));
+      const safe = choiceValues
+        .map((value, index) => ({ value, index }))
+        .filter(({ value }) => value <= 21)
+        .sort((a, b) => b.value - a.value);
+      await wait(260);
+      await chooseTwistCard(safe[0]?.index ?? choiceValues.indexOf(Math.min(...choiceValues)), true);
+    }
+  } else if (card.kind === 'ace') {
+    if (fromAgent) {
+      const target = player.value
+        .map((playingCard, index) => ({ playingCard, index }))
+        .filter(({ playingCard }) => playingCard.rank !== 'A')
+        .sort((a, b) => b.playingCard.value - a.playingCard.value)[0];
+      glassAceIndex.value = target?.index ?? 0;
+      message.value = `${player.value[glassAceIndex.value].rank}${player.value[glassAceIndex.value].suit} became a Glass Ace.`;
+    } else {
+      targetingAce.value = true;
+      message.value = 'Glass Ace: select one card in your hand.';
+    }
+  } else if (card.kind === 'breath') {
+    lastBreathArmed.value = true;
+    message.value = 'Last Breath is armed for the next draw that would bust.';
+  } else {
+    crownedHand.value = true;
+    message.value = 'Crowned Hand will enhance a three-or-more-card 21.';
+  }
+}
+
+function chooseGlassAce(index: number) {
+  if (!targetingAce.value || agentPlaying.value) return;
+  glassAceIndex.value = index;
+  targetingAce.value = false;
+  message.value = `${player.value[index].rank}${player.value[index].suit} is treated as an Ace this hand.`;
+}
+
+async function resolvePlayerDraw() {
+  if (playerValue.value > 21 && lastBreathArmed.value) {
+    const cancelled = player.value.pop()!;
+    lastBreathArmed.value = false;
+    message.value = `Last Breath cancelled ${cancelled.rank}${cancelled.suit} and forces a stand.`;
+    await wait(320);
+    await dealerTurn();
+  } else if (playerValue.value > 21) settle('bust');
+  else if (playerValue.value === 21) await dealerTurn();
+}
+
+async function hit(fromAgent = false) {
+  if (phase.value !== 'player' || twistChoices.value.length || targetingAce.value || (!fromAgent && agentPlaying.value)) return;
+  player.value.push(draw());
+  message.value = `Drew ${player.value.at(-1)!.rank}${player.value.at(-1)!.suit}.`;
+  await resolvePlayerDraw();
+}
+
 async function stand(fromAgent = false) {
-  if (phase.value !== 'player' || (!fromAgent && agentPlaying.value)) return;
+  if (phase.value !== 'player' || twistChoices.value.length || targetingAce.value || (!fromAgent && agentPlaying.value)) return;
   await dealerTurn();
 }
 
 async function doubleDown(fromAgent = false) {
-  if (phase.value !== 'player' || player.value.length !== 2 || chips.value < wager.value) return;
+  if (phase.value !== 'player' || player.value.length !== 2 || chips.value < wager.value || twistChoices.value.length || targetingAce.value) return;
   if (!fromAgent && agentPlaying.value) return;
   chips.value -= wager.value;
   wager.value *= 2;
   player.value.push(draw());
   message.value = `Doubled to ${wager.value} chips.`;
-  if (playerValue.value > 21) settle('bust');
-  else await dealerTurn();
+  if (playerValue.value > 21 && lastBreathArmed.value) {
+    const cancelled = player.value.pop()!;
+    lastBreathArmed.value = false;
+    message.value = `Last Breath cancelled ${cancelled.rank}${cancelled.suit}; the doubled hand stands.`;
+  } else if (playerValue.value > 21) {
+    settle('bust');
+    return;
+  }
+  await dealerTurn();
 }
 
 async function dealerTurn() {
   const token = runToken;
   phase.value = 'dealer';
   revealDealer.value = true;
+  twistChoices.value = [];
+  targetingAce.value = false;
   message.value = 'Dealer reveals the hole card.';
   await wait(420);
   while (dealerValue.value < 17 && token === runToken) {
@@ -144,13 +296,19 @@ function settle(reason: 'bust' | 'compare') {
   phase.value = 'settled';
   handsPlayed.value += 1;
   const dealerBlackjack = dealer.value.length === 2 && dealerValue.value === 21;
+  let favorEarned = 0;
   if (reason === 'bust' || playerValue.value > 21) {
     message.value = `Bust at ${playerValue.value}. Dealer wins.`;
   } else if (dealerValue.value > 21 || playerValue.value > dealerValue.value) {
-    const payout = blackjack.value && !dealerBlackjack ? Math.floor(wager.value * 2.5) : wager.value * 2;
+    const crowned = crownedHand.value && player.value.length >= 3 && playerValue.value === 21;
+    const payout = crowned
+      ? wager.value * 3
+      : blackjack.value && !dealerBlackjack ? Math.floor(wager.value * 2.5) : wager.value * 2;
     chips.value += payout;
     wins.value += 1;
-    message.value = dealerValue.value > 21 ? `Dealer busts. You win ${payout - wager.value}.` : `You win ${payout - wager.value} chips.`;
+    favorEarned = 1 + (dealerValue.value > 21 ? 1 : 0);
+    favor.value = Math.min(5, favor.value + favorEarned);
+    message.value = `${dealerValue.value > 21 ? 'Dealer busts' : crowned ? 'Crowned 21' : 'You win'} · +${payout - wager.value} chips · +${favorEarned} Favor.`;
   } else if (playerValue.value === dealerValue.value) {
     chips.value += wager.value;
     message.value = `Push at ${playerValue.value}. Bet returned.`;
@@ -160,11 +318,24 @@ function settle(reason: 'bust' | 'compare') {
   agentPlaying.value = false;
 }
 
+function agentFavorChoice() {
+  if (favorUsed.value) return undefined;
+  const available = playableFavorCards();
+  const find = (kind: FavorKind) => available.find((card) => card.kind === kind);
+  if (playerValue.value >= 15 && find('breath')) return find('breath');
+  if (playerValue.value >= 14 && playerValue.value <= 17 && find('twist')) return find('twist');
+  if (dealerUpValue.value >= 10 && find('peek')) return find('peek');
+  if (player.value.length >= 3 && playerValue.value >= 18 && find('crown')) return find('crown');
+  if (playerValue.value >= 16 && find('ace')) return find('ace');
+  return undefined;
+}
+
 function agentChoice() {
   const value = playerValue.value;
   const up = dealerUpValue.value;
   const soft = isSoft(player.value);
   const canDouble = player.value.length === 2 && chips.value >= wager.value;
+  if (revealDealer.value && dealerValue.value < value && value <= 21) return 'Stand';
   if (canDouble && !soft && (value === 11 || (value === 10 && up <= 9))) return 'Double';
   if (soft && value <= 17) return 'Hit';
   if (value >= 17) return 'Stand';
@@ -179,6 +350,11 @@ async function agentStep() {
     return;
   }
   if (phase.value !== 'player') return;
+  const favorCard = agentFavorChoice();
+  if (favorCard) {
+    await playFavor(favorCard, true);
+    return;
+  }
   const choice = agentChoice();
   decision.value = `${isSoft(player.value) ? 'Soft' : 'Hard'} ${playerValue.value} vs dealer ${dealerUpValue.value} → ${choice}`;
   message.value = `Strategy agent chooses ${choice.toLowerCase()}.`;
@@ -199,10 +375,7 @@ async function watchAgent() {
   }
 }
 
-onUnmounted(() => {
-  runToken += 1;
-});
-
+onUnmounted(() => { runToken += 1; });
 resetTable();
 </script>
 
@@ -210,9 +383,9 @@ resetTable();
   <section class="game-demo game-demo--blackjack">
     <header class="game-hero">
       <div>
-        <span class="game-eyebrow">Playable system demo · hidden information</span>
+        <span class="game-eyebrow">Blackjack · hidden information · special card triggers</span>
         <h2>Midnight House</h2>
-        <p>A complete seeded blackjack table. Read the dealer, manage your bankroll, or hand the seat to a basic-strategy agent.</p>
+        <p>Play recognizable Blackjack with a secondary deck of costly House Favors that alter information, draws, card values, and settlement.</p>
       </div>
       <div class="game-status-pill" :data-active="agentPlaying">{{ phase === 'player' ? (agentPlaying ? 'Agent playing' : 'Your hand') : phase }}</div>
     </header>
@@ -228,9 +401,7 @@ resetTable();
               class="playing-card"
               :class="{ red: card.suit === '♥' || card.suit === '♦', hidden: index === 1 && !revealDealer }"
             >
-              <template v-if="index !== 1 || revealDealer">
-                <b>{{ card.rank }}</b><span>{{ card.suit }}</span><em>{{ card.suit }}</em>
-              </template>
+              <template v-if="index !== 1 || revealDealer"><b>{{ card.rank }}</b><span>{{ card.suit }}</span><em>{{ card.suit }}</em></template>
               <div v-else class="card-back">GAOS</div>
             </div>
           </div>
@@ -241,21 +412,48 @@ resetTable();
 
         <div class="card-zone player-zone">
           <div class="playing-hand">
-            <div
+            <button
               v-for="(card, index) in player"
               :key="`${card.rank}${card.suit}-${index}`"
-              class="playing-card"
-              :class="{ red: card.suit === '♥' || card.suit === '♦' }"
+              class="playing-card player-card"
+              :class="{ red: card.suit === '♥' || card.suit === '♦', 'glass-ace': glassAceIndex === index, targetable: targetingAce }"
+              :disabled="!targetingAce"
+              @click="chooseGlassAce(index)"
             >
-              <b>{{ card.rank }}</b><span>{{ card.suit }}</span><em>{{ card.suit }}</em>
-            </div>
+              <b>{{ glassAceIndex === index ? 'A' : card.rank }}</b><span>{{ card.suit }}</span><em>{{ card.suit }}</em>
+            </button>
           </div>
           <div class="hand-label">Your hand <strong>{{ playerValue }}</strong></div>
         </div>
 
-        <div class="table-bank">
-          <span>Bankroll</span><strong>{{ chips }}</strong><small>chips</small>
+        <div v-if="twistChoices.length" class="twist-choice">
+          <span>Choose one card</span>
+          <button v-for="(card, index) in twistChoices" :key="`${card.rank}-${card.suit}`" :class="{ red: card.suit === '♥' || card.suit === '♦' }" @click="chooseTwistCard(index)">
+            <b>{{ card.rank }}</b><i>{{ card.suit }}</i>
+          </button>
         </div>
+
+        <div class="favor-zone">
+          <div class="favor-head">
+            <div><span>House Favors</span><strong>Play one special card per hand</strong></div>
+            <div class="favor-resource"><span v-for="(full, index) in favorPips" :key="index" :class="{ full }">◆</span><b>{{ favor }}/5</b></div>
+          </div>
+          <div class="favor-hand">
+            <button
+              v-for="card in favorHand"
+              :key="card.kind"
+              class="favor-card"
+              :class="{ exhausted: favorUsed || card.cost > favor }"
+              :disabled="phase !== 'player' || agentPlaying || favorUsed || card.cost > favor || twistChoices.length > 0 || targetingAce"
+              @click="playFavor(card)"
+            >
+              <span class="favor-cost">{{ card.cost }}</span><b>{{ card.glyph }}</b><strong>{{ card.name }}</strong><small>{{ card.text }}</small>
+            </button>
+            <div v-if="favorHand.length < 3" class="favor-discard-slot">DISCARD</div>
+          </div>
+        </div>
+
+        <div class="table-bank"><span>Bankroll</span><strong>{{ chips }}</strong><small>chips</small></div>
 
         <div class="table-actions">
           <template v-if="phase === 'player'">
@@ -268,29 +466,37 @@ resetTable();
       </div>
 
       <aside class="agent-console">
-        <div class="agent-console__head">
-          <span class="agent-orb" :class="{ thinking: agentPlaying || phase === 'dealer' }"></span>
-          <div><strong>Basic-strategy agent</strong><small>Seat view only · no hole card access</small></div>
-        </div>
-        <div class="agent-decision">
-          <span>Latest decision</span>
-          <p>{{ decision }}</p>
-        </div>
+        <div class="agent-console__head"><span class="agent-orb" :class="{ thinking: agentPlaying || phase === 'dealer' }"></span><div><strong>Favor-aware strategy agent</strong><small>Seat view · timing windows · resource value</small></div></div>
+        <div class="agent-decision"><span>Latest decision</span><p>{{ decision }}</p></div>
         <div class="agent-metrics">
-          <div><span>Legal actions</span><strong>{{ legalActions().length }}</strong></div>
-          <div><span>Hands</span><strong>{{ handsPlayed }}</strong></div>
-          <div><span>Wins</span><strong>{{ wins }}</strong></div>
+          <div><span>Legal actions</span><strong>{{ legalActions().length }}</strong></div><div><span>Favor</span><strong>{{ favor }}</strong></div><div><span>Wins</span><strong>{{ wins }}</strong></div>
         </div>
         <div class="game-actions">
           <button class="primary-action" :disabled="phase !== 'player' || agentPlaying" @click="watchAgent">Watch agent</button>
           <button :disabled="phase !== 'player' || agentPlaying" @click="agentStep">Step once</button>
           <button @click="resetTable">Reset table</button>
         </div>
-        <label class="seed-control">
-          <span>Seed</span>
-          <input v-model.number="seed" type="number" min="1" @change="resetTable">
-        </label>
+        <label class="seed-control"><span>Seed</span><input v-model.number="seed" type="number" min="1" @change="resetTable"></label>
       </aside>
     </div>
   </section>
 </template>
+
+<style scoped>
+.blackjack-stage { min-height: 820px; }
+.player-card { font: inherit; text-align:left; cursor:default; }
+.player-card.targetable { cursor:pointer; box-shadow:0 0 0 3px #f1c66d,0 8px 24px rgba(241,198,109,.34); }
+.player-card.glass-ace { border-color:#b8f3ff; box-shadow:0 0 20px rgba(150,230,255,.45); background:linear-gradient(145deg,#efffff,#b8dbe2); }
+.favor-zone { width:min(650px,100%); margin:.45rem auto .7rem; border:1px solid rgba(231,195,123,.2); border-radius:14px; padding:.7rem; background:rgba(5,16,12,.55); }
+.favor-head { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:.6rem; }
+.favor-head span,.favor-head strong { display:block; }.favor-head span { color:var(--game-muted); font-size:.56rem; font-weight:850; letter-spacing:.1em; text-transform:uppercase; }.favor-head strong { margin-top:.12rem; color:var(--game-ink); font-size:.68rem; }
+.favor-resource { display:flex; align-items:center; gap:.18rem; color:rgba(231,195,123,.16); }.favor-resource span.full { color:#f2c76d; filter:drop-shadow(0 0 5px rgba(242,199,109,.4)); }.favor-resource b { margin-left:.35rem; color:var(--game-muted); font-size:.58rem; }
+.favor-hand { display:flex; min-height:108px; justify-content:center; gap:.5rem; }
+.favor-card { position:relative; display:flex; width:31%; max-width:185px; flex-direction:column; align-items:center; border:1px solid rgba(231,195,123,.22); border-radius:10px; padding:.55rem .45rem; color:var(--game-ink); background:linear-gradient(145deg,rgba(231,195,123,.1),transparent 45%),#181b18; cursor:pointer; text-align:center; transition:transform .15s,border-color .15s; }
+.favor-card:hover:not(:disabled) { transform:translateY(-4px); border-color:#edc979; }.favor-card.exhausted { filter:grayscale(.6); opacity:.38; cursor:not-allowed; }
+.favor-card > b { color:#edc979; font-family:Georgia,serif; font-size:1.25rem; line-height:1; }.favor-card strong { margin-top:.3rem; color:var(--game-ink); font-family:Georgia,serif; font-size:.7rem; }.favor-card small { margin-top:.2rem; color:var(--game-muted); font-size:.52rem; line-height:1.3; }
+.favor-cost { position:absolute; left:6px; top:6px; display:grid; width:19px; height:19px; place-items:center; border-radius:50%; color:#21160a; background:#edc979; font-size:.55rem; font-weight:900; }
+.favor-discard-slot { display:grid; width:31%; max-width:185px; place-items:center; border:1px dashed rgba(255,255,255,.12); border-radius:10px; color:rgba(255,255,255,.2); font-size:.56rem; letter-spacing:.12em; }
+.twist-choice { display:flex; align-items:center; justify-content:center; gap:.6rem; margin:.35rem auto; color:var(--game-muted); font-size:.62rem; }.twist-choice button { display:grid; width:48px; height:62px; place-items:center; border:1px solid #fff; border-radius:7px; color:#16181d; background:#f5f1e8; cursor:pointer; }.twist-choice button.red { color:#b62638; }.twist-choice b { font-family:Georgia,serif; font-size:1rem; }.twist-choice i { font-style:normal; }
+@media(max-width:620px){.favor-hand{gap:.25rem}.favor-card{padding:.5rem .2rem}.favor-card small{display:none}.favor-head{align-items:flex-start;flex-direction:column}.blackjack-stage{min-height:760px}}
+</style>

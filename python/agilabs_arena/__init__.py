@@ -21,6 +21,20 @@ from .agent import (
     evaluate_agent_episodes,
     run_agent_episode,
 )
+from .replay import (
+    GAOS_REPLAY_DERIVED_SEEDS,
+    GAOS_REPLAY_EXTENSION,
+    GAOS_REPLAY_FORMAT_ID,
+    GAOS_REPLAY_FORMAT_VERSION,
+    GAOS_REPLAY_MANIFEST_FORMAT,
+    GAOS_REPLAY_MIME,
+    ReplayFormatError,
+    canonical_json,
+    parse_replay_jsonl,
+    run_level_seed,
+    serialize_replay_jsonl,
+    validate_replay_artifact,
+)
 
 __all__ = [
     "PROTOCOL_ID",
@@ -42,5 +56,17 @@ __all__ = [
     "Turn",
     "parse_turn_result",
     "parse_session_binding",
+    "GAOS_REPLAY_FORMAT_ID",
+    "GAOS_REPLAY_FORMAT_VERSION",
+    "GAOS_REPLAY_MIME",
+    "GAOS_REPLAY_EXTENSION",
+    "GAOS_REPLAY_DERIVED_SEEDS",
+    "GAOS_REPLAY_MANIFEST_FORMAT",
+    "ReplayFormatError",
+    "run_level_seed",
+    "canonical_json",
+    "validate_replay_artifact",
+    "parse_replay_jsonl",
+    "serialize_replay_jsonl",
 ]
-__version__ = "0.12.0"
+__version__ = "0.17.0"

@@ -20,7 +20,7 @@ npm install @yugao-gaos/turn-based-grid-sdk
 You can also pin a repository release without configuring the package registry:
 
 ```sh
-npm install 'git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.16.0'
+npm install 'git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.17.0'
 ```
 
 ## Choose the narrowest entry point
