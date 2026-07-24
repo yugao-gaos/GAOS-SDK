@@ -18,7 +18,19 @@ type TrajectorySegment = {
   to: Point;
   ghost: boolean;
 };
-type Motion = 'move' | 'attack' | 'guard';
+type Motion = 'move' | 'attack' | 'cast' | 'guard' | 'collision';
+type CombatAnimation = {
+  id: string;
+  kind: 'projectile' | 'melee' | 'tether';
+  sourceId: string;
+  from: Point;
+  to: Point;
+};
+type MovementResolution = {
+  blockHero: boolean;
+  blockedEnemyIds: Set<string>;
+  collisionCells: Set<number>;
+};
 
 const size = 6;
 const maxActions = 3;
@@ -51,7 +63,11 @@ const autoplay = ref(false);
 const activeBeat = ref<number | null>(null);
 const heroMotion = ref<Motion | null>(null);
 const enemyMotions = ref<Record<string, Motion>>({});
-const impactCells = ref(new Set<number>());
+const combatAnimations = ref<CombatAnimation[]>([]);
+const hitEnemyIds = ref(new Set<string>());
+const delayedHitEnemyIds = ref(new Set<string>());
+const heroHit = ref(false);
+const collisionCells = ref(new Set<number>());
 const message = ref('Program up to three actions, preview the paths, then commit.');
 const decision = ref('Waiting for a plan');
 const lastEvent = ref('Entered the vault');
@@ -209,52 +225,8 @@ function applyProjectedPlan(state: ProjectedState, plan: Plan, beat: number) {
   }
 }
 
-function projectedEnemyIntent(enemy: ProjectedEnemy, state: ProjectedState) {
-  if (manhattan(enemy, state.hero) === 1) {
-    return { kind: 'attack' as const, target: { ...state.hero } };
-  }
-  const candidates = lineDirections()
-    .map(([dx, dy]) => ({ x: enemy.x + dx, y: enemy.y + dy }))
-    .filter((point) => {
-      const occupant = projectedEnemyAt(point, state.enemies);
-      return inside(point)
-        && !terrainBlocked(point)
-        && !barrels.value.has(indexAt(point))
-        && (!occupant || occupant.id === enemy.id);
-    });
-  candidates.sort((a, b) => manhattan(a, state.hero) - manhattan(b, state.hero) || indexAt(a) - indexAt(b));
-  return { kind: 'move' as const, target: candidates[0] ?? { x: enemy.x, y: enemy.y } };
-}
-
-function applyProjectedEnemyHazard(state: ProjectedState, enemy: ProjectedEnemy) {
-  const index = indexAt(enemy);
-  if (pits.value.has(index)) {
-    state.enemies = state.enemies.filter((item) => item.id !== enemy.id);
-  } else if (spikes.value.has(index)) {
-    enemy.hp -= 2;
-    if (enemy.hp <= 0) state.enemies = state.enemies.filter((item) => item.id !== enemy.id);
-  }
-}
-
 function applyProjectedBeat(state: ProjectedState, plan: Plan, beat: number) {
-  const intents = state.enemies.map((enemy) => ({
-    snapshot: { ...enemy, origin: { ...enemy.origin } },
-    intent: projectedEnemyIntent(enemy, state),
-  }));
   applyProjectedPlan(state, plan, beat);
-  for (const { snapshot, intent } of intents) {
-    const enemy = state.enemies.find((item) => item.id === snapshot.id);
-    if (!enemy || enemy.x !== snapshot.x || enemy.y !== snapshot.y || intent.kind === 'attack') continue;
-    const occupant = projectedEnemyAt(intent.target, state.enemies);
-    if (terrainBlocked(intent.target)
-      || barrels.value.has(indexAt(intent.target))
-      || (occupant && occupant.id !== enemy.id)) continue;
-    if (intent.target.x === enemy.x && intent.target.y === enemy.y) continue;
-    enemy.x = intent.target.x;
-    enemy.y = intent.target.y;
-    enemy.movedAt = beat;
-    applyProjectedEnemyHazard(state, enemy);
-  }
 }
 
 function simulatePlans(plans: Plan[]) {
@@ -426,7 +398,11 @@ function reset() {
   activeBeat.value = null;
   heroMotion.value = null;
   enemyMotions.value = {};
-  impactCells.value = new Set();
+  combatAnimations.value = [];
+  hitEnemyIds.value = new Set();
+  delayedHitEnemyIds.value = new Set();
+  heroHit.value = false;
+  collisionCells.value = new Set();
   spawnRoom(1);
   message.value = 'Program up to three actions, preview the paths, then commit.';
   decision.value = 'Waiting for a plan';
@@ -551,10 +527,10 @@ function pushEnemy(enemy: Enemy, dx: number, dy: number): boolean {
   return true;
 }
 
-function executePlayer(plan: Plan) {
+function executePlayer(plan: Plan, blockedByCollision = false) {
   const card = plan.card.kind;
   if (card === 'step' || card === 'vault') {
-    if (!isBlocked(plan.target, false)) {
+    if (!blockedByCollision && !isBlocked(plan.target, false)) {
       hero.value = { ...hero.value, ...plan.target };
       lastEvent.value = `${plan.card.name} reached ${String.fromCharCode(65 + plan.target.x)}${plan.target.y + 1}.`;
     }
@@ -594,7 +570,34 @@ function enemyIntent(enemy: Enemy) {
   return { kind: 'move' as const, target: candidates[0] ?? { x: enemy.x, y: enemy.y } };
 }
 
-function executeEnemies(intents: EnemyIntent[]) {
+function resolveMovementConflicts(plan: Plan, intents: EnemyIntent[]): MovementResolution {
+  const proposals = new Map<number, Array<{ kind: 'hero' | 'enemy'; id: string }>>();
+  const addProposal = (target: Point, proposal: { kind: 'hero' | 'enemy'; id: string }) => {
+    const index = indexAt(target);
+    proposals.set(index, [...(proposals.get(index) ?? []), proposal]);
+  };
+  if ((plan.card.kind === 'step' || plan.card.kind === 'vault') && !isBlocked(plan.target, false)) {
+    addProposal(plan.target, { kind: 'hero', id: 'hero' });
+  }
+  for (const { enemy, intent } of intents) {
+    if (intent.kind !== 'move' || (intent.target.x === enemy.x && intent.target.y === enemy.y)) continue;
+    addProposal(intent.target, { kind: 'enemy', id: enemy.id });
+  }
+  const blockedEnemyIds = new Set<string>();
+  const collisionCells = new Set<number>();
+  let blockHero = false;
+  for (const [index, contenders] of proposals) {
+    if (contenders.length < 2) continue;
+    collisionCells.add(index);
+    for (const contender of contenders) {
+      if (contender.kind === 'hero') blockHero = true;
+      else blockedEnemyIds.add(contender.id);
+    }
+  }
+  return { blockHero, blockedEnemyIds, collisionCells };
+}
+
+function executeEnemies(intents: EnemyIntent[], blockedEnemyIds = new Set<string>()) {
   for (const { enemy: snapshot, intent } of intents) {
     const enemy = enemies.value.find((item) => item.id === snapshot.id);
     if (!enemy || hero.value.hp <= 0) continue;
@@ -610,7 +613,7 @@ function executeEnemies(intents: EnemyIntent[]) {
         hp: Math.max(0, hero.value.hp - (enemy.damage - blockedDamage)),
       };
       lastEvent.value = `${enemy.name} attacked${blockedDamage ? ` · ${blockedDamage} blocked` : ''}.`;
-    } else if (intent.kind === 'move' && !isBlocked(intent.target, false)) {
+    } else if (intent.kind === 'move' && !blockedEnemyIds.has(enemy.id) && !isBlocked(intent.target, false)) {
       enemies.value = enemies.value.map((item) => item.id === enemy.id ? { ...item, ...intent.target } : item);
       const moved = enemies.value.find((item) => item.id === enemy.id);
       if (moved) applyHazard(moved);
@@ -619,21 +622,86 @@ function executeEnemies(intents: EnemyIntent[]) {
   }
 }
 
-function prepareAnimations(plan: Plan, intents: EnemyIntent[]) {
+function animationCenter(point: Point) {
+  return { x: point.x + 0.5, y: point.y + 0.5 };
+}
+
+function meleeSlashCoordinates(animation: CombatAnimation) {
+  const target = animationCenter(animation.to);
+  const dx = animation.to.x - animation.from.x;
+  const dy = animation.to.y - animation.from.y;
+  const length = Math.hypot(dx, dy) || 1;
+  const perpendicular = { x: -dy / length, y: dx / length };
+  return {
+    x1: target.x - perpendicular.x * 0.32,
+    y1: target.y - perpendicular.y * 0.32,
+    x2: target.x + perpendicular.x * 0.32,
+    y2: target.y + perpendicular.y * 0.32,
+  };
+}
+
+function attackLungeStyle(sourceId: string) {
+  const animation = combatAnimations.value.find((item) => item.sourceId === sourceId && item.kind === 'melee');
+  if (!animation) return {};
+  return {
+    '--strike-x': `${Math.sign(animation.to.x - animation.from.x) * 12}px`,
+    '--strike-y': `${Math.sign(animation.to.y - animation.from.y) * 12}px`,
+  };
+}
+
+function prepareAnimations(plan: Plan, intents: EnemyIntent[], movement: MovementResolution) {
   heroMotion.value = plan.card.kind === 'step' || plan.card.kind === 'vault'
-    ? 'move'
-    : plan.card.kind === 'guard' ? 'guard' : 'attack';
-  enemyMotions.value = Object.fromEntries(intents.map(({ enemy, intent }) => [enemy.id, intent.kind]));
-  const impacts = new Set<number>();
-  if (plan.card.kind === 'bash' || plan.card.kind === 'hook' || plan.card.kind === 'bolt') impacts.add(indexAt(plan.target));
-  intents.filter(({ intent }) => intent.kind === 'attack').forEach(({ intent }) => impacts.add(indexAt(intent.target)));
-  impactCells.value = impacts;
+    ? movement.blockHero ? 'collision' : 'move'
+    : plan.card.kind === 'guard'
+      ? 'guard'
+      : plan.card.kind === 'bash' ? 'attack' : 'cast';
+  enemyMotions.value = Object.fromEntries(intents.map(({ enemy, intent }) => [
+    enemy.id,
+    intent.kind === 'move' && movement.blockedEnemyIds.has(enemy.id) ? 'collision' : intent.kind,
+  ]));
+  collisionCells.value = new Set(movement.collisionCells);
+  const animations: CombatAnimation[] = [];
+  const hitIds = new Set<string>();
+  const delayedIds = new Set<string>();
+  const playerTarget = enemyAt(plan.target);
+  if (plan.card.kind === 'bash' || plan.card.kind === 'hook' || plan.card.kind === 'bolt') {
+    const kind = plan.card.kind === 'bolt' ? 'projectile' : plan.card.kind === 'hook' ? 'tether' : 'melee';
+    animations.push({
+      id: `${activeBeat.value ?? 0}-player-${plan.card.kind}`,
+      kind,
+      sourceId: 'hero',
+      from: { x: hero.value.x, y: hero.value.y },
+      to: { ...plan.target },
+    });
+    if (playerTarget) {
+      hitIds.add(playerTarget.id);
+      if (kind !== 'melee') delayedIds.add(playerTarget.id);
+    }
+  }
+  for (const { enemy, intent } of intents) {
+    if (intent.kind !== 'attack') continue;
+    animations.push({
+      id: `${activeBeat.value ?? 0}-${enemy.id}-melee`,
+      kind: 'melee',
+      sourceId: enemy.id,
+      from: { x: enemy.x, y: enemy.y },
+      to: { ...intent.target },
+    });
+  }
+  combatAnimations.value = animations;
+  hitEnemyIds.value = hitIds;
+  delayedHitEnemyIds.value = delayedIds;
+  heroHit.value = intents.some(({ intent }) => intent.kind === 'attack');
 }
 
 function clearAnimations() {
   heroMotion.value = null;
   enemyMotions.value = {};
-  impactCells.value = new Set();
+  combatAnimations.value = [];
+  hitEnemyIds.value = new Set();
+  delayedHitEnemyIds.value = new Set();
+  heroHit.value = false;
+  collisionCells.value = new Set();
 }
 
 async function commitTurn() {
@@ -647,15 +715,24 @@ async function commitTurn() {
   for (let beat = 0; beat < plans.length && token === runToken; beat += 1) {
     const plan = plans[beat];
     const intents: EnemyIntent[] = enemies.value.map((enemy) => ({ enemy: { ...enemy }, intent: enemyIntent(enemy) }));
+    const movement = resolveMovementConflicts(plan, intents);
     activeBeat.value = beat;
     clearAnimations();
     await nextTick();
-    prepareAnimations(plan, intents);
+    prepareAnimations(plan, intents, movement);
     message.value = `Beat ${beat + 1}: ${plan.card.name} and every enemy response resolve together.`;
-    executePlayer(plan);
-    executeEnemies(intents);
+    executePlayer(plan, movement.blockHero);
+    executeEnemies(intents, movement.blockedEnemyIds);
+    if (movement.collisionCells.size) {
+      const cells = [...movement.collisionCells].map((index) => {
+        const point = pointAt(index);
+        return `${String.fromCharCode(65 + point.x)}${point.y + 1}`;
+      });
+      lastEvent.value = `Movement collision at ${cells.join(', ')}. Every contender held position.`;
+      message.value = lastEvent.value;
+    }
     await nextTick();
-    await wait(520);
+    await wait(620);
     if (hero.value.hp <= 0 || enemies.value.length === 0) break;
   }
   if (token !== runToken) return;
@@ -752,7 +829,7 @@ reset();
       <div>
         <span class="game-eyebrow">Three-beat lockstep combat · chamber {{ room }} of 3</span>
         <h2>Cinder Vault</h2>
-        <p>Program up to three actions, preview every path, then watch each beat resolve simultaneously against enemy responses.</p>
+        <p>Program up to three actions, preview your paths, then watch each beat resolve simultaneously against unknown enemy responses.</p>
       </div>
       <div class="game-status-pill" :data-active="autoplay">{{ won ? 'Run won' : defeated ? 'Run lost' : `Turn ${turn}` }}</div>
     </header>
@@ -809,6 +886,59 @@ reset();
               vector-effect="non-scaling-stroke"
             />
           </svg>
+          <svg v-if="resolving && combatAnimations.length" class="combat-animation-layer" viewBox="0 0 6 6" aria-hidden="true">
+            <g v-for="animation in combatAnimations" :key="animation.id">
+              <line
+                v-if="animation.kind === 'tether'"
+                class="combat-tether"
+                :x1="animationCenter(animation.from).x"
+                :y1="animationCenter(animation.from).y"
+                :x2="animationCenter(animation.to).x"
+                :y2="animationCenter(animation.to).y"
+                pathLength="1"
+              />
+              <line
+                v-else-if="animation.kind === 'melee'"
+                class="combat-melee-slash"
+                v-bind="meleeSlashCoordinates(animation)"
+                pathLength="1"
+              />
+              <template v-else>
+                <line
+                  class="combat-projectile-trail"
+                  :x1="animationCenter(animation.from).x"
+                  :y1="animationCenter(animation.from).y"
+                  :x2="animationCenter(animation.to).x"
+                  :y2="animationCenter(animation.to).y"
+                />
+                <circle
+                  class="combat-projectile-halo"
+                  :cx="animationCenter(animation.from).x"
+                  :cy="animationCenter(animation.from).y"
+                  r=".22"
+                >
+                  <animate attributeName="cx" :from="animationCenter(animation.from).x" :to="animationCenter(animation.to).x" dur=".34s" fill="freeze" />
+                  <animate attributeName="cy" :from="animationCenter(animation.from).y" :to="animationCenter(animation.to).y" dur=".34s" fill="freeze" />
+                </circle>
+                <circle
+                  class="combat-projectile"
+                  :cx="animationCenter(animation.from).x"
+                  :cy="animationCenter(animation.from).y"
+                  r=".12"
+                >
+                  <animate attributeName="cx" :from="animationCenter(animation.from).x" :to="animationCenter(animation.to).x" dur=".34s" fill="freeze" />
+                  <animate attributeName="cy" :from="animationCenter(animation.from).y" :to="animationCenter(animation.to).y" dur=".34s" fill="freeze" />
+                </circle>
+              </template>
+              <circle
+                class="combat-hit-burst"
+                :class="[`hit-${animation.kind}`, { delayed: animation.kind !== 'melee' }]"
+                :cx="animationCenter(animation.to).x"
+                :cy="animationCenter(animation.to).y"
+                r=".2"
+              />
+            </g>
+          </svg>
           <button
             v-for="index in size * size"
             :key="index"
@@ -827,7 +957,7 @@ reset();
               'preview-attack': previewAt(index - 1)?.kind === 'attack',
               'preview-guard': previewAt(index - 1)?.kind === 'guard',
               'preview-ghost': previewAt(index - 1)?.ghost,
-              impact: impactCells.has(index - 1),
+              'movement-collision': collisionCells.has(index - 1),
             }"
             @click="chooseTile(pointAt(index - 1))"
             @mouseenter="hoveredIndex = targetCells.has(index - 1) ? index - 1 : null"
@@ -842,8 +972,9 @@ reset();
               v-if="indexAt(hero) === index - 1"
               class="rogue-actor wayfarer token-actor"
               :class="heroMotion ? `motion-${heroMotion}` : ''"
+              :style="attackLungeStyle('hero')"
             >
-              <img src="/images/cinder-vault/wayfarer.webp" alt="Wayfarer">
+              <img src="/images/cinder-vault/wayfarer.webp" alt="Wayfarer" :class="{ 'hit-react': heroHit }">
               <i v-if="hero.shield">{{ hero.shield }}</i>
             </span>
             <span
@@ -853,8 +984,16 @@ reset();
                 { elite: isElite(enemyAt(pointAt(index - 1))!) },
                 enemyMotions[enemyAt(pointAt(index - 1))!.id] ? `motion-${enemyMotions[enemyAt(pointAt(index - 1))!.id]}` : '',
               ]"
+              :style="attackLungeStyle(enemyAt(pointAt(index - 1))!.id)"
             >
-              <img :src="tokenFor(enemyAt(pointAt(index - 1))!)" :alt="enemyAt(pointAt(index - 1))!.name">
+              <img
+                :src="tokenFor(enemyAt(pointAt(index - 1))!)"
+                :alt="enemyAt(pointAt(index - 1))!.name"
+                :class="{
+                  'hit-react': hitEnemyIds.has(enemyAt(pointAt(index - 1))!.id),
+                  'hit-delayed': delayedHitEnemyIds.has(enemyAt(pointAt(index - 1))!.id),
+                }"
+              >
               <i>{{ enemyAt(pointAt(index - 1))!.hp }}</i>
             </span>
             <span v-else class="environment-mark">{{ tileLabel(index - 1) }}</span>
@@ -922,13 +1061,13 @@ reset();
       <div>
         <span class="game-eyebrow">Quick guide</span>
         <h3 id="cinder-how-to">How to play</h3>
-        <p>Build a three-beat plan, check the colored trajectory on the board, then commit. Enemy responses stay hidden until every entity resolves together on each beat.</p>
+        <p>Build a three-beat plan, check your colored trajectory, then commit. Enemy responses stay hidden until every entity resolves together on each beat.</p>
       </div>
       <ol>
         <li><b>Choose a card.</b><span>Legal targets glow. Hover a target to preview its path before adding it.</span></li>
-        <li><b>Program up to three beats.</b><span>Solid blue arrows show movement. Dashed orange arrows show attacks. Ghost tokens show projected positions and remain valid future targets.</span></li>
-        <li><b>Plan for uncertainty.</b><span>Enemy movement and attacks are hidden until the current beat starts resolving.</span></li>
-        <li><b>Commit the turn.</b><span>Your action and every enemy response animate simultaneously, one beat at a time.</span></li>
+        <li><b>Program up to three beats.</b><span>Solid blue arrows show movement. Dashed orange arrows show attacks. Ghosts appear only for enemies you force to move with Bash or Hook.</span></li>
+        <li><b>Plan for uncertainty.</b><span>Normal enemy movement is not predicted. It may change positions or invalidate a later target during execution.</span></li>
+        <li><b>Commit the turn.</b><span>Actions resolve simultaneously. If multiple movers choose the same tile, they collide and all remain in place.</span></li>
       </ol>
       <div class="hazard-legend">
         <span><i class="legend-spike"></i><b>Spikes</b> deal damage</span>
@@ -963,10 +1102,19 @@ reset();
 #move-arrow path{fill:#6dd8e5}
 #attack-arrow path{fill:#ff925f}
 #displacement-arrow path{fill:#e5a7ff}
+.combat-animation-layer{position:absolute;z-index:7;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+.combat-projectile-trail{stroke:rgba(255,136,72,.42);stroke-width:.06;stroke-linecap:round;stroke-dasharray:.08 .16;animation:projectile-trail .48s ease-out both}
+.combat-projectile-halo{fill:rgba(255,91,43,.3);filter:drop-shadow(0 0 7px #ff5e35)}
+.combat-projectile{fill:#fff3b0;stroke:#ff7745;stroke-width:.055;filter:drop-shadow(0 0 3px #fff) drop-shadow(0 0 7px #ff5e35)}
+.combat-tether{fill:none;stroke:#e5a7ff;stroke-width:.075;stroke-linecap:round;stroke-dasharray:1;animation:tether-snap .5s ease-in-out both}
+.combat-melee-slash{fill:none;stroke:#fff0c2;stroke-width:.11;stroke-linecap:round;stroke-dasharray:1;filter:drop-shadow(0 0 .1px #ff784e);animation:melee-slash .34s ease-out both}
+.combat-hit-burst{fill:none;stroke:#ff7048;stroke-width:.07;transform-box:fill-box;transform-origin:center;animation:combat-hit .3s .08s ease-out both}
+.combat-hit-burst.hit-tether{stroke:#e5a7ff}.combat-hit-burst.delayed{animation-delay:.3s}
 .rogue-cell.preview-move{background:radial-gradient(circle,rgba(95,203,219,.16),transparent 68%),#202c31}
 .rogue-cell.preview-attack{background:radial-gradient(circle,rgba(255,137,83,.16),transparent 68%),#34231f}
 .rogue-cell.preview-guard{background:radial-gradient(circle,rgba(118,180,230,.2),transparent 68%),#202a36}
 .rogue-cell.preview-ghost{filter:saturate(.75)}
+.rogue-cell.movement-collision::after{position:absolute;z-index:7;inset:20%;display:grid;place-items:center;border:2px solid #ffd07d;border-radius:50%;color:#fff3c7;background:rgba(117,51,42,.72);box-shadow:0 0 20px rgba(255,112,72,.9);content:'×';font-size:1.2rem;font-weight:950;pointer-events:none;animation:collision-burst .58s ease-out both}
 .trajectory-marker{position:absolute;z-index:3;left:4px;top:4px;pointer-events:none;color:var(--trajectory-color)}
 .trajectory-marker strong{display:grid;width:22px;height:22px;place-items:center;border:2px solid #17131b;border-radius:50%;color:#16131a;background:var(--trajectory-color);box-shadow:0 0 12px color-mix(in srgb,var(--trajectory-color),transparent 35%);font-size:.62rem}
 .trajectory-move{--trajectory-color:#6dd8e5;color:var(--trajectory-color)}.trajectory-attack{--trajectory-color:#ff925f;color:var(--trajectory-color)}.trajectory-guard{--trajectory-color:#8bbcf0;color:var(--trajectory-color)}.trajectory-marker.ghost{opacity:.58}
@@ -980,8 +1128,10 @@ reset();
 .rogue-actor em{position:absolute;z-index:5;left:-8px;top:-8px;display:grid;width:22px;height:22px;place-items:center;transform:none;border-radius:50%;color:#24131c;background:#ffc778;font-size:.65rem;font-style:normal}
 .token-actor.motion-move{animation:token-hop .52s cubic-bezier(.2,.9,.25,1)}
 .token-actor.motion-attack{animation:token-strike .52s ease-out}
+.token-actor.motion-cast{animation:token-cast .52s ease-out}
 .token-actor.motion-guard{animation:token-guard .52s ease-out}
-.rogue-cell.impact::after{position:absolute;z-index:4;inset:8%;pointer-events:none;border:3px solid #ff8c58;border-radius:50%;box-shadow:0 0 20px #ef633f;content:'';animation:impact-ring .52s ease-out both}
+.token-actor.motion-collision{animation:token-collision .58s ease-out}
+.token-actor img.hit-react{animation:token-hit .32s .08s ease-out both}.token-actor img.hit-react.hit-delayed{animation-delay:.3s}
 .plan-controls{display:flex;align-items:center;justify-content:flex-end;gap:.5rem;margin-top:.65rem}
 .plan-controls button{border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:.58rem .85rem;color:var(--game-muted);background:#28202c;cursor:pointer;font-size:.62rem;font-weight:800}
 .plan-controls button:disabled{cursor:not-allowed;opacity:.35}
@@ -998,11 +1148,18 @@ reset();
 .hazard-legend i{display:block;width:12px;height:12px;border-radius:3px}.legend-spike{background:#8d4149}.legend-pit{background:#08060b;box-shadow:inset 0 0 0 2px #392a3d}.legend-barrel{background:#a84d2b}.legend-plate{box-shadow:inset 0 0 0 2px #c39050}
 @keyframes trajectory-dash{50%{filter:brightness(1.3)}}
 @keyframes attack-dashes{to{stroke-dashoffset:-14}}
+@keyframes projectile-trail{0%{opacity:0;stroke-dashoffset:.5}35%{opacity:.85}100%{opacity:0;stroke-dashoffset:-.5}}
+@keyframes tether-snap{0%{opacity:0;stroke-dashoffset:1}35%,70%{opacity:1;stroke-dashoffset:0}100%{opacity:0;stroke-dashoffset:-1}}
+@keyframes melee-slash{0%{opacity:0;stroke-dashoffset:1}35%{opacity:1}100%{opacity:0;stroke-dashoffset:-1}}
+@keyframes combat-hit{0%{opacity:0;transform:scale(.35)}35%{opacity:1}100%{opacity:0;transform:scale(3.1)}}
 @keyframes phantom-pulse{50%{opacity:.78;filter:saturate(.9) brightness(1.3)}}
 @keyframes token-hop{0%{transform:translateY(12px) scale(.78);opacity:.25}55%{transform:translateY(-7px) scale(1.08)}100%{transform:none;opacity:1}}
-@keyframes token-strike{0%,100%{transform:none}38%{transform:scale(1.18) rotate(-8deg);filter:brightness(1.35)}70%{transform:scale(.94) rotate(3deg)}}
+@keyframes token-strike{0%,100%{transform:none}35%{transform:translate(var(--strike-x,0),var(--strike-y,0)) scale(1.1);filter:brightness(1.35)}68%{transform:scale(.96)}}
+@keyframes token-cast{0%,100%{transform:none;filter:none}35%{transform:scale(.88);filter:brightness(1.45) drop-shadow(0 0 10px #ff8754)}58%{transform:scale(1.08);filter:brightness(1.2)}}
+@keyframes token-hit{0%,100%{transform:none;filter:none}28%{transform:translateX(-6px) rotate(-5deg);filter:brightness(1.8) saturate(.6)}55%{transform:translateX(4px) rotate(3deg)}}
 @keyframes token-guard{0%{transform:scale(.78)}45%{transform:scale(1.16);box-shadow:0 0 28px rgba(108,190,236,.8)}100%{transform:none}}
-@keyframes impact-ring{0%{transform:scale(.3);opacity:0}40%{opacity:1}100%{transform:scale(1.35);opacity:0}}
+@keyframes token-collision{0%,100%{transform:none}28%{transform:translateY(-6px) scale(.94);filter:brightness(1.45)}48%{transform:translateY(3px) scale(1.04)}68%{transform:translateY(-2px)}}
+@keyframes collision-burst{0%{transform:scale(.3) rotate(-20deg);opacity:0}35%{transform:scale(1.12);opacity:1}100%{transform:scale(.9) rotate(8deg);opacity:0}}
 @media(max-width:620px){
   .beat-ribbon{padding:.6rem}
   .beat-ribbon span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
