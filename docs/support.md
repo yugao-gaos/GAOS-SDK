@@ -30,8 +30,9 @@ identifiers throughout the v0.x line so existing installations, import maps,
 release URLs, and automation do not break.
 
 Those identifiers do not describe the current feature boundary. The `./engine`
-entry point is a genre-neutral tabletop mechanism suite; spatial grids are one
-optional family. Neutral names such as `TurnReducer`, `solveLevel`, and
+entry point is a genre-neutral game-mechanism suite; tabletop and spatial-grid
+games are supported application families, not product boundaries. Neutral
+names such as `TurnReducer`, `solveLevel`, and
 `recheckTranscript` are canonical. Deprecated `Grid*` compatibility aliases
 remain scheduled for the separate v1.0 boundary, where package naming will also
 be reconsidered.

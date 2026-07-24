@@ -3,7 +3,7 @@
 We used **OpenAI GPT-5.6 Sol** as a production collaborator across the full
 development loop: concepting, asset direction, engineering, review, publishing,
 and playtesting. The result is Gaming AGI Open SDK—now a composable
-deterministic tabletop mechanism suite—and
+SDK for deterministic, verifiable games—and
 [Zonoid](https://zonoid.ai), its first game and a live, sign-in-gated preview.
 
 This was not a one-prompt generation process. Sol worked through bounded tasks,

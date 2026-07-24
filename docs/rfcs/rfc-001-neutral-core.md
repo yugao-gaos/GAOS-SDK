@@ -114,7 +114,7 @@ overload aliases.
 ## Sequential turn discipline and turn order
 
 Sequential play — one seat acts per turn, everyone else waits — is the most
-common tabletop cadence and gets first-class support here (the simultaneous
+common turn-based cadence and gets first-class support here (the simultaneous
 and high-frequency cadences are the same collection model with different
 participation; see Appendix A.3). v0.12 has no seat-rotation logic because
 its reference consumer is single-seat; multi-seat sequential games need a

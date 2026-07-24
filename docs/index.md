@@ -3,7 +3,7 @@ layout: home
 
 hero:
   name: Gaming AGI Open SDK
-  tagline: A deterministic tabletop toolkit for games as benchmarks for human and AI agents.
+  tagline: A deterministic game SDK for benchmarks where humans and AI agents play by the same rules.
   actions:
     - theme: brand
       text: Start building
@@ -35,8 +35,8 @@ features:
   ></iframe>
 </div>
 
-**Deterministic tabletop mechanisms and multiplayer infrastructure for
-agent-ready games.**
+**Deterministic game mechanisms and multiplayer infrastructure for agent-ready
+games.**
 
 ## Our mission
 
@@ -85,7 +85,7 @@ concrete legal actions, validates the agent's choice, applies the injected
 reducer at each recorded tick, and returns the result with transcript-ready
 metrics.
 
-## A tabletop mechanism suite
+## A composable game SDK
 
 <div class="mechanism-grid">
   <a class="mechanism-card" href="./mechanisms/zones-and-card-play">
@@ -104,7 +104,7 @@ metrics.
     <p>Per-seat views, hidden hands, independent identity and order visibility, fog-of-war, teams, revelations, spectators, and leak checks.</p>
   </a>
   <a class="mechanism-card" href="./mechanisms/locations-and-layouts">
-    <span class="mechanism-kicker">Tabletop geometry</span>
+    <span class="mechanism-kicker">Spatial layouts</span>
     <h3>Layouts and locations</h3>
     <p>Stable cross-container addresses plus square, axial-hex, directed-graph, multi-board, pathfinding, line-of-sight, and keyed movement support.</p>
   </a>

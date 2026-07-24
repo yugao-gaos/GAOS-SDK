@@ -23,6 +23,33 @@
   --vp-home-hero-name-background: linear-gradient(120deg, #b7adff 15%, #71c9df 85%);
 }
 
+/* Keep direct social links visible in the desktop header instead of moving
+   them into VitePress's compact "extra navigation" menu. */
+@media (min-width: 820px) {
+  .VPNavBarAppearance,
+  .VPNavBarSocialLinks {
+    display: flex !important;
+    align-items: center;
+  }
+
+  .VPNavBarExtra {
+    display: none !important;
+  }
+}
+
+@media (min-width: 820px) and (max-width: 959px) {
+  .VPNavBarSearch .DocSearch-Button-Placeholder,
+  .VPNavBarSearch .DocSearch-Button-Keys {
+    display: none !important;
+  }
+
+  .VPNavBarSearch .DocSearch-Button {
+    width: 40px;
+    padding: 0 10px;
+    justify-content: center;
+  }
+}
+
 .VPHomeHero .text {
   max-width: 780px;
   letter-spacing: -0.025em;
@@ -513,6 +540,106 @@
 .gem-4 .gem-shape { background: linear-gradient(135deg, #e6b2ff, #6d35b5 68%); border-radius: 50%; }
 .gem-5 .gem-shape { background: linear-gradient(135deg, #f6fdff, #72c4db 68%); clip-path: polygon(50% 0, 62% 34%, 93% 25%, 70% 50%, 93% 75%, 62% 66%, 50% 100%, 38% 66%, 7% 75%, 30% 50%, 7% 25%, 38% 34%); }
 
+.human-play-panel {
+  width: min(560px, 100%);
+  margin: 1rem auto 0;
+  border: 1px solid var(--game-line);
+  border-radius: 14px;
+  padding: 0.9rem;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.human-play-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.human-play-head span,
+.human-play-head strong {
+  display: block;
+}
+
+.human-play-head span {
+  color: var(--game-muted);
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.human-play-head strong {
+  margin-top: 0.15rem;
+  color: var(--game-ink);
+  font-size: 0.76rem;
+}
+
+.human-control-button {
+  flex: 0 0 auto;
+  min-height: 34px;
+  border: 1px solid var(--game-line);
+  border-radius: 999px;
+  padding: 0 0.8rem;
+  color: var(--game-ink);
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+
+.human-control-button:hover:not(:disabled) {
+  border-color: var(--game-accent);
+}
+
+.human-control-button.active:disabled {
+  border-color: rgba(109, 227, 194, 0.26);
+  color: #8bf5d5;
+  background: rgba(54, 184, 148, 0.1);
+  cursor: default;
+  opacity: 1;
+}
+
+.human-play-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin: 0.85rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.human-play-steps li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--game-muted);
+  font-size: 0.64rem;
+  line-height: 1.35;
+}
+
+.human-play-steps b {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  color: #17130b;
+  background: var(--game-accent);
+  font-size: 0.62rem;
+}
+
+.human-play-panel .game-message {
+  min-height: 0;
+  margin: 0.85rem 0 0;
+  border-top: 1px solid var(--game-line);
+  padding-top: 0.7rem;
+  text-align: left;
+}
+
 .game-message {
   min-height: 1.5rem;
   margin-top: 1rem;
@@ -543,9 +670,10 @@
 }
 
 .table-bank {
-  position: absolute;
-  top: 1.5rem;
-  left: 2rem;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  margin: 0.15rem 0 0.6rem;
   color: var(--game-muted);
   font-size: 0.65rem;
   letter-spacing: 0.08em;
@@ -1284,6 +1412,15 @@
 
   .gem-cell {
     border-radius: 8px;
+  }
+
+  .human-play-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .human-play-steps {
+    grid-template-columns: 1fr;
   }
 }
 

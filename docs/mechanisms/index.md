@@ -1,7 +1,7 @@
 # Mechanism reference
 
 The `./engine` package is a set of deterministic, product-neutral building
-blocks for tabletop games. Each page in this section describes one
+blocks for games. Each page in this section describes one
 mechanism family: the state it expects, the ordering it guarantees, the policy
 the product must inject, and the edge cases an integration should test.
 

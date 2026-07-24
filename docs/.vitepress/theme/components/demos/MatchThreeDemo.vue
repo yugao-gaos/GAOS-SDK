@@ -3,38 +3,95 @@ import { computed, onUnmounted, ref } from 'vue';
 import { createRng, wait } from './game-utils';
 
 type Swap = { a: number; b: number; value: number };
+type Level = {
+  name: string;
+  subtitle: string;
+  moves: number;
+  locks: number[];
+  relic?: { column: number; row: number };
+  voids: number[];
+};
 
 const width = 7;
 const height = 7;
 const gemNames = ['Ember', 'Tide', 'Bloom', 'Sun', 'Void', 'Frost'];
+const levels: Level[] = [
+  {
+    name: 'Fractured Seal',
+    subtitle: 'Break every crystal lock by matching on or beside it.',
+    moves: 15,
+    locks: [16, 17, 18, 23, 24, 25],
+    voids: [],
+  },
+  {
+    name: 'The Sun Key',
+    subtitle: 'Clear matches beneath the key to lower it into the exit.',
+    moves: 16,
+    locks: [31, 32, 33],
+    relic: { column: 3, row: 0 },
+    voids: [],
+  },
+  {
+    name: 'Void Garden',
+    subtitle: 'Clear every corrupted cell before the void spreads again.',
+    moves: 18,
+    locks: [],
+    voids: [0, 1, 7, 41, 47, 48],
+  },
+];
+
 const seed = ref(2407);
+const levelIndex = ref(0);
 const board = ref<number[]>([]);
 const score = ref(0);
-const moves = ref(18);
-const target = 1800;
+const moves = ref(0);
 const selected = ref<number | null>(null);
 const clearing = ref(new Set<number>());
+const locks = ref<Record<number, number>>({});
+const voids = ref(new Set<number>());
+const relicRow = ref(-1);
+const relicDelivered = ref(false);
 const locked = ref(false);
 const agentPlaying = ref(false);
-const message = ref('Make a line of three or more.');
+const message = ref('');
 const decision = ref('Waiting for your move');
 const combo = ref(0);
 let random = createRng(seed.value);
 let runToken = 0;
 
-const progress = computed(() => Math.min(100, Math.round((score.value / target) * 100)));
+const level = computed(() => levels[levelIndex.value]);
+const objectiveComplete = computed(() => {
+  if (levelIndex.value === 0) return Object.values(locks.value).every((hp) => hp <= 0);
+  if (levelIndex.value === 1) return relicDelivered.value;
+  return voids.value.size === 0;
+});
 const stateLabel = computed(() => {
-  if (score.value >= target) return 'Vault opened';
-  if (moves.value <= 0) return 'Run complete';
-  return agentPlaying.value ? 'Agent playing' : 'Your turn';
+  if (objectiveComplete.value) return 'Chamber solved';
+  if (moves.value <= 0) return 'Out of moves';
+  return agentPlaying.value ? 'Agent solving' : 'Your move';
+});
+const objectiveProgress = computed(() => {
+  if (levelIndex.value === 0) {
+    const total = level.value.locks.length * 2;
+    const left = Object.values(locks.value).reduce((sum, hp) => sum + Math.max(0, hp), 0);
+    return Math.round(((total - left) / total) * 100);
+  }
+  if (levelIndex.value === 1) return relicDelivered.value ? 100 : Math.round((relicRow.value / (height - 1)) * 100);
+  const total = level.value.voids.length;
+  return Math.round(((total - Math.min(total, voids.value.size)) / total) * 100);
 });
 
-function cellRow(index: number) {
+function row(index: number) {
   return Math.floor(index / width);
 }
 
 function adjacent(a: number, b: number) {
-  return Math.abs(cellRow(a) - cellRow(b)) + Math.abs((a % width) - (b % width)) === 1;
+  return Math.abs(row(a) - row(b)) + Math.abs((a % width) - (b % width)) === 1;
+}
+
+function neighbors(index: number) {
+  return [index - width, index + width, index - 1, index + 1]
+    .filter((next) => next >= 0 && next < width * height && adjacent(index, next));
 }
 
 function swapCells(values: number[], a: number, b: number) {
@@ -48,9 +105,7 @@ function matches(values: number[]) {
     for (let x = 1; x <= width; x += 1) {
       const changed = x === width || values[y * width + x] !== values[y * width + start];
       if (changed) {
-        if (x - start >= 3) {
-          for (let at = start; at < x; at += 1) found.add(y * width + at);
-        }
+        if (x - start >= 3) for (let at = start; at < x; at += 1) found.add(y * width + at);
         start = x;
       }
     }
@@ -60,9 +115,7 @@ function matches(values: number[]) {
     for (let y = 1; y <= height; y += 1) {
       const changed = y === height || values[y * width + x] !== values[start * width + x];
       if (changed) {
-        if (y - start >= 3) {
-          for (let at = start; at < y; at += 1) found.add(at * width + x);
-        }
+        if (y - start >= 3) for (let at = start; at < y; at += 1) found.add(at * width + x);
         start = y;
       }
     }
@@ -70,18 +123,24 @@ function matches(values: number[]) {
   return found;
 }
 
+function puzzleValue(found: Set<number>) {
+  const affected = new Set([...found, ...[...found].flatMap(neighbors)]);
+  const lockBonus = [...affected].reduce((sum, cell) => sum + ((locks.value[cell] ?? 0) > 0 ? 35 : 0), 0);
+  const voidBonus = [...affected].reduce((sum, cell) => sum + (voids.value.has(cell) ? 30 : 0), 0);
+  const relicBonus = level.value.relic && [...found].some((cell) => cell % width === level.value.relic!.column && row(cell) > relicRow.value) ? 55 : 0;
+  return lockBonus + voidBonus + relicBonus;
+}
+
 function legalSwaps(values = board.value): Swap[] {
   const options: Swap[] = [];
   for (let index = 0; index < values.length; index += 1) {
+    if ((locks.value[index] ?? 0) > 0) continue;
     for (const next of [index + 1, index + width]) {
-      if (next >= values.length || (next === index + 1 && cellRow(next) !== cellRow(index))) continue;
+      if (next >= values.length || (next === index + 1 && row(next) !== row(index)) || (locks.value[next] ?? 0) > 0) continue;
       const copy = [...values];
       swapCells(copy, index, next);
       const made = matches(copy);
-      if (made.size) {
-        const rareBonus = [...made].filter((cell) => copy[cell] === 4).length * 4;
-        options.push({ a: index, b: next, value: made.size * 10 + rareBonus });
-      }
+      if (made.size) options.push({ a: index, b: next, value: made.size * 10 + puzzleValue(made) });
     }
   }
   return options.sort((a, b) => b.value - a.value || a.a - b.a);
@@ -92,7 +151,7 @@ function makeBoard() {
   for (let index = 0; index < width * height; index += 1) {
     let gem = Math.floor(random() * gemNames.length);
     const x = index % width;
-    const y = Math.floor(index / width);
+    const y = row(index);
     while (
       (x >= 2 && values[index - 1] === gem && values[index - 2] === gem)
       || (y >= 2 && values[index - width] === gem && values[index - width * 2] === gem)
@@ -111,16 +170,46 @@ function makeBoard() {
 function reset() {
   runToken += 1;
   agentPlaying.value = false;
-  random = createRng(seed.value);
+  random = createRng(seed.value + levelIndex.value * 997);
+  locks.value = Object.fromEntries(level.value.locks.map((cell) => [cell, 2]));
+  voids.value = new Set(level.value.voids);
+  relicRow.value = level.value.relic?.row ?? -1;
+  relicDelivered.value = false;
   board.value = makeBoard();
   score.value = 0;
-  moves.value = 18;
+  moves.value = level.value.moves;
   selected.value = null;
   clearing.value = new Set();
   combo.value = 0;
   locked.value = false;
-  message.value = 'Make a line of three or more.';
+  message.value = level.value.subtitle;
   decision.value = 'Waiting for your move';
+}
+
+function applyPuzzleEffects(found: Set<number>) {
+  const affected = new Set([...found, ...[...found].flatMap(neighbors)]);
+  const nextLocks = { ...locks.value };
+  for (const cell of affected) if ((nextLocks[cell] ?? 0) > 0) nextLocks[cell] -= 1;
+  locks.value = nextLocks;
+
+  const nextVoids = new Set(voids.value);
+  for (const cell of affected) nextVoids.delete(cell);
+  voids.value = nextVoids;
+
+  if (level.value.relic && !relicDelivered.value) {
+    const clearsBelow = [...found].some((cell) => cell % width === level.value.relic!.column && row(cell) > relicRow.value);
+    if (clearsBelow) {
+      relicRow.value += 1;
+      if (relicRow.value >= height - 1) relicDelivered.value = true;
+    }
+  }
+}
+
+function spreadVoid() {
+  if (levelIndex.value !== 2 || voids.value.size === 0) return;
+  const frontier = [...voids.value].sort((a, b) => a - b).flatMap(neighbors)
+    .filter((cell) => !voids.value.has(cell));
+  if (frontier.length) voids.value = new Set([...voids.value, frontier[Math.floor(random() * frontier.length)]]);
 }
 
 async function resolveBoard(token: number) {
@@ -129,108 +218,101 @@ async function resolveBoard(token: number) {
   while (found.size && token === runToken) {
     combo.value += 1;
     clearing.value = found;
+    applyPuzzleEffects(found);
     const gained = found.size * 10 * combo.value;
     score.value += gained;
-    message.value = combo.value > 1 ? `Cascade ×${combo.value} · +${gained}` : `Match · +${gained}`;
-    await wait(180);
+    message.value = combo.value > 1 ? `Cascade ×${combo.value} · puzzle state updated` : `Match · +${gained}`;
+    await wait(170);
     if (token !== runToken) return;
-
     const next = [...board.value];
     for (const index of found) next[index] = -1;
     for (let x = 0; x < width; x += 1) {
-      const column = [];
-      for (let y = height - 1; y >= 0; y -= 1) {
-        const value = next[y * width + x];
-        if (value >= 0) column.push(value);
-      }
+      const column: number[] = [];
+      for (let y = height - 1; y >= 0; y -= 1) if (next[y * width + x] >= 0) column.push(next[y * width + x]);
       while (column.length < height) column.push(Math.floor(random() * gemNames.length));
       for (let y = height - 1; y >= 0; y -= 1) next[y * width + x] = column[height - 1 - y];
     }
     board.value = next;
     clearing.value = new Set();
-    await wait(180);
+    await wait(170);
     found = matches(board.value);
   }
 }
 
 async function playSwap(a: number, b: number, actor: 'human' | 'agent') {
-  if (locked.value || moves.value <= 0 || score.value >= target) return;
+  if (locked.value || moves.value <= 0 || objectiveComplete.value) return;
   locked.value = true;
   selected.value = null;
   const token = runToken;
   const next = [...board.value];
   swapCells(next, a, b);
   board.value = next;
-  await wait(120);
-  const found = matches(board.value);
-  if (!found.size) {
+  await wait(110);
+  if (!matches(board.value).size) {
     const reverted = [...board.value];
     swapCells(reverted, a, b);
     board.value = reverted;
     message.value = 'That swap makes no match.';
-    decision.value = actor === 'human' ? 'Illegal action rejected' : decision.value;
+    if (actor === 'human') decision.value = 'Illegal action rejected';
     locked.value = false;
     return;
   }
   moves.value -= 1;
   await resolveBoard(token);
   if (token !== runToken) return;
-  if (score.value >= target) message.value = 'Vault opened — run won!';
-  else if (moves.value <= 0) message.value = `Run over · ${score.value} points`;
-  else if (!agentPlaying.value) message.value = 'Your move.';
+  if (!objectiveComplete.value) spreadVoid();
+  message.value = objectiveComplete.value ? `${level.value.name} solved!` : moves.value ? level.value.subtitle : 'The chamber seals. Restart the level.';
   locked.value = false;
 }
 
 function chooseCell(index: number) {
-  if (locked.value || agentPlaying.value) return;
-  if (selected.value === null) {
-    selected.value = index;
-    message.value = 'Choose an adjacent gem.';
-    return;
-  }
-  if (selected.value === index) {
-    selected.value = null;
-    return;
-  }
-  if (!adjacent(selected.value, index)) {
-    selected.value = index;
-    message.value = 'Choose an adjacent gem.';
+  if (locked.value || agentPlaying.value || (locks.value[index] ?? 0) > 0) return;
+  if (selected.value === null || !adjacent(selected.value, index)) {
+    selected.value = selected.value === index ? null : index;
+    message.value = selected.value === null ? level.value.subtitle : 'Choose an adjacent unlocked gem.';
     return;
   }
   void playSwap(selected.value, index, 'human');
 }
 
 async function agentStep() {
-  if (locked.value || moves.value <= 0 || score.value >= target) return;
+  if (locked.value || moves.value <= 0 || objectiveComplete.value) return;
   const options = legalSwaps();
   if (!options.length) {
-    decision.value = 'No legal swaps · reshuffling';
     seed.value += 1;
     reset();
     return;
   }
   const best = options[0];
   selected.value = best.a;
-  decision.value = `${options.length} legal swaps · chose +${best.value} immediate value`;
-  message.value = `Agent targets ${gemNames[board.value[best.a]]}`;
-  await wait(300);
+  decision.value = `${options.length} legal swaps · selected objective value ${best.value}`;
+  await wait(260);
   await playSwap(best.a, best.b, 'agent');
 }
 
 async function toggleAgent() {
   agentPlaying.value = !agentPlaying.value;
   const token = runToken;
-  while (agentPlaying.value && token === runToken && moves.value > 0 && score.value < target) {
+  while (agentPlaying.value && token === runToken && moves.value > 0 && !objectiveComplete.value) {
     await agentStep();
-    await wait(420);
+    await wait(360);
   }
   if (token === runToken) agentPlaying.value = false;
 }
 
-onUnmounted(() => {
-  runToken += 1;
-});
+function takeControl() {
+  agentPlaying.value = false;
+  selected.value = null;
+  decision.value = 'Human control';
+  message.value = locked.value ? 'Finishing the current move, then control returns to you.' : 'Select a gem to begin.';
+}
 
+function nextLevel() {
+  levelIndex.value = (levelIndex.value + 1) % levels.length;
+  reset();
+}
+
+onUnmounted(() => { runToken += 1; });
 reset();
 </script>
 
@@ -238,9 +320,9 @@ reset();
   <section class="game-demo game-demo--match">
     <header class="game-hero">
       <div>
-        <span class="game-eyebrow">Playable system demo · deterministic seed {{ seed }}</span>
+        <span class="game-eyebrow">Puzzle chamber {{ levelIndex + 1 }} of {{ levels.length }} · seed {{ seed }}</span>
         <h2>Prism Vault</h2>
-        <p>Chain elemental matches before the vault seals. Play it yourself or let the search agent take the board.</p>
+        <p>{{ level.name }} — {{ level.subtitle }}</p>
       </div>
       <div class="game-status-pill" :data-active="agentPlaying">{{ stateLabel }}</div>
     </header>
@@ -248,55 +330,84 @@ reset();
     <div class="game-layout">
       <div class="game-stage">
         <div class="match-hud">
-          <div><span>Score</span><strong>{{ score.toLocaleString() }}</strong></div>
+          <div><span>Objective</span><strong>{{ objectiveProgress }}%</strong></div>
           <div><span>Moves</span><strong>{{ moves }}</strong></div>
-          <div><span>Target</span><strong>{{ target.toLocaleString() }}</strong></div>
+          <div><span>Score</span><strong>{{ score.toLocaleString() }}</strong></div>
         </div>
-        <div class="goal-track" aria-label="Score progress">
-          <div :style="{ width: `${progress}%` }"></div>
-        </div>
+        <div class="goal-track"><div :style="{ width: `${objectiveProgress}%` }"></div></div>
         <div class="match-board" :aria-busy="locked">
           <button
             v-for="(gem, index) in board"
             :key="index"
             class="gem-cell"
-            :class="[`gem-${gem}`, { selected: selected === index, clearing: clearing.has(index) }]"
-            :aria-label="`${gemNames[gem]} gem, row ${cellRow(index) + 1}, column ${(index % width) + 1}`"
-            :disabled="locked || agentPlaying || moves <= 0 || score >= target"
+            :class="[
+              `gem-${gem}`,
+              {
+                selected: selected === index,
+                clearing: clearing.has(index),
+                'puzzle-locked': (locks[index] ?? 0) > 0,
+                corrupted: voids.has(index),
+                'relic-cell': level.relic && relicRow * width + level.relic.column === index && !relicDelivered,
+                'exit-cell': level.relic && (height - 1) * width + level.relic.column === index,
+              },
+            ]"
+            :disabled="locked || agentPlaying || moves <= 0 || objectiveComplete || (locks[index] ?? 0) > 0"
             @click="chooseCell(index)"
           >
             <span class="gem-shape"></span>
+            <span v-if="(locks[index] ?? 0) > 0" class="puzzle-overlay lock-mark">{{ locks[index] }}</span>
+            <span v-if="voids.has(index)" class="puzzle-overlay void-mark">VOID</span>
+            <span v-if="level.relic && relicRow * width + level.relic.column === index && !relicDelivered" class="puzzle-overlay relic-mark">KEY</span>
+            <span v-if="level.relic && (height - 1) * width + level.relic.column === index" class="puzzle-overlay exit-mark">EXIT</span>
           </button>
         </div>
-        <div class="game-message">{{ message }}</div>
+
+        <div class="human-play-panel">
+          <div class="human-play-head">
+            <div><span>Human play</span><strong>{{ agentPlaying ? 'Agent currently has the board' : 'You control the board' }}</strong></div>
+            <button class="human-control-button" :class="{ active: !agentPlaying }" :disabled="!agentPlaying" @click="takeControl">
+              {{ agentPlaying ? 'Take control' : 'Human control active' }}
+            </button>
+          </div>
+          <ol class="human-play-steps">
+            <li><b>1</b><span>Swap adjacent unlocked gems.</span></li>
+            <li><b>2</b><span>Match beside locks, void, or below the key.</span></li>
+            <li><b>3</b><span>Solve the objective before moves expire.</span></li>
+          </ol>
+          <div class="game-message" role="status">{{ message }}</div>
+        </div>
       </div>
 
       <aside class="agent-console">
         <div class="agent-console__head">
           <span class="agent-orb" :class="{ thinking: agentPlaying || locked }"></span>
-          <div><strong>Search agent</strong><small>One-ply value + cascade resolution</small></div>
+          <div><strong>Puzzle search agent</strong><small>Matches · blockers · relic route · void</small></div>
         </div>
-        <div class="agent-decision">
-          <span>Latest decision</span>
-          <p>{{ decision }}</p>
-        </div>
+        <div class="agent-decision"><span>Latest decision</span><p>{{ decision }}</p></div>
         <div class="agent-metrics">
-          <div><span>Legal actions</span><strong>{{ legalSwaps().length }}</strong></div>
+          <div><span>Legal</span><strong>{{ legalSwaps().length }}</strong></div>
           <div><span>Combo</span><strong>×{{ Math.max(1, combo) }}</strong></div>
-          <div><span>Progress</span><strong>{{ progress }}%</strong></div>
+          <div><span>Objective</span><strong>{{ objectiveProgress }}%</strong></div>
         </div>
         <div class="game-actions">
-          <button class="primary-action" :disabled="locked || moves <= 0 || score >= target" @click="toggleAgent">
-            {{ agentPlaying ? 'Pause agent' : 'Watch agent' }}
-          </button>
-          <button :disabled="locked || agentPlaying || moves <= 0 || score >= target" @click="agentStep">Step once</button>
-          <button @click="reset">Restart seed</button>
+          <button v-if="objectiveComplete" class="primary-action" @click="nextLevel">Next chamber</button>
+          <button v-else class="primary-action" :disabled="locked || moves <= 0" @click="toggleAgent">{{ agentPlaying ? 'Pause agent' : 'Watch agent' }}</button>
+          <button :disabled="locked || agentPlaying || moves <= 0 || objectiveComplete" @click="agentStep">Step once</button>
+          <button @click="reset">Restart chamber</button>
         </div>
-        <label class="seed-control">
-          <span>Seed</span>
-          <input v-model.number="seed" type="number" min="1" @change="reset">
-        </label>
+        <label class="seed-control"><span>Seed</span><input v-model.number="seed" type="number" min="1" @change="reset"></label>
       </aside>
     </div>
   </section>
 </template>
+
+<style scoped>
+.puzzle-overlay { position:absolute; z-index:3; display:grid; place-items:center; pointer-events:none; font-size:.48rem; font-weight:900; letter-spacing:.06em; }
+.lock-mark { inset:5px; border:2px solid rgba(190,235,255,.78); border-radius:12px; color:#dff8ff; background:rgba(73,142,172,.32); }
+.void-mark { right:3px; bottom:2px; color:#e0a8ff; text-shadow:0 0 8px #7d2bac; }
+.relic-mark { inset:18%; transform:rotate(-8deg); border:2px solid #ffe19a; border-radius:50% 50% 15% 50%; color:#2a1a0b; background:#f3b94f; box-shadow:0 0 14px #ffc65a; }
+.exit-mark { right:4px; top:3px; color:#8cf1d4; }
+.corrupted { box-shadow:inset 0 0 0 3px rgba(156,65,196,.6), inset 0 0 22px rgba(105,24,130,.8); }
+.puzzle-locked .gem-shape { opacity:.45; filter:grayscale(.3); }
+.exit-cell { background:rgba(73,193,158,.12); }
+</style>
