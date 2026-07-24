@@ -90,6 +90,24 @@ It declares MIME `application/vnd.gaos.replay+jsonl`, extension
 `gaos-replay.jsonl`, and `compressed: false`. A host may gzip transport or
 storage, but decompression must recover the canonical JSONL bytes.
 
+The npm archive includes the decoded-artifact
+[`gaos.replay` v1 JSON Schema](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/blob/v0.17.0/schemas/gaos.replay-v1.schema.json).
+The repository also carries a canonical JSONL fixture used by both language
+test suites, so independent implementations can verify byte-for-byte output.
+
+Python uses the same transport contract without adding runtime dependencies:
+
+```python
+from agilabs_arena import parse_replay_jsonl, serialize_replay_jsonl
+
+artifact = parse_replay_jsonl(stored)
+assert serialize_replay_jsonl(artifact) == stored
+```
+
+Python owns parsing, transport validation, seed derivation, and canonical
+serialization. Whole-run reducer recheck remains in the TypeScript engine
+until a product supplies an equivalent Python reducer registry.
+
 ## Whole-run recheck
 
 `recheckReplayArtifact` validates the envelope, groups actions by level, and

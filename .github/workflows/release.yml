@@ -35,9 +35,32 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: python -m pip install build pytest
+      - run: python -m pip install build pytest jsonschema
       - run: PYTHONPATH=python python -m pytest python/tests
       - run: python -m build python
+
+      - name: Smoke test installable archives
+        shell: bash
+        run: |
+          npm_tarball=$(npm pack --silent | tail -n 1)
+          smoke_dir="$RUNNER_TEMP/gaos-npm-smoke"
+          mkdir -p "$smoke_dir"
+          cd "$smoke_dir"
+          npm init -y >/dev/null
+          npm install "$GITHUB_WORKSPACE/$npm_tarball" >/dev/null
+          node --input-type=module -e "
+            const engine = await import('@yugao-gaos/turn-based-grid-sdk/engine');
+            if (engine.GAOS_REPLAY_FORMAT_VERSION !== '1.0') process.exit(1);
+          "
+          test -f node_modules/@yugao-gaos/turn-based-grid-sdk/schemas/gaos.replay-v1.schema.json
+          test -f node_modules/@yugao-gaos/turn-based-grid-sdk/fixtures/replay/gaos-replay-v1.golden.jsonl
+          cd "$GITHUB_WORKSPACE"
+          python -m pip install --force-reinstall python/dist/*.whl
+          EXPECTED_VERSION="${GITHUB_REF_NAME#v}" python -c "
+          import os, agilabs_arena
+          assert agilabs_arena.__version__ == os.environ['EXPECTED_VERSION']
+          assert agilabs_arena.GAOS_REPLAY_FORMAT_VERSION == '1.0'
+          "
 
       - run: npm publish
         env:

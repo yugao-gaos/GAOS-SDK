@@ -3,7 +3,9 @@
 For the public chronological changelog, see the
 [complete version history](/version-history).
 
-## v0.17.0 — in development
+## v0.17.0
+
+Released July 24, 2026.
 
 The v0.17 line begins by making replay evidence portable across products:
 
@@ -13,16 +15,19 @@ The v0.17 line begins by making replay evidence portable across products:
   level definitions/results, action permutations, visibility, and totals;
 - canonical serialization, strict parsing, transport validation, and
   whole-run reducer recheck are SDK-owned;
+- a packaged JSON Schema and shared golden JSONL fixture make the decoded
+  contract independently testable;
+- the zero-dependency Python package now parses, validates, and canonically
+  serializes the same replay bytes;
 - `transcriptToReplayArtifact` lifts existing single-level SDK transcripts;
 - `GAOS_REPLAY_MANIFEST_FORMAT` fills creator-platform
   `results.replayFormat` declarations without another product-specific spec;
   and
 - the public capability map and onboarding now cover card-only, hidden-role,
   square/hex/graph, multi-board, and hybrid games instead of presenting GAOS
-  as a grid-only toolkit.
-
-This version is not released yet. Published installation examples continue to
-pin v0.16.0 until the v0.17.0 release is cut.
+  as a grid-only toolkit; and
+- six browser-playable examples span card, puzzle, hex, graph, hybrid, and
+  real-time scheduled game loops.
 
 ## v0.16.0
 

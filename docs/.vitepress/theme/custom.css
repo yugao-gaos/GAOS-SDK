@@ -1492,6 +1492,8 @@
 .demo-tile--blackjack { background: radial-gradient(circle at 70% 10%, #176344, transparent 42%), #0d1b15; }
 .demo-tile--strategy { background: radial-gradient(circle at 75% 10%, #734239, transparent 44%), #18181e; }
 .demo-tile--rogue { background: radial-gradient(circle at 75% 10%, #57315c, transparent 43%), #18121c; }
+.demo-tile--starline { background: radial-gradient(circle at 75% 10%, #245d81, transparent 43%), #0b111e; }
+.demo-tile--lastlight { background: radial-gradient(circle at 75% 10%, #66502d, transparent 43%), #14170f; }
 
 .demo-tile > span {
   display: block;
@@ -1628,6 +1630,69 @@
 .rogue-art i:nth-child(2) { transform: translateY(-8px); }
 .rogue-art i:nth-child(3) { transform: translateY(5px); }
 .rogue-art i:nth-child(4) { transform: translateY(-3px); }
+
+.starline-art,
+.lastlight-art {
+  position: relative;
+}
+
+.starline-art i {
+  position: absolute;
+  z-index: 2;
+  width: 31px;
+  height: 31px;
+  border: 2px solid #7ce1ff;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #a9efff, #226f9c 70%);
+  box-shadow: 0 0 14px rgba(124, 225, 255, 0.4);
+}
+
+.starline-art i:nth-child(1) { left: 16%; top: 56%; }
+.starline-art i:nth-child(2) { left: 36%; top: 18%; }
+.starline-art i:nth-child(3) { left: 50%; top: 56%; }
+.starline-art i:nth-child(4) { left: 67%; top: 18%; }
+.starline-art i:nth-child(5) { left: 82%; top: 56%; border-color: #ff879b; background: #9d2b48; }
+
+.starline-art span,
+.lastlight-art span {
+  position: absolute;
+  height: 2px;
+  transform-origin: left center;
+  background: rgba(135, 221, 255, 0.5);
+}
+
+.starline-art span:nth-of-type(1) { left: 19%; top: 62%; width: 24%; transform: rotate(-35deg); }
+.starline-art span:nth-of-type(2) { left: 40%; top: 33%; width: 18%; transform: rotate(35deg); }
+.starline-art span:nth-of-type(3) { left: 54%; top: 62%; width: 20%; transform: rotate(-38deg); }
+.starline-art span:nth-of-type(4) { left: 71%; top: 34%; width: 18%; transform: rotate(35deg); }
+
+.lastlight-art i {
+  z-index: 2;
+  display: grid;
+  width: 47px;
+  height: 47px;
+  margin: 0 1.2rem;
+  place-items: center;
+  border: 2px solid #f0b45f;
+  border-radius: 50%;
+  color: #20150a;
+  background: #c77b3a;
+  box-shadow: 0 0 16px rgba(240, 180, 95, 0.32);
+  font-style: normal;
+}
+
+.lastlight-art span {
+  z-index: 1;
+  width: 28%;
+  height: 12px;
+  border-top: 2px dashed rgba(221, 202, 163, 0.4);
+  border-bottom: 2px solid rgba(37, 31, 24, 0.8);
+  background: #443d32;
+}
+
+.lastlight-art span:nth-of-type(1) { left: 11%; top: 55%; transform: rotate(-15deg); }
+.lastlight-art span:nth-of-type(2) { left: 37%; top: 42%; transform: rotate(16deg); }
+.lastlight-art span:nth-of-type(3) { left: 62%; top: 56%; transform: rotate(-12deg); }
 
 .demo-contract-strip {
   display: grid;

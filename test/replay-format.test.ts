@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   GAOS_REPLAY_DERIVED_SEEDS,
@@ -83,6 +84,16 @@ function runArtifact(): ReplayArtifact<Level> {
 }
 
 describe('portable GAOS replay JSONL', () => {
+  it('shares canonical golden bytes with non-TypeScript implementations', () => {
+    const fixture = readFileSync(
+      new URL('../fixtures/replay/gaos-replay-v1.golden.jsonl', import.meta.url),
+      'utf8',
+    );
+    const artifact = parseReplayJsonl(fixture);
+    expect(artifact.header.levels[0]!.seed).toBe(runLevelSeed(42, 0));
+    expect(serializeReplayJsonl(artifact)).toBe(fixture);
+  });
+
   it('publishes one manifest declaration consumers can reuse', () => {
     expect(GAOS_REPLAY_MANIFEST_FORMAT).toEqual({
       mime: GAOS_REPLAY_MIME,

@@ -1,0 +1,436 @@
+"""Portable ``gaos.replay`` v1 JSONL parsing, validation, and serialization."""
+
+from __future__ import annotations
+
+import json
+import math
+import re
+from typing import Any
+
+
+GAOS_REPLAY_FORMAT_ID = "gaos.replay"
+GAOS_REPLAY_FORMAT_VERSION = "1.0"
+GAOS_REPLAY_MIME = "application/vnd.gaos.replay+jsonl"
+GAOS_REPLAY_EXTENSION = "gaos-replay.jsonl"
+GAOS_REPLAY_DERIVED_SEEDS = "gaos.run-level-seed.v1"
+GAOS_REPLAY_MANIFEST_FORMAT = {
+    "mime": GAOS_REPLAY_MIME,
+    "extension": GAOS_REPLAY_EXTENSION,
+    "compressed": False,
+}
+
+_ACTION_ID = re.compile(r"^Action ([1-9][0-9]*)$")
+_U32_MAX = 0xFFFF_FFFF
+_SAFE_INTEGER_MAX = (1 << 53) - 1
+
+
+class ReplayFormatError(ValueError):
+    """Raised when a portable replay fails transport-level validation."""
+
+    def __init__(self, problems: list[str]):
+        self.problems = tuple(problems)
+        super().__init__(
+            f"invalid {GAOS_REPLAY_FORMAT_ID} {GAOS_REPLAY_FORMAT_VERSION} artifact: "
+            + "; ".join(problems)
+        )
+
+
+def run_level_seed(session_seed: int, level_index: int) -> int:
+    """Match the TypeScript SDK's unsigned 32-bit per-level seed derivation."""
+
+    return (session_seed ^ (0x9E3779B9 * (level_index + 1))) & _U32_MAX
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _valid_safe_integer(value: Any) -> bool:
+    return _is_int(value) and -_SAFE_INTEGER_MAX <= value <= _SAFE_INTEGER_MAX
+
+
+def _valid_non_negative_integer(value: Any) -> bool:
+    return _valid_safe_integer(value) and value >= 0
+
+
+def _valid_u32(value: Any) -> bool:
+    return _is_int(value) and 0 <= value <= _U32_MAX
+
+
+def _valid_permutation(value: Any) -> bool:
+    return (
+        isinstance(value, list)
+        and all(_is_int(entry) and 0 <= entry < len(value) for entry in value)
+        and len(set(value)) == len(value)
+    )
+
+
+def _valid_location(value: Any) -> bool:
+    if not isinstance(value, dict) or set(value) != {"container", "coord"}:
+        return False
+    if not isinstance(value["container"], str) or not value["container"]:
+        return False
+    coord = value["coord"]
+    return (
+        isinstance(coord, str)
+        or _valid_safe_integer(coord)
+        or (
+            isinstance(coord, list)
+            and len(coord) == 2
+            and all(_valid_safe_integer(entry) for entry in coord)
+        )
+    )
+
+
+def _validate_json_value(value: Any, path: str = "artifact") -> list[str]:
+    if value is None or isinstance(value, (str, bool, int)):
+        return []
+    if isinstance(value, float):
+        return [] if math.isfinite(value) else [f"{path} must contain only finite numbers"]
+    if isinstance(value, list):
+        return [
+            problem
+            for index, entry in enumerate(value)
+            for problem in _validate_json_value(entry, f"{path}[{index}]")
+        ]
+    if isinstance(value, dict):
+        problems: list[str] = []
+        for key, entry in value.items():
+            if not isinstance(key, str):
+                problems.append(f"{path} object keys must be strings")
+            else:
+                problems.extend(_validate_json_value(entry, f"{path}.{key}"))
+        return problems
+    return [f"{path} must contain only plain JSON values"]
+
+
+def validate_replay_artifact(value: Any) -> list[str]:
+    """Validate a decoded replay independently of product reducer code."""
+
+    if not isinstance(value, dict):
+        return ["artifact must be an object"]
+    header = value.get("header")
+    actions = value.get("actions")
+    if not isinstance(header, dict):
+        return ["header must be an object"]
+
+    problems: list[str] = []
+    if header.get("kind") != "header":
+        problems.append("header.kind must be header")
+    if header.get("format") != GAOS_REPLAY_FORMAT_ID:
+        problems.append(f"header.format must be {GAOS_REPLAY_FORMAT_ID}")
+    if header.get("formatVersion") != GAOS_REPLAY_FORMAT_VERSION:
+        problems.append(f"header.formatVersion must be {GAOS_REPLAY_FORMAT_VERSION}")
+    if not isinstance(header.get("sessionId"), str) or not header["sessionId"]:
+        problems.append("header.sessionId must be a non-empty string")
+    if not _valid_u32(header.get("seed")):
+        problems.append("header.seed must be an unsigned 32-bit integer")
+    if header.get("seedPolicy") not in ("explicit", GAOS_REPLAY_DERIVED_SEEDS):
+        problems.append(
+            f"header.seedPolicy must be explicit or {GAOS_REPLAY_DERIVED_SEEDS}"
+        )
+
+    permutation = header.get("perm")
+    if not _valid_permutation(permutation):
+        problems.append("header.perm must be a complete bijection over its declared length")
+        permutation = []
+
+    visibility = header.get("visibility")
+    if visibility is not None and (
+        not isinstance(visibility, str)
+        or (visibility != "full" and not visibility.startswith("seat:"))
+        or visibility == "seat:"
+    ):
+        problems.append("header.visibility must be full or seat:<id>")
+
+    game = header.get("game")
+    if not isinstance(game, dict):
+        problems.append("header.game must be an object")
+    else:
+        for field in ("id", "version"):
+            if not isinstance(game.get(field), str) or not game[field]:
+                problems.append(f"header.game.{field} must be a non-empty string")
+        adapter = game.get("adapter")
+        if not isinstance(adapter, dict):
+            problems.append("header.game.adapter must be an object")
+        else:
+            for field in ("id", "version"):
+                if not isinstance(adapter.get(field), str) or not adapter[field]:
+                    problems.append(
+                        f"header.game.adapter.{field} must be a non-empty string"
+                    )
+
+    levels = header.get("levels")
+    if not isinstance(levels, list) or not levels:
+        problems.append("header.levels must be a non-empty array")
+        levels = []
+    else:
+        seen_ids: set[str] = set()
+        for index, level in enumerate(levels):
+            if not isinstance(level, dict):
+                problems.append(f"level at index {index} must be an object")
+                continue
+            if level.get("index") != index:
+                problems.append(f"level at index {index} must declare index {index}")
+            level_id = level.get("id")
+            if not isinstance(level_id, str) or not level_id:
+                problems.append(f"level {index} id must be a non-empty string")
+            elif level_id in seen_ids:
+                problems.append(f"level {index} duplicates id {level_id}")
+            else:
+                seen_ids.add(level_id)
+            version = level.get("version")
+            if version is not None and (
+                isinstance(version, bool)
+                or not isinstance(version, (str, int, float))
+                or (
+                    isinstance(version, float)
+                    and not math.isfinite(version)
+                )
+            ):
+                problems.append(f"level {index} version must be a string or number")
+            seed = level.get("seed")
+            if not _valid_u32(seed):
+                problems.append(f"level {index} seed must be an unsigned 32-bit integer")
+            elif (
+                header.get("seedPolicy") == GAOS_REPLAY_DERIVED_SEEDS
+                and _valid_u32(header.get("seed"))
+                and seed != run_level_seed(header["seed"], index)
+            ):
+                problems.append(
+                    f"level {index} seed does not match {GAOS_REPLAY_DERIVED_SEEDS}"
+                )
+            if "level" not in level:
+                problems.append(f"level {index} must include level data")
+            result = level.get("result")
+            if not isinstance(result, dict):
+                problems.append(f"level {index} result must be an object")
+            else:
+                if result.get("status") not in ("won", "failed"):
+                    problems.append(f"level {index} result.status must be won or failed")
+                stars = result.get("stars")
+                if stars is not None and (
+                    isinstance(stars, bool)
+                    or not isinstance(stars, (int, float))
+                    or not math.isfinite(stars)
+                ):
+                    problems.append(
+                        f"level {index} result.stars must be a finite number or null"
+                    )
+                if not _valid_non_negative_integer(result.get("actionsUsed")):
+                    problems.append(
+                        f"level {index} result.actionsUsed must be a non-negative safe integer"
+                    )
+
+    totals = header.get("totals")
+    if not isinstance(totals, dict):
+        problems.append("header.totals must be an object")
+    else:
+        total_stars = totals.get("totalStars")
+        if (
+            isinstance(total_stars, bool)
+            or not isinstance(total_stars, (int, float))
+            or not math.isfinite(total_stars)
+        ):
+            problems.append("header.totals.totalStars must be a finite number")
+        if not _valid_non_negative_integer(totals.get("totalActionsUsed")):
+            problems.append(
+                "header.totals.totalActionsUsed must be a non-negative safe integer"
+            )
+
+    if not isinstance(actions, list):
+        problems.append("actions must be an array")
+    else:
+        first_number = actions[0].get("n") if actions and isinstance(actions[0], dict) else None
+        sequence_base = first_number if first_number in (0, 1) else None
+        if actions and sequence_base is None:
+            problems.append("action numbering must start at 0 or 1")
+        previous_level_index = -1
+        level_ticks: dict[int, int] = {}
+        for index, action in enumerate(actions):
+            if not isinstance(action, dict):
+                problems.append(f"action at index {index} must be an object")
+                continue
+            number = action.get("n")
+            if (
+                action.get("kind") != "action"
+            ):
+                problems.append(f"action at index {index} kind must be action")
+            if (
+                not _valid_safe_integer(number)
+                or sequence_base is None
+                or number != sequence_base + index
+            ):
+                problems.append(
+                    f"action at index {index} has non-contiguous sequence number {number}"
+                )
+            level_index = action.get("levelIndex")
+            if (
+                not _valid_non_negative_integer(level_index)
+                or level_index >= len(levels)
+            ):
+                problems.append(
+                    f"action {number} has invalid levelIndex {level_index}"
+                )
+            elif level_index < previous_level_index:
+                problems.append(f"action {number} returns to an earlier level")
+            else:
+                previous_level_index = level_index
+
+            parsed_ids: dict[str, int] = {}
+            for field in ("wireId", "canonicalId"):
+                candidate = action.get(field)
+                match = _ACTION_ID.fullmatch(candidate) if isinstance(candidate, str) else None
+                action_id = int(match.group(1)) if match else 0
+                if not match or not 1 <= action_id <= len(permutation):
+                    problems.append(
+                        f"action {number} {field} must be within Action 1..{len(permutation)}"
+                    )
+                else:
+                    parsed_ids[field] = action_id - 1
+            if (
+                "wireId" in parsed_ids
+                and "canonicalId" in parsed_ids
+                and permutation[parsed_ids["wireId"]] != parsed_ids["canonicalId"]
+            ):
+                problems.append(
+                    f"action {number}: wire {action.get('wireId')} to "
+                    f"{action.get('canonicalId')} contradicts the replay permutation"
+                )
+
+            for field in ("x", "y", "index", "tick"):
+                if field in action and not _valid_safe_integer(action[field]):
+                    problems.append(f"action {number} {field} must be a safe integer")
+            tick = action.get("tick")
+            if _valid_safe_integer(tick) and tick < 0:
+                problems.append(f"action {number} tick must be non-negative")
+            if _valid_non_negative_integer(level_index) and _valid_non_negative_integer(tick):
+                previous_tick = level_ticks.get(level_index, 0)
+                if tick < previous_tick:
+                    problems.append(
+                        f"action {number} tick must not precede its level's previous action"
+                    )
+                else:
+                    level_ticks[level_index] = tick
+            for field in ("boardId", "zoneId", "seat"):
+                if field in action and (
+                    not isinstance(action[field], str) or not action[field]
+                ):
+                    problems.append(f"action {number} {field} must be a non-empty string")
+            if "targets" in action:
+                if not isinstance(action["targets"], list):
+                    problems.append(f"action {number} targets must be an array")
+                else:
+                    for target_index, target in enumerate(action["targets"]):
+                        if not _valid_location(target):
+                            problems.append(
+                                f"action {number} target {target_index} is invalid"
+                            )
+
+    problems.extend(_validate_json_value(value))
+    return problems
+
+
+def _javascript_number(value: int | float) -> str:
+    """Render finite JSON numbers using JSON.stringify-compatible thresholds."""
+
+    if isinstance(value, int):
+        return str(value)
+    if not math.isfinite(value):
+        raise TypeError("JSON numbers must be finite")
+    if value == 0:
+        return "0"
+    text = repr(value).lower()
+    if "e" not in text:
+        return text[:-2] if text.endswith(".0") else text
+
+    mantissa, exponent_text = text.split("e")
+    exponent = int(exponent_text)
+    sign = ""
+    if mantissa.startswith("-"):
+        sign, mantissa = "-", mantissa[1:]
+    whole, _, fraction = mantissa.partition(".")
+    digits = whole + fraction
+    decimal_position = len(whole) + exponent
+    absolute = abs(value)
+    if 1e-6 <= absolute < 1e21:
+        if decimal_position <= 0:
+            return sign + "0." + ("0" * -decimal_position) + digits
+        if decimal_position >= len(digits):
+            return sign + digits + ("0" * (decimal_position - len(digits)))
+        return sign + digits[:decimal_position] + "." + digits[decimal_position:]
+
+    normalized = digits[0]
+    if len(digits) > 1:
+        normalized += "." + digits[1:].rstrip("0")
+        normalized = normalized.rstrip(".")
+    scientific_exponent = decimal_position - 1
+    exponent_sign = "+" if scientific_exponent >= 0 else "-"
+    return f"{sign}{normalized}e{exponent_sign}{abs(scientific_exponent)}"
+
+
+def canonical_json(value: Any) -> str:
+    """Return the same key-sorted canonical JSON used by the TypeScript SDK."""
+
+    problems = _validate_json_value(value, "value")
+    if problems:
+        raise TypeError("; ".join(problems))
+
+    def encode(candidate: Any) -> str:
+        if candidate is None:
+            return "null"
+        if candidate is True:
+            return "true"
+        if candidate is False:
+            return "false"
+        if isinstance(candidate, str):
+            return json.dumps(candidate, ensure_ascii=False, separators=(",", ":"))
+        if isinstance(candidate, (int, float)):
+            return _javascript_number(candidate)
+        if isinstance(candidate, list):
+            return "[" + ",".join(encode(entry) for entry in candidate) + "]"
+        return (
+            "{"
+            + ",".join(
+                json.dumps(key, ensure_ascii=False) + ":" + encode(candidate[key])
+                for key in sorted(candidate)
+            )
+            + "}"
+        )
+
+    return encode(value)
+
+
+def parse_replay_jsonl(jsonl: str) -> dict[str, Any]:
+    """Parse and validate one portable replay JSONL artifact."""
+
+    if not isinstance(jsonl, str) or not jsonl.strip():
+        raise ReplayFormatError(["JSONL must contain a header line"])
+    lines = jsonl.splitlines()
+    while lines and not lines[-1].strip():
+        lines.pop()
+    parsed: list[Any] = []
+    for index, line in enumerate(lines):
+        if not line.strip():
+            raise ReplayFormatError([f"line {index + 1} must not be blank"])
+        try:
+            parsed.append(json.loads(line))
+        except json.JSONDecodeError as error:
+            raise ReplayFormatError(
+                [f"line {index + 1} is not valid JSON: {error.msg}"]
+            ) from error
+    artifact = {"header": parsed[0], "actions": parsed[1:]}
+    problems = validate_replay_artifact(artifact)
+    if problems:
+        raise ReplayFormatError(problems)
+    return artifact
+
+
+def serialize_replay_jsonl(artifact: dict[str, Any]) -> str:
+    """Validate and serialize canonical, trailing-newline replay JSONL."""
+
+    problems = validate_replay_artifact(artifact)
+    if problems:
+        raise ReplayFormatError(problems)
+    records = [artifact["header"], *artifact["actions"]]
+    return "\n".join(canonical_json(record) for record in records) + "\n"

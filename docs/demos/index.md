@@ -7,7 +7,7 @@ pageClass: demo-landing
 
 <div class="demo-landing-hero">
   <span>GAOS PLAYABLE ARCADE</span>
-  <h1>Four real games.<br>One agent-ready contract.</h1>
+  <h1>Six real games.<br>One agent-ready contract.</h1>
   <p>Play every game yourself, hand your position to a deterministic agent, or watch complete agent-vs-environment runs. No account, server, or API key required.</p>
 </div>
 
@@ -16,9 +16,9 @@ pageClass: demo-landing
     <div class="demo-tile-art match-art" aria-hidden="true">
       <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
     </div>
-    <span>Patterns · cascades · scoring</span>
+    <span>Patterns · blockers · relic routes</span>
     <h2>Prism Vault</h2>
-    <p>A polished match-3 run with seeded boards and a search agent that ranks every legal swap.</p>
+    <p>Three authored match-3 puzzle chambers with locks, keys, spreading void, and objective-aware search.</p>
     <b>Play Match-3 →</b>
   </a>
 
@@ -36,9 +36,9 @@ pageClass: demo-landing
     <div class="demo-tile-art strategy-art" aria-hidden="true">
       <i>V</i><i>R</i><i>W</i><i>V</i><i>R</i>
     </div>
-    <span>Movement · targeting · multi-agent turns</span>
+    <span>Hexes · speed · cooldown timeline</span>
     <h2>Ashfall Crossing</h2>
-    <p>Command a three-unit squad, then switch to agent-vs-agent without restarting the battle.</p>
+    <p>Command a hex squad where fast units can activate repeatedly before slower units return to the timeline.</p>
     <b>Play Grid Strategy →</b>
   </a>
 
@@ -46,10 +46,31 @@ pageClass: demo-landing
     <div class="demo-tile-art rogue-art" aria-hidden="true">
       <i>→</i><i>†</i><i>✦</i><i>◇</i>
     </div>
-    <span>Deck · energy · grid · enemy phase</span>
+    <span>Programmed beats · pushes · traps</span>
     <h2>Cinder Vault</h2>
-    <p>Cross a three-room card-and-grid roguelike with one-click takeover from the run evaluator.</p>
+    <p>Program simultaneous turns, vault obstacles, and push enemies into spikes, pits, gates, and explosions.</p>
     <b>Play the Roguelike →</b>
+  </a>
+
+  <a class="demo-tile demo-tile--starline" href="./starline-dominion">
+    <div class="demo-tile-art starline-art" aria-hidden="true">
+      <i></i><i></i><i></i><i></i><i></i>
+      <span></span><span></span><span></span><span></span>
+    </div>
+    <span>Real time · graph traversal · conquest</span>
+    <h2>Starline Dominion</h2>
+    <p>Produce fleets on planets, traverse hyperlanes, and contest a live graph against a rival commander.</p>
+    <b>Play Graph RTS →</b>
+  </a>
+
+  <a class="demo-tile demo-tile--lastlight" href="./last-light">
+    <div class="demo-tile-art lastlight-art" aria-hidden="true">
+      <i>R</i><i>F</i><i>M</i><span></span><span></span><span></span>
+    </div>
+    <span>Real time · tower defense · zombie horde</span>
+    <h2>Last Light</h2>
+    <p>Build survivor defenses around branching roads and hold the safehouse through three escalating waves.</p>
+    <b>Defend the Safehouse →</b>
   </a>
 </div>
 

@@ -32,10 +32,14 @@
     "./agent-cli": {
       "types": "./dist/agent-cli/index.d.ts",
       "import": "./dist/agent-cli/index.js"
-    }
+    },
+    "./schemas/gaos.replay-v1.schema.json": "./schemas/gaos.replay-v1.schema.json",
+    "./fixtures/replay/gaos-replay-v1.golden.jsonl": "./fixtures/replay/gaos-replay-v1.golden.jsonl"
   },
   "files": [
     "dist",
+    "schemas",
+    "fixtures",
     "README.md"
   ],
   "scripts": {

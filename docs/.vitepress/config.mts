@@ -74,6 +74,8 @@ export default defineConfig({
           { text: 'Midnight House — Blackjack', link: '/demos/blackjack' },
           { text: 'Ashfall Crossing — Strategy', link: '/demos/grid-strategy' },
           { text: 'Cinder Vault — Roguelike', link: '/demos/card-grid-roguelike' },
+          { text: 'Starline Dominion — Graph RTS', link: '/demos/starline-dominion' },
+          { text: 'Last Light — Zombie Defense', link: '/demos/last-light' },
         ],
       },
       {

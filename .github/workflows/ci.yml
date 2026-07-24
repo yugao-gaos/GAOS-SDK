@@ -37,6 +37,6 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
-      - run: python -m pip install build pytest
+      - run: python -m pip install build pytest jsonschema
       - run: PYTHONPATH=python python -m pytest python/tests
       - run: python -m build python
