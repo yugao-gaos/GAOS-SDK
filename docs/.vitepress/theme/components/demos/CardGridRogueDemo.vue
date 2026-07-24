@@ -9,6 +9,15 @@ type Enemy = Point & { id: string; name: string; hp: number; maxHp: number; dama
 type Plan = { card: Card; target: Point; summary: string };
 type EnemyIntent = { enemy: Enemy; intent: { kind: 'attack' | 'move'; target: Point } };
 type Preview = { kind: 'move' | 'attack' | 'guard'; beat: number; endpoint: boolean; ghost: boolean };
+type ProjectedEnemy = Enemy & { origin: Point; movedAt: number | null };
+type ProjectedState = { hero: Point; enemies: ProjectedEnemy[] };
+type TrajectorySegment = {
+  kind: 'move' | 'attack' | 'displacement';
+  beat: number;
+  from: Point;
+  to: Point;
+  ghost: boolean;
+};
 type Motion = 'move' | 'attack' | 'guard';
 
 const size = 6;
@@ -50,26 +59,43 @@ let runToken = 0;
 
 const actionsLeft = computed(() => maxActions - queue.value.length);
 const selectedCard = computed(() => cards.find((card) => card.kind === selectedKind.value) ?? null);
-const virtualHero = computed(() => {
-  let position = { x: hero.value.x, y: hero.value.y };
-  for (const plan of queue.value) if (plan.card.kind === 'step' || plan.card.kind === 'vault') position = { ...plan.target };
-  return position;
-});
+const projectedState = computed(() => simulatePlans(queue.value));
+const virtualHero = computed(() => projectedState.value.hero);
+const projectedEnemies = computed(() => projectedState.value.enemies);
+const phantomEnemies = computed(() => projectedEnemies.value.filter((enemy) => (
+  enemy.x !== enemy.origin.x || enemy.y !== enemy.origin.y
+)));
 const won = computed(() => room.value === 3 && enemies.value.length === 0);
 const defeated = computed(() => hero.value.hp <= 0);
 const roomCleared = computed(() => enemies.value.length === 0 && !won.value);
 const targetCells = computed(() => new Set(selectedCard.value ? legalTargets(selectedCard.value).map(indexAt) : []));
 const previewCells = computed(() => {
   const previews = new Map<number, Preview>();
-  let origin = { x: hero.value.x, y: hero.value.y };
+  const state = initialProjectedState();
   queue.value.forEach((plan, index) => {
-    addPreview(previews, origin, plan.card, plan.target, index + 1, false);
-    if (plan.card.kind === 'step' || plan.card.kind === 'vault') origin = { ...plan.target };
+    addPreview(previews, state.hero, plan.card, plan.target, index + 1, false);
+    applyProjectedBeat(state, plan, index + 1);
   });
   if (selectedCard.value && hoveredIndex.value !== null && targetCells.value.has(hoveredIndex.value)) {
-    addPreview(previews, origin, selectedCard.value, pointAt(hoveredIndex.value), queue.value.length + 1, true);
+    addPreview(previews, state.hero, selectedCard.value, pointAt(hoveredIndex.value), queue.value.length + 1, true);
   }
   return previews;
+});
+const trajectorySegments = computed(() => {
+  const segments: TrajectorySegment[] = [];
+  const state = initialProjectedState();
+  queue.value.forEach((plan, index) => {
+    addTrajectory(segments, state, plan, index + 1, false);
+    applyProjectedBeat(state, plan, index + 1);
+  });
+  if (selectedCard.value && hoveredIndex.value !== null && targetCells.value.has(hoveredIndex.value)) {
+    addTrajectory(segments, state, {
+      card: selectedCard.value,
+      target: pointAt(hoveredIndex.value),
+      summary: '',
+    }, queue.value.length + 1, true);
+  }
+  return segments;
 });
 const enemyPreviewCells = computed(() => {
   const previews = new Map<number, { attacks: number; moves: number }>();
@@ -100,6 +126,14 @@ function enemyAt(point: Point) {
   return enemies.value.find((enemy) => enemy.x === point.x && enemy.y === point.y);
 }
 
+function projectedEnemyAt(point: Point, projected = projectedEnemies.value) {
+  return projected.find((enemy) => enemy.x === point.x && enemy.y === point.y);
+}
+
+function phantomAt(point: Point) {
+  return phantomEnemies.value.find((enemy) => enemy.x === point.x && enemy.y === point.y);
+}
+
 function isBlocked(point: Point, includeHero = true) {
   const index = indexAt(point);
   return !inside(point)
@@ -108,6 +142,136 @@ function isBlocked(point: Point, includeHero = true) {
     || barrels.value.has(index)
     || !!enemyAt(point)
     || (includeHero && hero.value.x === point.x && hero.value.y === point.y);
+}
+
+function terrainBlocked(point: Point) {
+  const index = indexAt(point);
+  return !inside(point)
+    || walls.value.has(index)
+    || (gate.value === index && !gateOpen.value);
+}
+
+function initialProjectedState(): ProjectedState {
+  return {
+    hero: { x: hero.value.x, y: hero.value.y },
+    enemies: enemies.value.map((enemy) => ({
+      ...enemy,
+      origin: { x: enemy.x, y: enemy.y },
+      movedAt: null,
+    })),
+  };
+}
+
+function cloneProjectedState(state: ProjectedState): ProjectedState {
+  return {
+    hero: { ...state.hero },
+    enemies: state.enemies.map((enemy) => ({ ...enemy, origin: { ...enemy.origin } })),
+  };
+}
+
+function isBlockedInProjectedState(point: Point, state: ProjectedState, includeHero = true) {
+  const index = indexAt(point);
+  return terrainBlocked(point)
+    || barrels.value.has(index)
+    || !!projectedEnemyAt(point, state.enemies)
+    || (includeHero && state.hero.x === point.x && state.hero.y === point.y);
+}
+
+function pushProjectedEnemy(state: ProjectedState, enemyId: string, dx: number, dy: number, beat: number): boolean {
+  const enemy = state.enemies.find((item) => item.id === enemyId);
+  if (!enemy) return false;
+  const destination = { x: enemy.x + dx, y: enemy.y + dy };
+  if (terrainBlocked(destination) || (destination.x === state.hero.x && destination.y === state.hero.y)) return false;
+  const chained = projectedEnemyAt(destination, state.enemies);
+  if (chained && !pushProjectedEnemy(state, chained.id, dx, dy, beat)) return false;
+  enemy.x = destination.x;
+  enemy.y = destination.y;
+  enemy.movedAt = beat;
+  const destinationIndex = indexAt(destination);
+  if (pits.value.has(destinationIndex)) {
+    state.enemies = state.enemies.filter((item) => item.id !== enemy.id);
+  } else if (spikes.value.has(destinationIndex)) {
+    enemy.hp -= 2;
+    if (enemy.hp <= 0) state.enemies = state.enemies.filter((item) => item.id !== enemy.id);
+  }
+  return true;
+}
+
+function applyProjectedPlan(state: ProjectedState, plan: Plan, beat: number) {
+  const kind = plan.card.kind;
+  if (kind === 'step' || kind === 'vault') {
+    state.hero = { ...plan.target };
+    return;
+  }
+  if (kind === 'bash' || kind === 'hook') {
+    const enemy = projectedEnemyAt(plan.target, state.enemies);
+    if (!enemy) return;
+    const dx = kind === 'bash' ? Math.sign(enemy.x - state.hero.x) : Math.sign(state.hero.x - enemy.x);
+    const dy = kind === 'bash' ? Math.sign(enemy.y - state.hero.y) : Math.sign(state.hero.y - enemy.y);
+    pushProjectedEnemy(state, enemy.id, dx, dy, beat);
+    return;
+  }
+  if (kind === 'bolt') {
+    const enemy = projectedEnemyAt(plan.target, state.enemies);
+    if (enemy) {
+      enemy.hp -= 2;
+      if (enemy.hp <= 0) state.enemies = state.enemies.filter((item) => item.id !== enemy.id);
+    }
+  }
+}
+
+function projectedEnemyIntent(enemy: ProjectedEnemy, state: ProjectedState) {
+  if (manhattan(enemy, state.hero) === 1) {
+    return { kind: 'attack' as const, target: { ...state.hero } };
+  }
+  const candidates = lineDirections()
+    .map(([dx, dy]) => ({ x: enemy.x + dx, y: enemy.y + dy }))
+    .filter((point) => {
+      const occupant = projectedEnemyAt(point, state.enemies);
+      return inside(point)
+        && !terrainBlocked(point)
+        && !barrels.value.has(indexAt(point))
+        && (!occupant || occupant.id === enemy.id);
+    });
+  candidates.sort((a, b) => manhattan(a, state.hero) - manhattan(b, state.hero) || indexAt(a) - indexAt(b));
+  return { kind: 'move' as const, target: candidates[0] ?? { x: enemy.x, y: enemy.y } };
+}
+
+function applyProjectedEnemyHazard(state: ProjectedState, enemy: ProjectedEnemy) {
+  const index = indexAt(enemy);
+  if (pits.value.has(index)) {
+    state.enemies = state.enemies.filter((item) => item.id !== enemy.id);
+  } else if (spikes.value.has(index)) {
+    enemy.hp -= 2;
+    if (enemy.hp <= 0) state.enemies = state.enemies.filter((item) => item.id !== enemy.id);
+  }
+}
+
+function applyProjectedBeat(state: ProjectedState, plan: Plan, beat: number) {
+  const intents = state.enemies.map((enemy) => ({
+    snapshot: { ...enemy, origin: { ...enemy.origin } },
+    intent: projectedEnemyIntent(enemy, state),
+  }));
+  applyProjectedPlan(state, plan, beat);
+  for (const { snapshot, intent } of intents) {
+    const enemy = state.enemies.find((item) => item.id === snapshot.id);
+    if (!enemy || enemy.x !== snapshot.x || enemy.y !== snapshot.y || intent.kind === 'attack') continue;
+    const occupant = projectedEnemyAt(intent.target, state.enemies);
+    if (terrainBlocked(intent.target)
+      || barrels.value.has(indexAt(intent.target))
+      || (occupant && occupant.id !== enemy.id)) continue;
+    if (intent.target.x === enemy.x && intent.target.y === enemy.y) continue;
+    enemy.x = intent.target.x;
+    enemy.y = intent.target.y;
+    enemy.movedAt = beat;
+    applyProjectedEnemyHazard(state, enemy);
+  }
+}
+
+function simulatePlans(plans: Plan[]) {
+  const state = initialProjectedState();
+  plans.forEach((plan, index) => applyProjectedBeat(state, plan, index + 1));
+  return state;
 }
 
 function lineDirections() {
@@ -127,7 +291,7 @@ function straightLine(origin: Point, target: Point) {
   return points;
 }
 
-function hasClearLine(origin: Point, target: Point) {
+function hasClearLine(origin: Point, target: Point, projected = projectedEnemies.value) {
   const line = straightLine(origin, target);
   if (!line.length || line.length > 3) return false;
   return line.slice(0, -1).every((point) => {
@@ -135,8 +299,47 @@ function hasClearLine(origin: Point, target: Point) {
     return !walls.value.has(index)
       && !(gate.value === index && !gateOpen.value)
       && !barrels.value.has(index)
-      && !enemyAt(point);
+      && !projectedEnemyAt(point, projected);
   });
+}
+
+function addTrajectory(segments: TrajectorySegment[], state: ProjectedState, plan: Plan, beat: number, ghost: boolean) {
+  const from = { ...state.hero };
+  const kind = plan.card.kind;
+  if (kind === 'step' || kind === 'vault') {
+    segments.push({ kind: 'move', beat, from, to: { ...plan.target }, ghost });
+    return;
+  }
+  if (kind === 'guard') return;
+  segments.push({ kind: 'attack', beat, from, to: { ...plan.target }, ghost });
+  if (kind !== 'bash' && kind !== 'hook') return;
+  const enemy = projectedEnemyAt(plan.target, state.enemies);
+  if (!enemy) return;
+  const next = cloneProjectedState(state);
+  applyProjectedPlan(next, plan, beat);
+  const moved = next.enemies.find((item) => item.id === enemy.id);
+  if (moved && (moved.x !== enemy.x || moved.y !== enemy.y)) {
+    segments.push({
+      kind: 'displacement',
+      beat,
+      from: { x: enemy.x, y: enemy.y },
+      to: { x: moved.x, y: moved.y },
+      ghost,
+    });
+  }
+}
+
+function segmentCoordinates(segment: TrajectorySegment) {
+  const dx = segment.to.x - segment.from.x;
+  const dy = segment.to.y - segment.from.y;
+  const length = Math.max(Math.hypot(dx, dy), 1);
+  const inset = Math.min(0.28, length * 0.22);
+  return {
+    x1: segment.from.x + 0.5 + (dx / length) * inset,
+    y1: segment.from.y + 0.5 + (dy / length) * inset,
+    x2: segment.to.x + 0.5 - (dx / length) * inset,
+    y2: segment.to.y + 0.5 - (dy / length) * inset,
+  };
 }
 
 function addPreview(previews: Map<number, Preview>, origin: Point, card: Card, target: Point, beat: number, ghost: boolean) {
@@ -247,23 +450,26 @@ function reset() {
 
 function legalTargets(card: Card): Point[] {
   if (queue.value.length >= maxActions || resolving.value) return [];
-  const origin = virtualHero.value;
+  const state = projectedState.value;
+  const origin = state.hero;
   if (card.kind === 'guard') return [{ ...origin }];
   if (card.kind === 'step') {
     return lineDirections().map(([dx, dy]) => ({ x: origin.x + dx, y: origin.y + dy }))
-      .filter((point) => inside(point) && !isBlocked(point, false));
+      .filter((point) => inside(point) && !isBlockedInProjectedState(point, state, false));
   }
   if (card.kind === 'vault') {
     return lineDirections().flatMap(([dx, dy]) => {
       const middle = { x: origin.x + dx, y: origin.y + dy };
       const landing = { x: origin.x + dx * 2, y: origin.y + dy * 2 };
-      return inside(landing) && isBlocked(middle, false) && !isBlocked(landing, false) ? [landing] : [];
+      return inside(landing)
+        && isBlockedInProjectedState(middle, state, false)
+        && !isBlockedInProjectedState(landing, state, false) ? [landing] : [];
     });
   }
-  if (card.kind === 'bash') return enemies.value.filter((enemy) => manhattan(origin, enemy) === 1);
-  if (card.kind === 'hook') return enemies.value.filter((enemy) => hasClearLine(origin, enemy));
+  if (card.kind === 'bash') return state.enemies.filter((enemy) => manhattan(origin, enemy) === 1);
+  if (card.kind === 'hook') return state.enemies.filter((enemy) => hasClearLine(origin, enemy, state.enemies));
   return [
-    ...enemies.value.filter((enemy) => hasClearLine(origin, enemy)),
+    ...state.enemies.filter((enemy) => hasClearLine(origin, enemy, state.enemies)),
     ...[...barrels.value].map(pointAt).filter((barrel) => hasClearLine(origin, barrel)),
   ];
 }
@@ -407,6 +613,10 @@ function executeEnemies(intents: EnemyIntent[]) {
   for (const { enemy: snapshot, intent } of intents) {
     const enemy = enemies.value.find((item) => item.id === snapshot.id);
     if (!enemy || hero.value.hp <= 0) continue;
+    if (enemy.x !== snapshot.x || enemy.y !== snapshot.y) {
+      lastEvent.value = `${enemy.name}'s intent was disrupted by forced movement.`;
+      continue;
+    }
     if (intent.kind === 'attack' && manhattan(enemy, hero.value) === 1) {
       const blockedDamage = Math.min(hero.value.shield, enemy.damage);
       hero.value = {
@@ -586,6 +796,30 @@ reset();
         </div>
 
         <div class="rogue-board">
+          <svg class="trajectory-layer" viewBox="0 0 6 6" aria-hidden="true">
+            <defs>
+              <marker id="move-arrow" markerWidth=".34" markerHeight=".34" refX=".28" refY=".17" orient="auto" markerUnits="userSpaceOnUse">
+                <path d="M0,0 L.34,.17 L0,.34 Z" />
+              </marker>
+              <marker id="attack-arrow" markerWidth=".34" markerHeight=".34" refX=".28" refY=".17" orient="auto" markerUnits="userSpaceOnUse">
+                <path d="M0,0 L.34,.17 L0,.34 Z" />
+              </marker>
+              <marker id="displacement-arrow" markerWidth=".34" markerHeight=".34" refX=".28" refY=".17" orient="auto" markerUnits="userSpaceOnUse">
+                <path d="M0,0 L.34,.17 L0,.34 Z" />
+              </marker>
+            </defs>
+            <line
+              v-for="(segment, segmentIndex) in trajectorySegments"
+              :key="`${segment.beat}-${segment.kind}-${segmentIndex}`"
+              :x1="segmentCoordinates(segment).x1"
+              :y1="segmentCoordinates(segment).y1"
+              :x2="segmentCoordinates(segment).x2"
+              :y2="segmentCoordinates(segment).y2"
+              :class="[`path-${segment.kind}`, { ghost: segment.ghost }]"
+              :marker-end="`url(#${segment.kind === 'move' ? 'move-arrow' : segment.kind === 'attack' ? 'attack-arrow' : 'displacement-arrow'})`"
+              vector-effect="non-scaling-stroke"
+            />
+          </svg>
           <button
             v-for="index in size * size"
             :key="index"
@@ -641,6 +875,22 @@ reset();
               <em>{{ enemyIntent(enemyAt(pointAt(index - 1))!).kind === 'attack' ? '!' : '→' }}</em>
             </span>
             <span v-else class="environment-mark">{{ tileLabel(index - 1) }}</span>
+            <span
+              v-if="phantomAt(pointAt(index - 1))"
+              class="rogue-actor enemy token-actor phantom-actor"
+              :class="{ elite: isElite(phantomAt(pointAt(index - 1))!) }"
+            >
+              <img :src="tokenFor(phantomAt(pointAt(index - 1))!)" :alt="`Projected ${phantomAt(pointAt(index - 1))!.name}`">
+              <i>{{ phantomAt(pointAt(index - 1))!.hp }}</i>
+              <em>{{ phantomAt(pointAt(index - 1))!.movedAt }}</em>
+            </span>
+            <span
+              v-if="queue.length && indexAt(virtualHero) === index - 1 && indexAt(hero) !== index - 1"
+              class="rogue-actor wayfarer token-actor phantom-actor phantom-wayfarer"
+            >
+              <img src="/images/cinder-vault/wayfarer.webp" alt="Projected Wayfarer">
+              <em>{{ queue.length }}</em>
+            </span>
             <small>{{ String.fromCharCode(65 + ((index - 1) % size)) }}{{ Math.floor((index - 1) / size) + 1 }}</small>
           </button>
         </div>
@@ -693,7 +943,7 @@ reset();
       </div>
       <ol>
         <li><b>Choose a card.</b><span>Legal targets glow. Hover a target to preview its path before adding it.</span></li>
-        <li><b>Program up to three beats.</b><span>Blue paths move the Wayfarer; orange paths attack or push; numbered circles show resolution order.</span></li>
+        <li><b>Program up to three beats.</b><span>Solid blue arrows show movement. Dashed orange arrows show attacks. Ghost tokens show projected positions and remain valid future targets.</span></li>
         <li><b>Read enemy intent.</b><span>Red arrows mark movement targets and red exclamation marks show incoming attacks.</span></li>
         <li><b>Commit the turn.</b><span>Your action and every enemy intent animate simultaneously, one beat at a time.</span></li>
       </ol>
@@ -715,19 +965,33 @@ reset();
 .beat-ribbon b,.beat-ribbon span{display:block}.beat-ribbon b{color:var(--game-accent);font-size:.55rem}.beat-ribbon span{margin-top:.2rem;color:var(--game-muted);font-size:.6rem}
 .environment-mark{z-index:1;max-width:80%;color:rgba(255,231,194,.65);font-size:.48rem;font-weight:800;text-transform:uppercase}
 .rogue-cell.wall{background:#302c31}.rogue-cell.spike{background:repeating-linear-gradient(45deg,#33242a 0 8px,#5b3035 8px 10px)}.rogue-cell.pit{background:radial-gradient(circle,#050408 20%,#1c1520 65%)}.rogue-cell.barrel{background:radial-gradient(circle,#843d26,#2a1920 60%)}.rogue-cell.plate{box-shadow:inset 0 0 0 3px #b8894d}.rogue-cell.gate{background:repeating-linear-gradient(90deg,#4d4745 0 5px,#171419 5px 10px)}.rogue-cell.gate.open{opacity:.38}
-.rogue-cell.preview-move{background:radial-gradient(circle,rgba(95,203,219,.2),transparent 68%),#202c31}
-.rogue-cell.preview-attack{background:radial-gradient(circle,rgba(255,137,83,.2),transparent 68%),#34231f}
+.rogue-board{position:relative}
+.rogue-cell.targetable{z-index:auto}
+.trajectory-layer{position:absolute;z-index:2;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+.trajectory-layer line{fill:none;stroke-linecap:round;stroke-linejoin:round;stroke-width:3}
+.trajectory-layer .path-move{stroke:#6dd8e5}
+.trajectory-layer .path-attack{stroke:#ff925f;stroke-dasharray:8 6;animation:attack-dashes .75s linear infinite}
+.trajectory-layer .path-displacement{stroke:#e5a7ff;stroke-dasharray:3 5;animation:attack-dashes .75s linear infinite}
+.trajectory-layer .ghost{opacity:.52}
+#move-arrow path{fill:#6dd8e5}
+#attack-arrow path{fill:#ff925f}
+#displacement-arrow path{fill:#e5a7ff}
+.rogue-cell.preview-move{background:radial-gradient(circle,rgba(95,203,219,.16),transparent 68%),#202c31}
+.rogue-cell.preview-attack{background:radial-gradient(circle,rgba(255,137,83,.16),transparent 68%),#34231f}
 .rogue-cell.preview-guard{background:radial-gradient(circle,rgba(118,180,230,.2),transparent 68%),#202a36}
 .rogue-cell.preview-ghost{filter:saturate(.75)}
-.trajectory-marker{position:absolute;z-index:1;inset:12%;pointer-events:none;border:2px dashed;border-radius:16px;animation:trajectory-dash 1.1s linear infinite}
-.trajectory-marker::before{position:absolute;inset:29%;border-radius:50%;background:currentColor;box-shadow:0 0 12px currentColor;content:'';opacity:.22}
-.trajectory-marker strong{position:absolute;top:-7px;left:-7px;display:grid;width:22px;height:22px;place-items:center;border:2px solid #17131b;border-radius:50%;color:#16131a;background:var(--trajectory-color);font-size:.62rem}
+.trajectory-marker{position:absolute;z-index:3;left:4px;top:4px;pointer-events:none;color:var(--trajectory-color)}
+.trajectory-marker strong{display:grid;width:22px;height:22px;place-items:center;border:2px solid #17131b;border-radius:50%;color:#16131a;background:var(--trajectory-color);box-shadow:0 0 12px color-mix(in srgb,var(--trajectory-color),transparent 35%);font-size:.62rem}
 .trajectory-move{--trajectory-color:#6dd8e5;color:var(--trajectory-color)}.trajectory-attack{--trajectory-color:#ff925f;color:var(--trajectory-color)}.trajectory-guard{--trajectory-color:#8bbcf0;color:var(--trajectory-color)}.trajectory-marker.ghost{opacity:.58}
 .enemy-target-marker{position:absolute;z-index:3;right:4px;top:4px;display:grid;width:18px;height:18px;place-items:center;border:1px solid rgba(255,255,255,.26);border-radius:50%;color:#2a1720;background:#d97168;box-shadow:0 0 10px rgba(217,113,104,.42);font-size:.58rem;font-weight:950}
 .enemy-target-marker.attacking{color:#fff;background:#bf3f48;animation:danger-pulse 1s ease-in-out infinite}
 .token-actor{transform:none;border-radius:50%;background:#211820;box-shadow:0 7px 15px rgba(0,0,0,.48),0 0 0 2px rgba(0,0,0,.3)}
 .token-actor img{display:block;width:100%;height:100%;border-radius:50%;object-fit:cover}
 .token-actor i{z-index:4;transform:none}
+.phantom-actor{position:absolute;z-index:5;left:50%;top:50%;width:58%;transform:translate(-50%,-50%);border-style:dashed;opacity:.58;pointer-events:none;filter:saturate(.72) brightness(1.15);animation:phantom-pulse 1.15s ease-in-out infinite}
+.phantom-actor::after{position:absolute;inset:-7px;border:1px dashed #e5a7ff;border-radius:50%;content:''}
+.phantom-actor em{left:auto;right:-8px;top:-8px;color:#231527;background:#e5a7ff}
+.phantom-wayfarer{border-color:#6dd8e5}.phantom-wayfarer::after{border-color:#6dd8e5}.phantom-wayfarer em{background:#6dd8e5}
 .rogue-actor em{position:absolute;z-index:5;left:-8px;top:-8px;display:grid;width:22px;height:22px;place-items:center;transform:none;border-radius:50%;color:#24131c;background:#ffc778;font-size:.65rem;font-style:normal}
 .token-actor.motion-move{animation:token-hop .52s cubic-bezier(.2,.9,.25,1)}
 .token-actor.motion-attack{animation:token-strike .52s ease-out}
@@ -748,7 +1012,9 @@ reset();
 .hazard-legend span{display:flex;align-items:center;gap:.35rem;border-radius:999px;padding:.35rem .55rem;color:var(--game-muted);background:rgba(255,255,255,.04);font-size:.58rem}.hazard-legend b{color:var(--game-ink)}
 .hazard-legend i{display:block;width:12px;height:12px;border-radius:3px}.legend-spike{background:#8d4149}.legend-pit{background:#08060b;box-shadow:inset 0 0 0 2px #392a3d}.legend-barrel{background:#a84d2b}.legend-plate{box-shadow:inset 0 0 0 2px #c39050}
 @keyframes trajectory-dash{50%{filter:brightness(1.3)}}
+@keyframes attack-dashes{to{stroke-dashoffset:-14}}
 @keyframes danger-pulse{50%{transform:scale(1.18);box-shadow:0 0 16px rgba(239,74,80,.75)}}
+@keyframes phantom-pulse{50%{opacity:.78;filter:saturate(.9) brightness(1.3)}}
 @keyframes token-hop{0%{transform:translateY(12px) scale(.78);opacity:.25}55%{transform:translateY(-7px) scale(1.08)}100%{transform:none;opacity:1}}
 @keyframes token-strike{0%,100%{transform:none}38%{transform:scale(1.18) rotate(-8deg);filter:brightness(1.35)}70%{transform:scale(.94) rotate(3deg)}}
 @keyframes token-guard{0%{transform:scale(.78)}45%{transform:scale(1.16);box-shadow:0 0 28px rgba(108,190,236,.8)}100%{transform:none}}
