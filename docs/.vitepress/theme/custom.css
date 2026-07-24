@@ -1623,17 +1623,35 @@
 
 .demo-tile {
   position: relative;
-  display: block;
+  display: flex;
+  isolation: isolate;
+  flex-direction: column;
+  justify-content: flex-end;
   min-height: 430px;
   overflow: hidden;
   border: 1px solid var(--vp-c-divider);
   border-radius: 20px;
-  padding: 1.4rem;
+  padding: 1.4rem 1.4rem 4.2rem;
   color: #f7f4eb !important;
   text-decoration: none !important;
   background: #12141e;
   box-shadow: 0 12px 35px rgba(20, 16, 35, 0.11);
   transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.demo-tile::after {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  content: '';
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    rgba(7, 8, 12, 0.02) 0%,
+    rgba(7, 8, 12, 0.12) 36%,
+    rgba(7, 8, 12, 0.78) 66%,
+    rgba(7, 8, 12, 0.98) 100%
+  );
 }
 
 .demo-tile:hover {
@@ -1650,9 +1668,11 @@
 .demo-tile--lastlight { background: radial-gradient(circle at 75% 10%, #66502d, transparent 43%), #14170f; }
 
 .demo-tile > span {
+  position: relative;
+  z-index: 2;
   display: block;
-  margin-top: 1.2rem;
-  color: rgba(255, 255, 255, 0.55);
+  margin-top: 0;
+  color: rgba(255, 255, 255, 0.7);
   font-size: 0.63rem;
   font-weight: 800;
   letter-spacing: 0.09em;
@@ -1660,6 +1680,8 @@
 }
 
 .demo-tile h2 {
+  position: relative;
+  z-index: 2;
   margin: 0.3rem 0 0.5rem;
   color: #fff;
   font-family: Georgia, 'Times New Roman', serif;
@@ -1668,6 +1690,8 @@
 }
 
 .demo-tile p {
+  position: relative;
+  z-index: 2;
   max-width: 470px;
   margin: 0;
   color: rgba(255, 255, 255, 0.63);
@@ -1677,6 +1701,7 @@
 
 .demo-tile > b {
   position: absolute;
+  z-index: 2;
   bottom: 1.4rem;
   left: 1.4rem;
   color: #fff;
@@ -1684,14 +1709,16 @@
 }
 
 .demo-tile-art {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
   display: block;
-  width: calc(100% + 2.8rem);
-  height: 210px;
-  margin: -1.4rem -1.4rem 0;
-  border-radius: 19px 19px 10px 10px;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border-radius: inherit;
   object-fit: cover;
   object-position: center;
-  mask-image: linear-gradient(to bottom, #000 82%, transparent 100%);
   transition: transform 400ms ease, filter 400ms ease;
 }
 
