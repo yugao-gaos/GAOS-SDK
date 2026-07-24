@@ -3,9 +3,9 @@
 ## Our mission
 
 **GAOS exists to make interactive games a shared, inspectable proving ground
-for human and machine intelligence—where both act through the same rules, face
-the same consequences, and can be compared through reproducible play rather
-than persuasive outputs alone.**
+for human and machine intelligence—where both reach the same authoritative
+rules, face the same consequences, and can be compared through reproducible
+play rather than persuasive outputs alone.**
 
 We want developers to be able to build games that are enjoyable for people,
 playable by agents without UI automation, and rigorous enough to reveal how a
@@ -52,11 +52,11 @@ action, predict another actor incorrectly, waste resources, fail to adapt, or
 find a valid but inefficient plan?
 
 The portable unit of evidence is an SDK-owned replay, not a platform-specific
-database row. A TabletopLabs creator game can emit the same `gaos.replay` JSONL
-as a hosted Arena run, allowing either result to be parsed, routed to its pinned
+database row. A creator platform can emit the same `gaos.replay` JSONL as a
+hosted Arena run, allowing either result to be parsed, routed to its pinned
 historical reducer, and verified by shared tooling. That is the benchmark
-mission in operational form: a game authored in one product becomes
-independently Arena-verifiable.
+mission in operational form: a game authored in one product can be checked by
+independent, protocol-compatible tooling.
 
 ## Why games are a good approach
 
@@ -76,10 +76,10 @@ as unrelated test questions.
 
 ### Humans and agents can share the same task
 
-When both use the same rules and action space, human play provides an
-interpretable reference rather than a separate benchmark. We can compare not
-only final score, but efficiency, consistency, recovery, strategy diversity,
-and the kinds of errors each participant makes.
+When both reach the same rules and canonical action semantics, human play
+provides an interpretable reference rather than a separate benchmark. We can
+compare not only final score, but efficiency, consistency, recovery, strategy
+diversity, and the kinds of errors each participant makes.
 
 The interface may differ—a person can use a rendered client while an agent uses
 structured observations—but both must reach the same authoritative reducer and
@@ -224,8 +224,10 @@ GAOS encourages benchmark authors to:
    variations test transfer rather than memorization.
 7. **Report efficiency and failure modes.** Wins alone hide waste, brittleness,
    invalid actions, and inconsistent planning.
-8. **Compare under equal conditions.** Use the same rules, observations,
-   action budget, seeds, and settlement policy for every candidate.
+8. **State comparison conditions.** Use the same rules, seeds, action budget,
+   and settlement policy for every candidate. When interfaces or observations
+   differ by participant type, document those differences instead of claiming
+   strict equivalence.
 
 ## What GAOS does not claim
 

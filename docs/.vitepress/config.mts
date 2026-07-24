@@ -86,6 +86,7 @@ export default defineConfig({
           { text: 'Capability map', link: '/capabilities' },
           { text: 'Quickstart', link: '/quickstart' },
           { text: 'Architecture map', link: '/architecture' },
+          { text: 'Terminology', link: '/terminology' },
         ],
       },
       {
@@ -138,7 +139,7 @@ export default defineConfig({
         items: [
           { text: 'Agentic play', link: '/agentic-play' },
           { text: 'Turn protocol v1', link: '/protocol-v1' },
-          { text: 'Python client', link: '/python' },
+          { text: 'Python SDK surface', link: '/python' },
         ],
       },
       {
@@ -148,8 +149,15 @@ export default defineConfig({
           { text: 'Roadmap', link: '/roadmap' },
           { text: 'Support and compatibility', link: '/support' },
           { text: 'Version history', link: '/version-history' },
-          { text: 'Batch implementation review', link: '/rfcs/implementation-review' },
           { text: 'Release process and migrations', link: '/releases' },
+        ],
+      },
+      {
+        text: 'Historical design records',
+        collapsed: true,
+        items: [
+          { text: 'RFC index', link: '/rfcs/0000-overview' },
+          { text: 'Batch implementation review', link: '/rfcs/implementation-review' },
         ],
       },
     ],

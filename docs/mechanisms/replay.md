@@ -105,8 +105,8 @@ assert serialize_replay_jsonl(artifact) == stored
 ```
 
 Python owns parsing, transport validation, seed derivation, and canonical
-serialization. Whole-run reducer recheck remains in the TypeScript engine
-until a product supplies an equivalent Python reducer registry.
+serialization. The SDK's whole-run reducer recheck remains in the TypeScript
+engine and requires the product's pinned reducer registry.
 
 ## Whole-run recheck
 
@@ -156,8 +156,8 @@ Arena's existing run header maps directly:
 | `totalStars`, `totalSteps` | `totals.totalStars`, `totals.totalActionsUsed` |
 | action `levelIndex` | action `levelIndex` |
 
-TabletopLabs can use the manifest constant above and emit the identical
-envelope from creator sessions. Shared tooling then resolves the declared
+Creator platforms can use the manifest constant above and emit the identical
+envelope from their sessions. Shared tooling then resolves the declared
 adapter and verifies either producer with the same parse/recheck path.
 
 ## Reducer-level transcript inputs

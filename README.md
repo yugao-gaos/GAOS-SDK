@@ -64,13 +64,14 @@ The repository contains six layers:
 
 - a genre-neutral v1 turn envelope, cursor, retry, and simultaneous-intent
   protocol;
-- reference clients and observation types for GAOS-hosted Arena sessions;
+- reference clients and observation types for hosted Arena sessions;
 - reusable layouts, movement, settlement, turn order, information partitions,
   zones, card composition, portals, pathfinding, pattern matching, lockstep
   re-simulation, scoring, solving, and portable JSONL replay verification
   through the `./engine` package subpath;
 - deterministic single- and multi-agent episodes with concrete action
-  discovery, frame skip, Gym-style termination, per-seat rewards, transcripts,
+  discovery, frame skip, Gymnasium-compatible termination, per-seat rewards,
+  transcripts,
   batch evaluation, and portable tools;
 - extensible keyed-model drivers for Anthropic, OpenAI, xAI, and OpenRouter;
 - reusable launch recipes and a standalone CLI for Claude Code, Ollama-backed
@@ -258,7 +259,7 @@ const jsonl = serializeReplayJsonl(artifact);
 const checked = recheckReplayArtifact(artifact, reducerRegistry);
 ```
 
-Arena runs and TabletopLabs creator games can therefore emit the same
+Arena runs and creator-platform games can therefore emit the same
 self-identifying artifact and be verified by the same SDK tooling. Existing
 single-level `TranscriptHeader` + `TranscriptAction` data lifts through
 `transcriptToReplayArtifact`.
@@ -268,6 +269,26 @@ The decoded artifact has a packaged
 share one [canonical JSONL fixture](fixtures/replay/gaos-replay-v1.golden.jsonl).
 Python consumers can use `parse_replay_jsonl`, `validate_replay_artifact`, and
 `serialize_replay_jsonl` from `agilabs_arena`.
+
+## Choose a language
+
+The two distributions share hosted protocol and portable replay formats, but
+they are not feature-equivalent:
+
+| Capability | TypeScript | Python |
+| --- | --- | --- |
+| Hosted Arena client | Yes | Yes |
+| Local mechanism engine and `TurnReducer` | Yes | No |
+| Local single- and multi-agent environments | Yes | No local engine; hosted `ArenaEnv` and generic evaluation helpers |
+| Portable replay parse, validation, and serialization | Yes | Yes |
+| Replay re-simulation through a pinned reducer | Yes | No |
+| Model-provider drivers and agent CLI launchers | Yes | No |
+| Gymnasium-compatible environment API | No | Yes, without a Gymnasium runtime dependency |
+
+Use TypeScript to build the game and authoritative reducer. Use Python to
+control a compatible hosted game from research code or to exchange portable
+replay evidence. See the
+[language guide](https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/quickstart#choose-your-language).
 
 ## TypeScript
 
@@ -412,7 +433,7 @@ The distribution is named `gaos-turn-based-grid-sdk`; the stable import name
 remains `agilabs_arena` for compatibility with existing integrations.
 
 ```sh
-pip install gaos_turn_based_grid_sdk-0.17.0-py3-none-any.whl
+python -m pip install "https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/download/v0.17.0/gaos_turn_based_grid_sdk-0.17.0-py3-none-any.whl"
 ```
 
 ```python
@@ -427,8 +448,9 @@ session_id, turn = arena.create_session(
 print(turn.grid)
 ```
 
-See [the Python guide](python/README.md) for the Gymnasium-style environment
-and hosted Arena matchmaking API.
+See [the Python guide](python/README.md) for the Gymnasium-compatible
+environment API, explicit capability boundary, portable replay utilities, and
+hosted Arena matchmaking API.
 
 ## Protocol boundary
 

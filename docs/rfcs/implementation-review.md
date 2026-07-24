@@ -3,6 +3,12 @@
 Status: complete for the additive v0.13–v0.16 scope · Reviewed against the
 updated 58,209-byte handoff bundle
 
+::: info Historical design record
+This review captures a completed implementation checkpoint. It is retained for
+design provenance, not as the current API guide. Start with the
+[architecture map](/architecture) or [mechanism reference](/mechanisms/).
+:::
+
 This review treats the five RFCs and Appendix A as one acceptance contract.
 The implementation remains product-neutral and preserves every v0.12 rename
 as a deprecated alias until the separately scheduled v1.0 boundary.

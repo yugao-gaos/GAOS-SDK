@@ -2,6 +2,13 @@
 
 Status: implemented through v0.16 · Target: v0.13 → v1.0 arc · Baseline: v0.12.0 export surface
 
+::: info Historical design record
+This RFC batch records the design path that led to the current SDK. For
+supported APIs and current terminology, use the
+[architecture map](/architecture), [capability map](/capabilities), and
+[mechanism reference](/mechanisms/).
+:::
+
 ## Goal
 
 Evolve the SDK from a turn-based **grid** engine into a composable **game

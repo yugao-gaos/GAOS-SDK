@@ -18,7 +18,8 @@ Released July 24, 2026.
 - Explicit per-level seeds, pinned content/results, reducer adapter identity,
   aggregate totals, and level-indexed actions.
 - Canonical serialization, strict parsing, transport validation, whole-run
-  reducer recheck, and a direct TabletopLabs `results.replayFormat` constant.
+  reducer recheck, and a creator-platform `results.replayFormat` integration
+  constant.
 - Packaged JSON Schema, cross-language golden fixture, and zero-dependency
   Python parsing, validation, and canonical serialization.
 - Lossless adapter from the existing `TranscriptHeader`/`TranscriptAction`
