@@ -41,6 +41,8 @@ export interface TranscriptAction {
 export interface RecheckResult {
   ok: boolean;
   problems: string[];
+  /** Non-fatal audit limitations and security hygiene warnings. */
+  diagnostics: string[];
   replayed: { status: string; stars: number | null; actionsUsed: number };
 }
 
@@ -230,6 +232,7 @@ export function recheckTranscript<TLevel, TState, TView extends TickView<unknown
   return {
     ok: problems.length === 0,
     problems,
+    diagnostics: [],
     replayed: {
       status: view.status,
       stars: view.stars ?? null,

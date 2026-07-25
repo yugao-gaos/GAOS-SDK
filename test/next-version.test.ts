@@ -156,6 +156,7 @@ describe('v0.13 neutral core', () => {
     expect(recheckTranscript(boardReducer, header, actions)).toEqual({
       ok: true,
       problems: [],
+      diagnostics: [],
       replayed: { status: 'won', stars: null, actionsUsed: 1 },
     });
     expect(recheckGridTranscript(boardReducer as ActionReducer<null, State>, header, actions))

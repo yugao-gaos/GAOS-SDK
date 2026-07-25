@@ -93,7 +93,7 @@ const TWO_POW_53 = 9_007_199_254_740_992;
 const PIO2_1 = 1.57079632673412561417;
 const PIO2_1T = 6.07710050650619224932e-11;
 const RANGE_BITS = 256n;
-const RANGE_SCALE = 2 ** 256;
+const RANGE_SCALE = Number(1n << 256n);
 const INV_PIO2_FIXED =
   0xa2f9836e4e441529fc2757d1f534ddc0db6295993c439041fe5163abdebbc561n;
 const PIO2_FIXED =
@@ -275,8 +275,11 @@ function roundTo(x: number, decimals: number): number {
   if (!(scaledMagnitude < TWO_POW_53)) {
     throw new RangeError('|x| * 10^decimals must be < 2^53');
   }
-  const scaled = decimals >= 0 ? x * scale : x / scale;
-  const rounded = scaled < 0 ? -Math.floor(-scaled + 0.5) : Math.floor(scaled + 0.5);
+  const integral = Math.floor(scaledMagnitude);
+  const roundedMagnitude = scaledMagnitude - integral >= 0.5
+    ? integral + 1
+    : integral;
+  const rounded = x < 0 ? -roundedMagnitude : roundedMagnitude;
   const result = decimals >= 0 ? rounded / scale : rounded * scale;
   return result === 0 && x < 0 ? -0 : result;
 }
@@ -294,6 +297,10 @@ export function createDmath(options: {
   if (backend.id !== 'js' && backend.id !== 'wasm') {
     throw new TypeError('dmath backend id must be js or wasm');
   }
+  const backendId = backend.id;
+  const backendSin = backend.sin.bind(backend);
+  const backendCos = backend.cos.bind(backend);
+  const backendAtan2 = backend.atan2.bind(backend);
   const checkedResult = (value: number, operation: string): number => {
     if (!Number.isFinite(value)) {
       throw new RangeError(`${operation} backend result must be finite`);
@@ -302,21 +309,21 @@ export function createDmath(options: {
   };
   return Object.freeze({
     algorithm,
-    backend: backend.id,
+    backend: backendId,
     sin: (x: number) => {
       requireFinite(x, 'x');
       if (Math.abs(x) > MAX_TRIG_INPUT) throw new RangeError('x must satisfy |x| <= 2^30');
-      return checkedResult(backend.sin(x), 'sin');
+      return checkedResult(backendSin(x), 'sin');
     },
     cos: (x: number) => {
       requireFinite(x, 'x');
       if (Math.abs(x) > MAX_TRIG_INPUT) throw new RangeError('x must satisfy |x| <= 2^30');
-      return checkedResult(backend.cos(x), 'cos');
+      return checkedResult(backendCos(x), 'cos');
     },
     atan2: (y: number, x: number) => {
       requireFinite(y, 'y');
       requireFinite(x, 'x');
-      return checkedResult(backend.atan2(y, x), 'atan2');
+      return checkedResult(backendAtan2(y, x), 'atan2');
     },
     clamp,
     roundTo,

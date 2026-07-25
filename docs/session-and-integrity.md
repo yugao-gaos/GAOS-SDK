@@ -54,6 +54,12 @@ when the seat's redacted view is unchanged. `snapshot(seat)` is the reconnect
 path; v1 observation deltas are either a complete snapshot or an unchanged
 marker.
 
+The v0.19 kernel bounds future tick targets, buffered submissions per seat,
+catch-up work, retained receipts, and extension bytes. The client-side
+`PredictionSession` sketch from RFC-006 is deferred to v0.20: observation
+deltas first need an authoritative acknowledgement identity so reconciliation
+can remove and replay pending predictions deterministically.
+
 ## Deterministic math
 
 State-path code can import `STATE_MATH` and `createDmath` from `./engine`.
@@ -109,6 +115,9 @@ Mismatches remain outside the reducer batch and become independently
 verifiable replay audit records. The package includes three complete
 preimage-and-hash vectors at
 `fixtures/commitment/gaos.commit.sha256.v1.vectors.json`.
+Replay recheck results expose non-fatal `diagnostics` for redacted mismatch
+records that cannot be independently rechecked and for salt reuse across
+distinct commitments.
 
 ## Finalization
 

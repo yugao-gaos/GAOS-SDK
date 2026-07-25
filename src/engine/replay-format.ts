@@ -269,6 +269,8 @@ export interface ReplayLevelRecheck {
 export interface ReplayArtifactRecheckResult {
   ok: boolean;
   problems: string[];
+  /** Non-fatal audit limitations and security hygiene warnings. */
+  diagnostics: string[];
   levels: ReplayLevelRecheck[];
   replayed: {
     statuses: string[];
@@ -289,6 +291,18 @@ export class ReplayFormatError extends Error {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function rejectUnknownProperties(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+  label: string,
+  problems: string[],
+): void {
+  const allowedKeys = new Set(allowed);
+  for (const key of Object.keys(value)) {
+    if (!allowedKeys.has(key)) problems.push(`${label} has unknown property ${key}`);
+  }
 }
 
 function validU32(value: unknown): value is number {
@@ -398,9 +412,24 @@ export function transcriptToReplayArtifact<TLevel>(
 export function validateReplayArtifact(value: unknown): string[] {
   const problems: string[] = [];
   if (!isRecord(value)) return ['artifact must be an object'];
+  rejectUnknownProperties(value, ['header', 'actions', 'records'], 'artifact', problems);
   const header = value['header'];
   const actions = value['actions'];
   if (!isRecord(header)) return ['header must be an object'];
+  rejectUnknownProperties(header, [
+    'kind',
+    'format',
+    'formatVersion',
+    'sessionId',
+    'game',
+    'seed',
+    'seedPolicy',
+    'perm',
+    'levels',
+    'totals',
+    'visibility',
+    'extensions',
+  ], 'header', problems);
   if (header['kind'] !== 'header') problems.push('header.kind must be header');
   if (header['format'] !== GAOS_REPLAY_FORMAT_ID) {
     problems.push(`header.format must be ${GAOS_REPLAY_FORMAT_ID}`);
@@ -434,6 +463,7 @@ export function validateReplayArtifact(value: unknown): string[] {
   if (!isRecord(game)) {
     problems.push('header.game must be an object');
   } else {
+    rejectUnknownProperties(game, ['id', 'version', 'adapter'], 'header.game', problems);
     for (const field of ['id', 'version'] as const) {
       if (typeof game[field] !== 'string' || game[field].length === 0) {
         problems.push(`header.game.${field} must be a non-empty string`);
@@ -443,6 +473,7 @@ export function validateReplayArtifact(value: unknown): string[] {
     if (!isRecord(adapter)) {
       problems.push('header.game.adapter must be an object');
     } else {
+      rejectUnknownProperties(adapter, ['id', 'version'], 'header.game.adapter', problems);
       for (const field of ['id', 'version'] as const) {
         if (typeof adapter[field] !== 'string' || adapter[field].length === 0) {
           problems.push(`header.game.adapter.${field} must be a non-empty string`);
@@ -461,6 +492,15 @@ export function validateReplayArtifact(value: unknown): string[] {
         problems.push(`level at index ${index} must be an object`);
         continue;
       }
+      rejectUnknownProperties(candidate, [
+        'index',
+        'id',
+        'version',
+        'seed',
+        'level',
+        'result',
+        'extensions',
+      ], `level ${index}`, problems);
       if (candidate['index'] !== index) {
         problems.push(`level at index ${index} must declare index ${index}`);
       }
@@ -490,6 +530,12 @@ export function validateReplayArtifact(value: unknown): string[] {
       if (!isRecord(result)) {
         problems.push(`level ${index} result must be an object`);
       } else {
+        rejectUnknownProperties(
+          result,
+          ['status', 'stars', 'actionsUsed', 'extensions'],
+          `level ${index} result`,
+          problems,
+        );
         if (result['status'] !== 'won' && result['status'] !== 'failed') {
           problems.push(`level ${index} result.status must be won or failed`);
         }
@@ -508,6 +554,12 @@ export function validateReplayArtifact(value: unknown): string[] {
   if (!isRecord(totals)) {
     problems.push('header.totals must be an object');
   } else {
+    rejectUnknownProperties(
+      totals,
+      ['totalStars', 'totalActionsUsed', 'extensions'],
+      'header.totals',
+      problems,
+    );
     if (typeof totals['totalStars'] !== 'number' || !Number.isFinite(totals['totalStars'])) {
       problems.push('header.totals.totalStars must be a finite number');
     }
@@ -532,6 +584,24 @@ export function validateReplayArtifact(value: unknown): string[] {
         problems.push(`action at index ${index} must be an object`);
         continue;
       }
+      rejectUnknownProperties(action, [
+        'kind',
+        'n',
+        'levelIndex',
+        'wireId',
+        'canonicalId',
+        'x',
+        'y',
+        'index',
+        'boardId',
+        'zoneId',
+        'seat',
+        'targets',
+        'tick',
+        'commit',
+        'reveal',
+        'verifiedPayload',
+      ], `action ${String(action['n'])}`, problems);
       if (action['kind'] !== 'action') problems.push(`action at index ${index} kind must be action`);
       if (!Number.isSafeInteger(action['n'])
         || sequenceBase === undefined
@@ -601,6 +671,14 @@ export function validateReplayArtifact(value: unknown): string[] {
         } else {
           for (const [targetIndex, target] of action['targets'].entries()) {
             try {
+              if (isRecord(target)) {
+                rejectUnknownProperties(
+                  target,
+                  ['container', 'coord'],
+                  `action ${String(action['n'])} target ${targetIndex}`,
+                  problems,
+                );
+              }
               locationKey(target as never);
             } catch {
               problems.push(`action ${String(action['n'])} target ${targetIndex} is invalid`);
@@ -625,6 +703,12 @@ export function validateReplayArtifact(value: unknown): string[] {
         if (!isRecord(commit)) {
           problems.push(`action ${String(action['n'])} commit must be an object`);
         } else {
+          rejectUnknownProperties(
+            commit,
+            ['commitmentId', 'scheme', 'hash'],
+            `action ${String(action['n'])} commit`,
+            problems,
+          );
           if (!validU32(commit['commitmentId'])) {
             problems.push(`action ${String(action['n'])} commitmentId must be an unsigned 32-bit integer`);
           }
@@ -641,6 +725,12 @@ export function validateReplayArtifact(value: unknown): string[] {
         if (!isRecord(reveal)) {
           problems.push(`action ${String(action['n'])} reveal must be an object`);
         } else {
+          rejectUnknownProperties(
+            reveal,
+            ['commitmentId', 'salt', 'payload'],
+            `action ${String(action['n'])} reveal`,
+            problems,
+          );
           if (!validU32(reveal['commitmentId'])) {
             problems.push(`action ${String(action['n'])} reveal commitmentId must be an unsigned 32-bit integer`);
           }
@@ -670,11 +760,27 @@ export function validateReplayArtifact(value: unknown): string[] {
       const validateResolutionInput = (
         candidate: unknown,
         label: string,
+        actionRecord = false,
       ): void => {
         if (!isRecord(candidate)) {
           problems.push(`${label} must be an object`);
           return;
         }
+        rejectUnknownProperties(candidate, [
+          ...(actionRecord ? ['kind', 'n', 'levelIndex', 'tick'] : []),
+          'wireId',
+          'canonicalId',
+          'x',
+          'y',
+          'index',
+          'boardId',
+          'zoneId',
+          'seat',
+          'targets',
+          'commit',
+          'reveal',
+          'verifiedPayload',
+        ], label, problems);
         const indexes: Record<'wireId' | 'canonicalId', number | undefined> = {
           wireId: undefined,
           canonicalId: undefined,
@@ -712,6 +818,35 @@ export function validateReplayArtifact(value: unknown): string[] {
           problems.push(`${label} verifiedPayload requires reveal`);
         }
         const commit = candidate['commit'];
+        if (isRecord(commit)) {
+          rejectUnknownProperties(
+            commit,
+            ['commitmentId', 'scheme', 'hash'],
+            `${label} commit`,
+            problems,
+          );
+        }
+        if (candidate['targets'] !== undefined) {
+          if (!Array.isArray(candidate['targets'])) {
+            problems.push(`${label} targets must be an array`);
+          } else {
+            for (const [targetIndex, target] of candidate['targets'].entries()) {
+              if (isRecord(target)) {
+                rejectUnknownProperties(
+                  target,
+                  ['container', 'coord'],
+                  `${label} target ${targetIndex}`,
+                  problems,
+                );
+              }
+              try {
+                locationKey(target as never);
+              } catch {
+                problems.push(`${label} target ${targetIndex} is invalid`);
+              }
+            }
+          }
+        }
         if (commit !== undefined && (!isRecord(commit)
           || !validU32(commit['commitmentId'])
           || commit['scheme'] !== COMMITMENT_SCHEME
@@ -720,6 +855,14 @@ export function validateReplayArtifact(value: unknown): string[] {
           problems.push(`${label} has an invalid commitment envelope`);
         }
         const reveal = candidate['reveal'];
+        if (isRecord(reveal)) {
+          rejectUnknownProperties(
+            reveal,
+            ['commitmentId', 'salt', 'payload'],
+            `${label} reveal`,
+            problems,
+          );
+        }
         if (reveal !== undefined && (!isRecord(reveal)
           || !validU32(reveal['commitmentId'])
           || typeof reveal['salt'] !== 'string'
@@ -759,8 +902,46 @@ export function validateReplayArtifact(value: unknown): string[] {
           problems.push(`record ${index} has unknown kind ${String(kind)}`);
           continue;
         }
+        const common = ['kind', 'n', 'levelIndex'];
+        const allowedByKind: Record<string, string[]> = {
+          action: [
+            ...common,
+            'wireId',
+            'canonicalId',
+            'x',
+            'y',
+            'index',
+            'boardId',
+            'zoneId',
+            'seat',
+            'targets',
+            'tick',
+            'commit',
+            'reveal',
+            'verifiedPayload',
+          ],
+          resolution: [...common, 'tick', 'inputs', 'cause', 'systemInput'],
+          deadline: [...common, 'tick', 'reason'],
+          extension: [...common, 'lane', 'record'],
+          checkpoint: [...common, 'tick', 'digest'],
+          'commit-mismatch': [
+            ...common,
+            'tick',
+            'participantId',
+            'submissionId',
+            'commitmentId',
+            'scheme',
+            'attemptedReveal',
+          ],
+        };
+        rejectUnknownProperties(
+          record,
+          allowedByKind[kind as string]!,
+          `record ${index}`,
+          problems,
+        );
         if (kind === 'action') {
-          validateResolutionInput(record, `record ${index} action`);
+          validateResolutionInput(record, `record ${index} action`, true);
         } else if (kind === 'resolution') {
           if (!validNonNegativeInteger(record['tick'])) {
             problems.push(`resolution ${index} tick must be a non-negative safe integer`);
@@ -843,6 +1024,14 @@ export function validateReplayArtifact(value: unknown): string[] {
             problems.push(`commit-mismatch ${index} participantId and submissionId are required`);
           }
           const attempt = record['attemptedReveal'];
+          if (isRecord(attempt)) {
+            rejectUnknownProperties(
+              attempt,
+              ['salt', 'payload'],
+              `commit-mismatch ${index} attemptedReveal`,
+              problems,
+            );
+          }
           if (attempt !== undefined && (!isRecord(attempt)
             || typeof attempt['salt'] !== 'string'
             || !/^(?:[0-9a-f]{2}){16,64}$/.test(attempt['salt'])
@@ -957,14 +1146,26 @@ function recheckGroupedLevel<
   artifact: ReplayArtifact<TLevel>,
   level: ReplayLevelRecord<TLevel>,
   reducer: Reducer<TLevel, TState, TView>,
+  seenSalts: Map<string, { identity: string; location: string }>,
 ): RecheckResult {
   const problems: string[] = [];
+  const diagnostics: string[] = [];
   const commitments = new Map<string, RecordedCommitment>();
   const nextCommitmentId = new Map<string, number>();
   let state = reducer.init(level.level, level.seed);
   const records = (artifact.records ?? []).filter(
     (record) => record.levelIndex === level.index,
   );
+  const noteSalt = (salt: string, identity: string, location: string): void => {
+    const prior = seenSalts.get(salt);
+    if (prior && prior.identity !== identity) {
+      diagnostics.push(
+        `salt reuse: ${location} reuses salt first observed at ${prior.location}`,
+      );
+    } else {
+      seenSalts.set(salt, { identity, location });
+    }
+  };
   for (const record of records) {
     const resolution: ReplayResolution | undefined = record.kind === 'resolution'
       ? record
@@ -1030,6 +1231,11 @@ function recheckGroupedLevel<
         }
         let verifiedPayload: JsonValue | undefined;
         if (replayInput.reveal) {
+          noteSalt(
+            replayInput.reveal.salt,
+            `${level.index}\u0000${seat ?? '<missing>'}\u0000${replayInput.reveal.commitmentId}`,
+            `resolution ${resolution.n} seat ${seat ?? '<missing>'}`,
+          );
           if (!seat) {
             problems.push(`resolution ${resolution.n} reveal requires seat`);
             continue;
@@ -1101,9 +1307,15 @@ function recheckGroupedLevel<
           + `${record.participantId}/${record.commitmentId}`,
         );
       } else if (!record.attemptedReveal) {
-        // A redacted artifact may preserve the finding without the secret.
-        // It remains structurally valid but cannot claim cryptographic recheck.
+        diagnostics.push(
+          `commit-mismatch record ${record.n} was recorded but is not independently recheckable`,
+        );
       } else {
+        noteSalt(
+          record.attemptedReveal.salt,
+          `${level.index}\u0000${record.participantId}\u0000${record.commitmentId}`,
+          `commit-mismatch record ${record.n} seat ${record.participantId}`,
+        );
         try {
           const actualHash = createCommitmentHash(
             {
@@ -1148,6 +1360,7 @@ function recheckGroupedLevel<
   return {
     ok: problems.length === 0,
     problems,
+    diagnostics,
     replayed: {
       status: view.status,
       stars: view.stars ?? null,
@@ -1171,10 +1384,12 @@ export function recheckReplayArtifact<
   options: ReplayArtifactRecheckOptions<TLevel, TState> = {},
 ): ReplayArtifactRecheckResult {
   const problems = validateReplayArtifact(artifact);
+  const diagnostics: string[] = [];
   if (problems.length > 0) {
     return {
       ok: false,
       problems,
+      diagnostics,
       levels: [],
       replayed: { statuses: [], totalStars: 0, totalActionsUsed: 0 },
     };
@@ -1200,11 +1415,13 @@ export function recheckReplayArtifact<
       return {
         ok: false,
         problems,
+        diagnostics,
         levels: [],
         replayed: { statuses: [], totalStars: 0, totalActionsUsed: 0 },
       };
     }
   }
+  const seenSalts = new Map<string, { identity: string; location: string }>();
   for (const level of artifact.header.levels) {
     const context: ReplayReducerContext<TLevel> = {
       game: artifact.header.game,
@@ -1226,7 +1443,7 @@ export function recheckReplayArtifact<
         n: index,
       }));
     const result = artifact.records
-      ? recheckGroupedLevel(artifact, level, reducer)
+      ? recheckGroupedLevel(artifact, level, reducer, seenSalts)
       : recheckTranscript(
         reducer,
         {
@@ -1248,6 +1465,9 @@ export function recheckReplayArtifact<
     problems.push(...result.problems.map(
       (problem) => `level ${level.index} (${level.id}): ${problem}`,
     ));
+    diagnostics.push(...result.diagnostics.map(
+      (diagnostic) => `level ${level.index} (${level.id}): ${diagnostic}`,
+    ));
     totalStars += result.replayed.status === 'won' ? (result.replayed.stars ?? 0) : 0;
     totalActionsUsed += result.replayed.actionsUsed;
   }
@@ -1268,6 +1488,7 @@ export function recheckReplayArtifact<
   return {
     ok: problems.length === 0,
     problems,
+    diagnostics,
     levels: checks,
     replayed: {
       statuses: checks.map(({ result }) => result.replayed.status),

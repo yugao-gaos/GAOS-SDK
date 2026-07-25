@@ -145,6 +145,48 @@ describe('portable GAOS replay JSONL', () => {
     );
   });
 
+  it('rejects unknown properties at every frozen replay boundary', () => {
+    const artifact = structuredClone(runArtifact()) as ReplayArtifact<Level>
+      & { unexpected?: boolean };
+    artifact.unexpected = true;
+    expect(validateReplayArtifact(artifact)).toContain('artifact has unknown property unexpected');
+
+    const nested = structuredClone(runArtifact());
+    (nested.header.game.adapter as unknown as Record<string, unknown>)['extra'] = true;
+    expect(validateReplayArtifact(nested))
+      .toContain('header.game.adapter has unknown property extra');
+
+    const action = structuredClone(runArtifact());
+    (action.actions[0] as unknown as Record<string, unknown>)['extra'] = true;
+    expect(validateReplayArtifact(action))
+      .toContain('action 0 has unknown property extra');
+  });
+
+  it('rejects v1.0 commitment fields and aborts before reducer resolution for unknown dmath', () => {
+    const legacy = structuredClone(runArtifact());
+    legacy.header.formatVersion = '1.0';
+    legacy.actions[0]!.commit = {
+      commitmentId: 0,
+      scheme: 'gaos.commit.sha256.v1',
+      hash: '00'.repeat(32),
+    };
+    expect(validateReplayArtifact(legacy).join('\n'))
+      .toMatch(/commitment fields require formatVersion 1.1/);
+
+    const unsupported = structuredClone(runArtifact());
+    unsupported.header.extensions = {
+      dmath: { algorithm: 'future', backend: 'js' },
+    };
+    let reducerResolved = false;
+    const checked = recheckReplayArtifact(unsupported, () => {
+      reducerResolved = true;
+      return reducer;
+    });
+    expect(checked.ok).toBe(false);
+    expect(checked.problems.join('\n')).toMatch(/cannot construct replay dmath algorithm/);
+    expect(reducerResolved).toBe(false);
+  });
+
   it('detects seed, total, ordering, and adapter tampering', () => {
     const artifact = runArtifact();
     const wrongSeed = structuredClone(artifact);
