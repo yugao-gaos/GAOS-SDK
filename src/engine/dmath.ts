@@ -84,14 +84,12 @@ const PI = 3.141592653589793116;
 const PI_OVER_2 = 1.570796326794896558;
 const PI_OVER_4 = 0.785398163397448279;
 const TWO_PI = 6.283185307179586232;
-const INV_PI_OVER_2 = 0.636619772367581343;
 const MAX_TRIG_INPUT = 1_073_741_824;
 const TWO_POW_53 = 9_007_199_254_740_992;
 
-// Split pi/2 constants keep the range-reduction subtraction stable for the
-// dmath-1 input domain. Evaluation order is part of the frozen algorithm.
-const PIO2_1 = 1.57079632673412561417;
-const PIO2_1T = 6.07710050650619224932e-11;
+// The fixed-point constants are the first 256 fractional bits of 2/pi and
+// pi/2. They were generated independently from Machin's formula by
+// scripts/generate-dmath-evidence.mjs. Evaluation order is frozen as dmath-1.
 const RANGE_BITS = 256n;
 const RANGE_SCALE = Number(1n << 256n);
 const INV_PIO2_FIXED =
@@ -178,11 +176,10 @@ function reduceTrig(x: number): { quadrant: number; reduced: number } {
   if (Math.abs(x) > MAX_TRIG_INPUT) {
     throw new RangeError('x must satisfy |x| <= 2^30');
   }
-  if (Math.abs(x) > TWO_PI) return reduceTrigFixed(x);
-  const nearest = Math.round(x * INV_PI_OVER_2);
-  const first = x - nearest * PIO2_1;
-  const reduced = first - nearest * PIO2_1T;
-  return { quadrant: ((nearest % 4) + 4) % 4, reduced };
+  // Avoid quantizing very small values into the 256-bit fixed-point grid.
+  // Values already in the kernel interval require no range reduction.
+  if (Math.abs(x) <= PI_OVER_4) return { quadrant: 0, reduced: x };
+  return reduceTrigFixed(x);
 }
 
 function kernelSin(x: number): number {

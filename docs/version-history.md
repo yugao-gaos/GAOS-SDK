@@ -15,15 +15,18 @@ Prepared July 25, 2026.
 - New optional `./session` kernel with persist-before-publish prepared
   transitions, explicit commit/abort lifecycle, mutable-state isolation,
   durable partial-window intents, crash rehydration, and per-seat observation
-  revisions.
+  revisions with canonical applied-submission acknowledgements.
+- Multi-level `finalizeRunReplay` projection with derived level seeds, global
+  action/record numbering, aggregate totals, and run-terminal validation.
 - `gaos.replay` v1.1 grouped resolutions preserve one reducer call per
   authoritative resolution and add deadline, extension, and mismatch audit
   records. The parser continues to accept and reproduce v1.0 artifacts.
-- Frozen `dmath-1` contexts provide deterministic `sin`, `cos`, `atan2`,
-  `clamp`, and `roundTo`, with an exported state-path math classification.
+- `dmath-1` contexts provide deterministic `sin`, `cos`, `atan2`, `clamp`,
+  and `roundTo`, frozen for the first time by this release with a 512-bit
+  independent oracle and Node/Chromium/Firefox/WebKit/workerd bit-vector CI.
 - `gaos.commit.sha256.v1` provides byte-exact framing, canonical payload
-  validation, synchronous SHA-256 replay verification, and published complete
-  preimage vectors.
+  validation, synchronous SHA-256 replay verification, published complete
+  preimage vectors, and explicit non-fatal replay diagnostics.
 
 [Sessions and integrity →](/session-and-integrity) ·
 [Portable replay →](/mechanisms/replay)

@@ -129,6 +129,13 @@ const checked = recheckReplayArtifact(
 if (!checked.ok) console.error(checked.problems);
 ```
 
+`checked.ok` reports demonstrated validation or simulation failures.
+`checked.diagnostics` reports evidence that is intentionally non-fatal, such
+as a redacted commitment-mismatch record whose reveal is unavailable for
+independent recomputation or salt reuse across commitments. A verifier that
+claims full independent cryptographic verification must require both
+`checked.ok` and `checked.diagnostics.length === 0`.
+
 The checker verifies global action numbering and level ordering, per-level seed
 policy, each recorded terminal result, and aggregate totals. Problems are
 prefixed with the level index/id so a multi-level run can be diagnosed without

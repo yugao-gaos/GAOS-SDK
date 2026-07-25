@@ -1,4 +1,6 @@
+import hashlib
 import json
+import struct
 from pathlib import Path
 
 import pytest
@@ -29,6 +31,32 @@ SCHEMA = (
     / "schemas"
     / "gaos.replay-v1.schema.json"
 )
+COMMITMENT_FIXTURE = (
+    Path(__file__).parents[2]
+    / "fixtures"
+    / "commitment"
+    / "gaos.commit.sha256.v1.vectors.json"
+)
+
+
+def test_commitment_vectors_match_python_framing_and_sha256():
+    def frame(value):
+        return struct.pack(">I", len(value)) + value
+
+    vectors = json.loads(COMMITMENT_FIXTURE.read_text(encoding="utf-8"))
+    for vector in vectors:
+        binding = vector["binding"]
+        preimage = b"".join([
+            frame(b"gaos.commit.sha256.v1"),
+            frame(binding["sessionId"].encode("utf-8")),
+            frame(binding["seat"].encode("utf-8")),
+            struct.pack(">Q", binding["commitmentId"]),
+            struct.pack(">Q", binding["windowRef"]),
+            frame(bytes.fromhex(vector["salt"])),
+            frame(canonical_json(vector["payload"]).encode("utf-8")),
+        ])
+        assert preimage.hex() == vector["preimageHex"], vector["name"]
+        assert hashlib.sha256(preimage).hexdigest() == vector["hash"], vector["name"]
 
 
 def test_golden_fixture_round_trips_with_typescript_canonical_bytes():

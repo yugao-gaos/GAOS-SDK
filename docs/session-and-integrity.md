@@ -9,7 +9,10 @@ database, network, timer, or deployment platform.
 Every state-changing operation returns a `Prepared` transition:
 
 ```ts
-import { createSessionKernel } from '@yugao-gaos/turn-based-grid-sdk/session';
+import {
+  createSessionKernel,
+  type Prepared,
+} from '@yugao-gaos/turn-based-grid-sdk/session';
 
 const kernel = createSessionKernel({
   sessionId,
@@ -27,14 +30,28 @@ const kernel = createSessionKernel({
   }),
 });
 
-const prepared = kernel.prepareIngest(submission);
-try {
-  await eventStore.append(prepared.events);
+async function persistCommitPublish<TResult>(prepared: Prepared<TResult>) {
+  try {
+    // Append the complete transition batch atomically. eventId is the
+    // idempotency key if this storage call itself is retried.
+    await eventStore.appendIdempotent(prepared.events);
+  } catch (error) {
+    kernel.abort(prepared);
+    throw error;
+  }
+
+  // A valid prepared transition is completed exactly once.
   kernel.commit(prepared);
-} catch (error) {
-  kernel.abort(prepared);
-  throw error;
+
+  // Publication is downstream of durable state. A send failure is retried or
+  // repaired with snapshot(seat); it must never abort the committed state.
+  await publishDeltas(prepared.deltas);
+  return prepared.result;
 }
+
+const receipt = await persistCommitPublish(
+  kernel.prepareIngest(submission),
+);
 ```
 
 Preparation operates on an isolated reducer draft. The live state,
@@ -42,6 +59,35 @@ observations, cursor, and digest do not change until `commit`. Hosts with
 mutable, copy-on-write, pooled, or ECS state supply `stateIsolation.fork`,
 `discard`, and optionally `retire`; structured-cloneable state uses the
 default strategy.
+
+### Normative host obligations
+
+Hosts must serialize transitions for one kernel and execute this order:
+
+1. call exactly one `prepare*` method;
+2. atomically persist every `prepared.events` entry;
+3. call `commit(prepared)` exactly once; and
+4. only then acknowledge the submitter or publish `prepared.deltas`.
+
+Every event id is derived from
+`sessionId + transitionRevision + eventIndex`. Storage must treat an exact
+duplicate id and byte-identical event as an idempotent retry, while conflicting
+bytes under the same id are fatal corruption. A prepared transition must end
+in exactly one `commit` or `abort`. Persistence failure requires `abort`;
+delivery failure after commit does not.
+
+Crash recovery always follows the durable log:
+
+- before persistence, nothing happened and the draft is aborted/discarded;
+- after persistence but before in-memory commit, restart with
+  `rehydrateKernel(options, transcript)`—the persisted transition wins; and
+- after commit but before delivery, rehydrate the same log and retransmit or
+  send `snapshot(seat)`.
+
+`stateIsolation.discard` owns cleanup for an aborted or stale draft and is
+called exactly once. After a successful commit, `stateIsolation.retire` owns
+the previous live state and is also called exactly once. Hosts must not retain
+or reuse either resource after its ownership callback.
 
 Accepted intents are events even before a simultaneous window is complete.
 `rehydrateKernel(options, transcript)` therefore restores pending commands and
@@ -52,13 +98,46 @@ group.
 Every seat has an independent `viewRevision`. Resolution increments it even
 when the seat's redacted view is unchanged. `snapshot(seat)` is the reconnect
 path; v1 observation deltas are either a complete snapshot or an unchanged
-marker.
+marker. Resolution deltas also carry `acknowledgements`, the applied
+`(participantId, submissionId)` identities in canonical reducer order.
+Host-derived inputs are excluded and reconnect snapshots carry an empty list.
 
-The v0.19 kernel bounds future tick targets, buffered submissions per seat,
-catch-up work, retained receipts, and extension bytes. The client-side
-`PredictionSession` sketch from RFC-006 is deferred to v0.20: observation
-deltas first need an authoritative acknowledgement identity so reconciliation
-can remove and replay pending predictions deterministically.
+Prediction clients process deltas in increasing `viewRevision` order, apply
+the authoritative body, remove exact acknowledged identities from their
+pending queue, and replay the remaining pending inputs in original local
+enqueue order. A revision gap requires retransmission or snapshot/resync; it
+must not be filled by guessing.
+
+The v0.19 kernel bounds future tick targets, catch-up work, retained receipts,
+and extension bytes. A participation window admits exactly one unresolved
+intent per seat, so there is no multi-entry per-seat buffer. The client-side
+`PredictionSession` class remains deferred to v0.20 so it can be extracted
+from a working TabletopLabs migration; its acknowledgement contract is stable
+in v0.19.
+
+## Multi-level runs
+
+Each kernel remains one level episode. Hosts compose completed episodes with
+`finalizeRunReplay`:
+
+```ts
+import {
+  finalizeRunReplay,
+} from '@yugao-gaos/turn-based-grid-sdk/session';
+
+const artifact = finalizeRunReplay(levelTranscripts, {
+  seed: runSeed,
+  perm,
+  visibility: 'full',
+});
+```
+
+The input list must be non-empty and ordered. Transcript `i` must use
+`runLevelSeed(runSeed, i)`; all segments share their session, game/adapter,
+and dmath declaration; and every non-final segment must be won. The projection
+assigns global action/record numbers and level indices, derives aggregate
+totals, and returns an ordinary `gaos.replay` v1.1 artifact for the existing
+whole-run verifier.
 
 ## Deterministic math
 
@@ -80,15 +159,18 @@ non-finite inputs and documented out-of-domain values instead of allowing
 NaN or infinity into reducer state. The selected algorithm is recorded in a
 session replay and must be constructible before re-simulation begins.
 
-| Function | Accepted domain | Boundary rule |
+| Function | Accepted domain | Accuracy/boundary rule |
 | --- | --- | --- |
-| `sin`, `cos` | finite `|x| <= 2^30` | preserve the signed-zero sine convention |
-| `atan2` | finite `x` and `y` | IEEE signed-zero quadrants |
+| `sin`, `cos` | finite `|x| <= 2^30` | at most 1 ulp; preserve the signed-zero sine convention |
+| `atan2` | finite `x` and `y` | at most 3 ulp; IEEE signed-zero quadrants |
 | `clamp` | finite values, `lo <= hi` | exact endpoint selection |
-| `roundTo` | integer decimals `[-15, 15]`, scaled magnitude `< 2^53` | half away from zero |
+| `roundTo` | integer decimals `[-15, 15]`, scaled magnitude `< 2^53` | deterministic binary64, half away from zero |
 
 The package publishes exact binary64 vectors at
-`fixtures/dmath/dmath-1.vectors.json`.
+`fixtures/dmath/dmath-1.vectors.json`. CI runs them in Node, Chromium,
+Firefox, WebKit, and workerd. A reproducible 512-bit integer oracle and
+constant generator provide accuracy and provenance evidence without calling
+native transcendental functions.
 
 ## Commit–reveal envelopes
 
@@ -117,7 +199,14 @@ preimage-and-hash vectors at
 `fixtures/commitment/gaos.commit.sha256.v1.vectors.json`.
 Replay recheck results expose non-fatal `diagnostics` for redacted mismatch
 records that cannot be independently rechecked and for salt reuse across
-distinct commitments.
+distinct commitments. `ok: true` means no demonstrated replay failure; a
+consumer claiming independent cryptographic verification must additionally
+require `diagnostics.length === 0`.
+
+Live reveal processing reports salt reuse through
+`prepared.result.warnings`. It remains non-fatal because session/seat/window
+binding keeps commitments distinct, but hosts should surface or log the
+warning: salt reuse weakens resistance to offline guessing.
 
 ## Finalization
 

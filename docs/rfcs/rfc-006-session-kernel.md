@@ -1,13 +1,13 @@
 # RFC — `./session`: the authoritative session kernel (optional subpath)
 
-Status: **implemented (rev 7, v0.19.0, 2026-07-25)** · Target: v0.19 · Breaking: no
+Status: **implemented (rev 8, v0.19.0, 2026-07-25)** · Target: v0.19 · Breaking: no
 (new subpath; requires the gaos.replay v1.1 format bump, which lands first)
 
-Current disposition (rev 7, 2026-07-25): §§1–6 are the sole normative
-text except §3.2, whose client companion is deferred to v0.20. Its current
-delta shape does not carry authoritative acknowledgement identities, so it
-cannot deterministically decide which pending predictions to remove during
-reconciliation. Rev 5 resolves the fourth review: §3.1 adds SessionStateIsolation
+Current disposition (rev 8, 2026-07-25): §§1–6 are the sole normative
+text except the `PredictionSession` class sketch in §3.2, which is deferred to
+v0.20. Rev 8 adds the stable v0.19 acknowledgement identity/order contract
+and the multi-level `finalizeRunReplay` projection required by RFC-009.
+Rev 5 resolves the fourth review: §3.1 adds SessionStateIsolation
 (fork/discard/retire) so mutable/COW reducers are first-class in prepared
 transitions — the kernel never assumes fresh-state reducers (§J) — and rev 6
 adds the exactly-once abort/retire lifecycle (§L). Earlier
@@ -23,8 +23,9 @@ See §M.
 Implementation evidence (2026-07-25): `src/session.ts`,
 `src/engine/replay-format.ts`, and `test/session.test.ts` cover the prepared
 lifecycle, mutable-state isolation, durable partial windows, rehydration,
-atomic grouped replay, deadlines, checkpoints, observation revisions, and
-bounded tick catch-up.
+atomic grouped replay, deadlines, checkpoints, observation revisions,
+acknowledgement ordering, multi-level run composition, and bounded tick
+catch-up.
 
 Fifth review (2026-07-25): mutable/COW isolation is resolved, but the host
 cannot explicitly abort an opaque prepared transition after persistence
@@ -206,6 +207,11 @@ export interface Prepared<TResult> {
 
 /** Finalization is a pure projection at a terminal result (see §D1). */
 export function finalizeReplay(t: SessionTranscript, o: FinalizeOptions): ReplayArtifact<unknown>;
+/** Ordered one-level transcripts become one derived-seed run (§3.5). */
+export function finalizeRunReplay(
+  transcripts: readonly SessionTranscript[],
+  options: FinalizeRunOptions,
+): ReplayArtifact<unknown>;
 ```
 
 Determinism rules (contractual): ingestion order never affects outcomes —
@@ -216,10 +222,11 @@ which is how a DO avoids wall-clock ticking).
 ### 3.2 Client companion (informative; deferred to v0.20)
 
 `PredictionSession` is deliberately not part of the v0.19 implementation.
-The v0.20 design must add an acknowledgement identity/order contract to
-`ObservationDelta` (or to a paired authoritative response) before freezing
-the construction, rollback, and pending-action APIs. The sketch below records
-the intended direction only and is not normative.
+The acknowledgement identity/order contract it needs is now normative in
+§3.3. The class remains deferred so v0.20 can extract its construction,
+rollback, and pending-action API from TabletopLabs' working migration rather
+than design those pieces speculatively. The sketch below records direction
+only and is not normative.
 
 ```ts
 export interface PredictionSession<TView> {
@@ -244,6 +251,10 @@ export interface ObservationDelta {
   viewRevision: number;    // monotonic per seat; advances on EVERY resolution
   tick: number;
   codec: 'v1';             // v1 is snapshot-only; patch codecs are future, negotiated
+  acknowledgements: readonly {
+    participantId: string;
+    submissionId: string;
+  }[];
   body:
     | { kind: 'snapshot'; view: TickView<unknown, unknown> }
     | { kind: 'unchanged' };
@@ -253,8 +264,20 @@ export interface ObservationDelta {
 ```
 
 The kernel computes deltas from successive `viewFor` outputs — products never
-hand-write redaction on the wire. A seat that misses deltas requests a
-snapshot (late join uses the same path).
+hand-write redaction on the wire. `acknowledgements` contains every user input
+applied by the resolution that produced this `viewRevision`, in exact
+canonical reducer-input order. Host-derived inputs with a null submission id
+are excluded. Every seat delta for one resolution carries the same identities;
+the identities acknowledge ordering, not visibility of action payloads.
+`snapshot(seat)` applies no new input and therefore carries an empty list.
+
+Clients consume deltas in strictly increasing `viewRevision` order. For each
+delta they apply the authoritative body, remove pending submissions whose
+exact `(participantId, submissionId)` identity appears in
+`acknowledgements`, then replay the remaining pending inputs in their original
+local enqueue order. Duplicate acknowledgements are harmless. A revision gap
+requires retransmission or snapshot/resync; clients must not guess the missing
+acknowledgement order.
 
 ### 3.4 Host obligations (adapter interface withdrawn — §D2/§F-E2)
 
@@ -269,6 +292,25 @@ live state is retired via `stateIsolation.retire` (absent ⇒
 product-managed). On crash between persist and commit: rehydrate via
 `rehydrateKernel(transcript)`; the persisted events win. Wall clocks never
 enter the kernel — deadlines are ingested inputs (§F-E3).
+
+### 3.5 Multi-level run projection
+
+One kernel still owns exactly one level episode. `finalizeRunReplay` composes
+an ordered, non-empty list of terminal level transcripts into one
+`gaos.replay` v1.1 run:
+
+- `FinalizeRunOptions.seed` is the run seed, and transcript `i` must record
+  exactly `runLevelSeed(runSeed, i)`;
+- all segments must share `sessionId`, game/adapter identity, and dmath
+  declaration;
+- every non-final segment must end `won`; a failed segment terminates the run;
+- action and record sequence numbers are reassigned globally and each record
+  receives its ordered `levelIndex`; and
+- `createReplayArtifact` derives per-level seeds and aggregate totals, keeping
+  the format's existing validation and recheck path authoritative.
+
+Independently seeded transcripts are rejected rather than silently assembled
+under derived-seed semantics.
 
 ## 4. Extraction plan (from Arena's session-do)
 
@@ -566,10 +608,12 @@ advance(target?): {
   deltas), and trivially testable.
 - Exposed state: `cursor()`, `tick()`, `viewRevision(seat)`,
   `snapshot(seat)` (for reconnect), `sessionHeader()`.
-- `advance(target)` semantics pinned: ticks mode — target is inclusive,
-  monotonic, `target - tick()` capped by `limits.maxCatchUpTicks` (excess
-  returns `partial: true`; host loops); stale target throws. Turns mode —
-  `target` forbidden; each call resolves at most one window.
+- `advance(target)` semantics pinned: ticks mode — target is inclusive and
+  monotonic. `target - tick()` is the number of future ticks beyond the
+  current open tick and is capped by `limits.maxFutureTicks`; the current tick
+  itself is not "future". One call resolves at most `maxCatchUpTicks`
+  inclusive ticks, returning `partial: true` when the host must loop. A stale
+  target throws. Turns mode forbids `target` and resolves at most one window.
 - Deadlines: hosts submit `DeadlineInput { deadlineId, tick }` as ordinary
   ingested inputs — durably ordered with gameplay, recorded as `deadline`
   events (time-as-input doctrine, now in the event union).
@@ -637,9 +681,13 @@ commit/reveal as opaque submissions until RFC-008 lands.
    projection time, keeping the `Action N` representation a replay-format
    concern.
 6. **Q6 (bounds):** `limits = { maxFutureTicks (default 2× tick rate),
-   maxBufferedSubmissionsPerSeat (default 64), maxCatchUpTicks (default
-   600), receiptRetention }`; violations return typed rejections, never
-   unbounded work.
+   maxCatchUpTicks (default 600), receiptRetention, maxExtensionBytes }`.
+   The collector admits exactly one unresolved intent per participating seat,
+   so there is no multi-entry per-seat buffer and no separate buffer limit.
+   `maxFutureTicks` measures only the distance ahead of the current open tick:
+   a target exactly `maxFutureTicks` ahead is valid and resolves the current
+   tick plus that many future ticks, subject to the per-call catch-up cap.
+   Violations use typed errors and never trigger unbounded work.
 
 ---
 

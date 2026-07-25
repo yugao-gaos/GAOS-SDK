@@ -3,6 +3,12 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { JsonValue } from '../src/protocol.js';
 import {
+  oracleAtan2,
+  oracleCos,
+  oracleSin,
+  ulpDistance,
+} from '../scripts/dmath-oracle.mjs';
+import {
   COMMITMENT_SCHEME,
   STATE_MATH,
   bytesToHex,
@@ -41,6 +47,27 @@ describe('deterministic math', () => {
     expect(dmath.roundTo(-0.49999999999999994, 0)).toBe(-0);
     expect(Object.is(dmath.roundTo(-0.1, 0), -0)).toBe(true);
     expect(dmath.clamp(4, 0, 3)).toBe(3);
+  });
+
+  it('meets documented ulp bounds against an independent 512-bit oracle', () => {
+    const dmath = createDmath();
+    for (const value of [Math.PI / 2, Math.PI, Math.PI * 2]) {
+      expect(ulpDistance(dmath.sin(value), oracleSin(value))).toBe(0);
+      expect(ulpDistance(dmath.cos(value), oracleCos(value))).toBe(0);
+    }
+    let seed = 0x5eed_1234;
+    const randomUnit = (): number => {
+      seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+      return seed / 0x1_0000_0000;
+    };
+    for (let index = 0; index < 512; index++) {
+      const angle = (randomUnit() * 2 - 1) * 1_073_741_824;
+      expect(ulpDistance(dmath.sin(angle), oracleSin(angle))).toBeLessThanOrEqual(1);
+      expect(ulpDistance(dmath.cos(angle), oracleCos(angle))).toBeLessThanOrEqual(1);
+      const y = (randomUnit() * 2 - 1) * 1_000_000;
+      const x = (randomUnit() * 2 - 1) * 1_000_000;
+      expect(ulpDistance(dmath.atan2(y, x), oracleAtan2(y, x))).toBeLessThanOrEqual(3);
+    }
   });
 
   it('captures custom backend methods at construction', () => {
@@ -377,5 +404,63 @@ describe('gaos.commit.sha256.v1', () => {
     expect(checked.ok).toBe(true);
     expect(checked.problems).toEqual([]);
     expect(checked.diagnostics.join('\n')).toMatch(/salt reuse/);
+  });
+
+  it('retains an unrevealed commitment in a seat-scoped finalized artifact', () => {
+    interface CommitState { actionsUsed: number }
+    const commitReducer: TickReducer<{}, CommitState> = {
+      init: () => ({ actionsUsed: 0 }),
+      advance: (state, inputs) => ({
+        actionsUsed: state.actionsUsed + inputs.length,
+      }),
+      view: (state): TickView => ({
+        actions: [{ id: 'Action 1', params: 'none' }],
+        status: state.actionsUsed === 1 ? 'won' : 'playing',
+        ...(state.actionsUsed === 1 ? { stars: 3 } : {}),
+        hud: { actionsUsed: state.actionsUsed },
+      }),
+    };
+    const hash = createCommitmentHash(binding, salt, payload);
+    const commit = {
+      wireId: 'Action 1',
+      canonicalId: 'Action 1',
+      seat: binding.seat,
+      commit: { commitmentId: 0, scheme: COMMITMENT_SCHEME, hash },
+    } as const;
+    const artifact = createReplayArtifact({
+      sessionId: binding.sessionId,
+      game: {
+        id: 'unrevealed-test',
+        version: '1',
+        adapter: { id: 'unrevealed-test/reducer', version: '1' },
+      },
+      seed: 1,
+      seedPolicy: 'explicit',
+      perm: [0],
+      visibility: `seat:${binding.seat}`,
+      levels: [{
+        id: 'only',
+        seed: 1,
+        level: {},
+        result: { status: 'won', stars: 3, actionsUsed: 1 },
+      }],
+      actions: [{ ...commit, n: 0, levelIndex: 0 }],
+      records: [{
+        kind: 'resolution',
+        n: 0,
+        levelIndex: 0,
+        tick: binding.windowRef,
+        inputs: [commit],
+        cause: 'complete',
+      }],
+    });
+    expect(JSON.stringify(artifact)).not.toContain(salt);
+    expect(JSON.stringify(artifact)).not.toContain('"payload"');
+    expect(artifact.header.visibility).toBe('seat:red');
+    expect(recheckReplayArtifact(artifact, () => commitReducer)).toMatchObject({
+      ok: true,
+      problems: [],
+      diagnostics: [],
+    });
   });
 });

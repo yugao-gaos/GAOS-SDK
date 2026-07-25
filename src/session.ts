@@ -12,6 +12,7 @@ import {
 } from './protocol.js';
 import {
   COMMITMENT_SCHEME,
+  GAOS_REPLAY_DERIVED_SEEDS,
   advanceTick,
   assertCommitmentEnvelope,
   createCommitmentHash,
@@ -36,8 +37,6 @@ import {
 export interface SessionLimits {
   /** Maximum distance a tick target may be ahead of the open tick. */
   maxFutureTicks?: number;
-  /** Maximum unresolved submissions retained for one seat. */
-  maxBufferedSubmissionsPerSeat?: number;
   /** Maximum ticks resolved by one `prepareAdvance` call. */
   maxCatchUpTicks?: number;
   /** Receipts retained per seat, measured in resolved windows. */
@@ -189,11 +188,21 @@ export interface ObservationDelta<TView = TickView<unknown, unknown>> {
   viewRevision: number;
   tick: number;
   codec: 'v1';
+  /**
+   * Applied user inputs in canonical reducer order for this view revision.
+   * A reconnect snapshot applies no new input and therefore carries `[]`.
+   */
+  acknowledgements: readonly ObservationAcknowledgement[];
   body:
     | { kind: 'snapshot'; view: TView }
     | { kind: 'unchanged' };
   /** Diagnostic only; not authentication or anti-cheat evidence. */
   viewDigest: number;
+}
+
+export interface ObservationAcknowledgement {
+  participantId: string;
+  submissionId: string;
 }
 
 export interface IngestReceipt {
@@ -213,6 +222,15 @@ export interface AdvanceSummary<TView> {
   tick: number;
   digest: number;
   deltas: readonly ObservationDelta<TView>[];
+  /** Non-fatal integrity warnings observed while preparing this advance. */
+  warnings: readonly SessionWarning[];
+}
+
+export interface SessionWarning {
+  code: 'salt_reuse';
+  message: string;
+  participantId: string;
+  commitmentId: number;
 }
 
 export interface DeadlineInput {
@@ -225,6 +243,11 @@ export interface FinalizeOptions {
   perm: number[];
   visibility?: TranscriptVisibility;
   extensions?: JsonObject;
+}
+
+export interface FinalizeRunOptions extends FinalizeOptions {
+  /** Authoritative run seed used to derive every ordered level seed. */
+  seed: number;
 }
 
 const preparedTransition: unique symbol = Symbol('gaos.prepared-transition');
@@ -258,6 +281,7 @@ interface KernelState<TState, TCommand extends JsonValue, TView> {
   viewRevisions: Map<string, number>;
   commitments: Map<string, LiveCommitment>;
   nextCommitmentIds: Map<string, number>;
+  seenSalts: Map<string, string>;
 }
 
 interface PreparedState<TState, TCommand extends JsonValue, TView> {
@@ -285,8 +309,7 @@ export type PreparedTransitionErrorCode =
 
 export type SessionConflictErrorCode =
   | 'conflict'
-  | 'unknown_submission'
-  | 'buffer_limit';
+  | 'unknown_submission';
 
 export class PreparedTransitionError extends Error {
   constructor(
@@ -346,7 +369,6 @@ export interface SessionKernel<TCommand extends JsonValue, TView> {
 }
 
 const DEFAULT_LIMITS = Object.freeze({
-  maxBufferedSubmissionsPerSeat: 64,
   maxCatchUpTicks: 600,
   receiptRetention: 64,
   maxExtensionBytes: 65_536,
@@ -360,10 +382,23 @@ function actionCopy(action: SubmittedAction): SubmittedAction {
   return structuredClone(action);
 }
 
-function deepFreeze<T>(value: T): T {
-  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
-    for (const child of Object.values(value)) deepFreeze(child);
-    Object.freeze(value);
+function deepFreeze<T>(value: T, maximumObjects = 100_000): T {
+  if (value === null || typeof value !== 'object') return value;
+  const pending: object[] = [value];
+  const visited = new WeakSet<object>();
+  let visitedObjects = 0;
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    visitedObjects++;
+    if (visitedObjects > maximumObjects) {
+      throw new RangeError('prepared value exceeds the deep-freeze object limit');
+    }
+    for (const child of Object.values(current)) {
+      if (child !== null && typeof child === 'object') pending.push(child);
+    }
+    Object.freeze(current);
   }
   return value;
 }
@@ -432,8 +467,6 @@ class SessionKernelImpl<
         ?? (options.cadence.mode === 'ticks'
           ? options.cadence.rate.ticksPerSecond * 2
           : 1),
-      maxBufferedSubmissionsPerSeat: options.limits?.maxBufferedSubmissionsPerSeat
-        ?? DEFAULT_LIMITS.maxBufferedSubmissionsPerSeat,
       maxCatchUpTicks: options.limits?.maxCatchUpTicks ?? DEFAULT_LIMITS.maxCatchUpTicks,
       receiptRetention: options.limits?.receiptRetention ?? DEFAULT_LIMITS.receiptRetention,
       maxExtensionBytes: options.limits?.maxExtensionBytes ?? DEFAULT_LIMITS.maxExtensionBytes,
@@ -501,6 +534,7 @@ class SessionKernelImpl<
       viewRevisions: revisions,
       commitments: new Map(),
       nextCommitmentIds: new Map(),
+      seenSalts: new Map(),
     };
     if (transcript) this.rehydrate(transcript);
   }
@@ -536,6 +570,7 @@ class SessionKernelImpl<
       viewRevisions: new Map(this.live.viewRevisions),
       commitments: cloneMapValues(this.live.commitments),
       nextCommitmentIds: new Map(this.live.nextCommitmentIds),
+      seenSalts: new Map(this.live.seenSalts),
     };
     this.draftForks.set(draft, reducerState);
     return draft;
@@ -576,6 +611,9 @@ class SessionKernelImpl<
       draft.transitionRevision = nextRevision;
       draft.events.push(...events);
     }
+    const publishedEvents = deepFreeze(structuredClone(events));
+    const publishedDeltas = deepFreeze(structuredClone(deltas));
+    const publishedResult = deepFreeze(structuredClone(result));
     const state: PreparedState<TState, TCommand, TView> = {
       owner: this.owner,
       completion: 'open',
@@ -583,13 +621,12 @@ class SessionKernelImpl<
       drafts: this.takeDraftResources(draft),
       noop,
     };
-    const publishedEvents = deepFreeze(structuredClone(events));
     return Object.freeze({
       baseTransitionRevision: base,
       nextTransitionRevision: nextRevision,
       events: publishedEvents,
-      deltas: Object.freeze(deltas),
-      result,
+      deltas: publishedDeltas,
+      result: publishedResult,
       [preparedTransition]: state as PreparedState<unknown, JsonValue, unknown>,
     });
   }
@@ -611,9 +648,6 @@ class SessionKernelImpl<
   }
 
   prepareIngest(submission: CommandSubmission<TCommand>): Prepared<IngestReceipt> {
-    if (this.options.reducer.view(this.live.reducerState).status !== 'playing') {
-      throw new SessionAdvanceError('terminal', 'session is already terminal');
-    }
     const key = receiptKey(submission.participantId, submission.submissionId);
     const canonicalCommand = canonicalJson(submission.command);
     const existing = this.live.receipts.get(key);
@@ -622,13 +656,21 @@ class SessionKernelImpl<
         throw new SessionConflictError('submission id was reused with different content or cursor');
       }
       const draft = this.forkLive();
-      return this.makePrepared(
-        draft,
-        [],
-        [],
-        { ...existing.receipt, status: 'duplicate' },
-        true,
-      );
+      try {
+        return this.makePrepared(
+          draft,
+          [],
+          [],
+          { ...existing.receipt, status: 'duplicate' },
+          true,
+        );
+      } catch (error) {
+        this.discardDraft(draft);
+        throw error;
+      }
+    }
+    if (this.options.reducer.view(this.live.reducerState).status !== 'playing') {
+      throw new SessionAdvanceError('terminal', 'session is already terminal');
     }
     if (this.live.expiredReceiptKeys.has(key)) {
       throw new SessionConflictError(
@@ -685,16 +727,6 @@ class SessionKernelImpl<
         );
       }
     }
-    const bufferedForSeat = [...this.live.receipts.values()].filter(
-      (receipt) => receipt.cursor === this.live.cursor
-        && receipt.receipt.participantId === submission.participantId,
-    ).length;
-    if (bufferedForSeat >= this.limits.maxBufferedSubmissionsPerSeat) {
-      throw new SessionConflictError(
-        'buffer_limit',
-        'maxBufferedSubmissionsPerSeat was reached',
-      );
-    }
     const collected = collectIntent(this.live.window, submission);
     const draft = this.forkLive();
     draft.window = structuredClone(collected.window);
@@ -719,15 +751,20 @@ class SessionKernelImpl<
       receipt,
       cursor: draft.cursor,
     });
-    return this.makePrepared(draft, [{
-      kind: 'intent-accepted',
-      tick: draft.tick,
-      revision: draft.cursor,
-      participantId: submission.participantId,
-      submissionId: submission.submissionId,
-      command: structuredClone(submission.command),
-      canonicalCommand,
-    }], [], receipt);
+    try {
+      return this.makePrepared(draft, [{
+        kind: 'intent-accepted',
+        tick: draft.tick,
+        revision: draft.cursor,
+        participantId: submission.participantId,
+        submissionId: submission.submissionId,
+        command: structuredClone(submission.command),
+        canonicalCommand,
+      }], [], receipt);
+    } catch (error) {
+      this.discardDraft(draft);
+      throw error;
+    }
   }
 
   private mapIntents(
@@ -735,11 +772,14 @@ class SessionKernelImpl<
     intents: readonly CollectedIntent<TCommand>[],
   ): {
     inputs: CanonicalInput[];
+    warnings: SessionWarning[];
     rejection?: Omit<Extract<SessionEvent, { kind: 'rejection' }>, keyof SessionEventBase>;
   } {
     const inputs: CanonicalInput[] = [];
+    const warnings: SessionWarning[] = [];
     const commitments = cloneMapValues(draft.commitments);
     const nextCommitmentIds = new Map(draft.nextCommitmentIds);
+    const seenSalts = new Map(draft.seenSalts);
     for (const intent of intents) {
       const context: CommandContext = {
         sessionId: this.options.sessionId,
@@ -776,6 +816,21 @@ class SessionKernelImpl<
         nextCommitmentIds.set(intent.participantId, expected + 1);
       }
       if (action.reveal) {
+        const identity = commitmentKey(
+          intent.participantId,
+          action.reveal.commitmentId,
+        );
+        const priorIdentity = seenSalts.get(action.reveal.salt);
+        if (priorIdentity !== undefined && priorIdentity !== identity) {
+          warnings.push({
+            code: 'salt_reuse',
+            message: 'commitment salt was reused within this session',
+            participantId: intent.participantId,
+            commitmentId: action.reveal.commitmentId,
+          });
+        } else {
+          seenSalts.set(action.reveal.salt, identity);
+        }
         const key = commitmentKey(intent.participantId, action.reveal.commitmentId);
         const commitment = commitments.get(key);
         if (!commitment || commitment.revealed) {
@@ -792,8 +847,10 @@ class SessionKernelImpl<
           action.reveal.payload,
         );
         if (actual !== commitment.envelope.hash) {
+          draft.seenSalts = seenSalts;
           return {
             inputs,
+            warnings,
             rejection: {
               kind: 'rejection',
               code: 'commit_mismatch',
@@ -820,7 +877,8 @@ class SessionKernelImpl<
     }
     draft.commitments = commitments;
     draft.nextCommitmentIds = nextCommitmentIds;
-    return { inputs };
+    draft.seenSalts = seenSalts;
+    return { inputs, warnings };
   }
 
   private resolveOnce(
@@ -831,6 +889,7 @@ class SessionKernelImpl<
     event?: Omit<Extract<SessionEvent, { kind: 'resolution' }>, keyof SessionEventBase>;
     rejection?: Omit<Extract<SessionEvent, { kind: 'rejection' }>, keyof SessionEventBase>;
     deltas: ObservationDelta<TView>[];
+    warnings: SessionWarning[];
   } {
     const intents = draft.window.participants
       .filter((seat) => Object.hasOwn(draft.window.intents, seat))
@@ -840,7 +899,10 @@ class SessionKernelImpl<
     }
     const collectedInputs = this.mapIntents(draft, intents);
     const mapped = forcedInputs && !collectedInputs.rejection
-      ? { inputs: [...collectedInputs.inputs, ...forcedInputs] }
+      ? {
+        inputs: [...collectedInputs.inputs, ...forcedInputs],
+        warnings: collectedInputs.warnings,
+      }
       : collectedInputs;
     if ('rejection' in mapped && mapped.rejection) {
       const rejectedSeat = mapped.rejection.participantId;
@@ -851,7 +913,7 @@ class SessionKernelImpl<
         mapped.rejection.participantId,
         mapped.rejection.submissionId,
       ));
-      return { rejection: mapped.rejection, deltas: [] };
+      return { rejection: mapped.rejection, deltas: [], warnings: mapped.warnings };
     }
     draft.reducerState = advanceTick(
       this.options.reducer,
@@ -860,6 +922,13 @@ class SessionKernelImpl<
     );
     const resolvedTick = draft.tick;
     const resolvedCursor = draft.cursor;
+    const acknowledgements: ObservationAcknowledgement[] = mapped.inputs.flatMap(
+      ({ participantId, submissionId }) => (
+        participantId === null || submissionId === null
+          ? []
+          : [{ participantId, submissionId }]
+      ),
+    );
     draft.cursor++;
     draft.tick++;
     const view = this.options.reducer.view(draft.reducerState);
@@ -875,6 +944,7 @@ class SessionKernelImpl<
         viewRevision: revision,
         tick: draft.tick,
         codec: 'v1',
+        acknowledgements: structuredClone(acknowledgements),
         body: unchanged
           ? { kind: 'unchanged' }
           : { kind: 'snapshot', view: structuredClone(next) },
@@ -911,6 +981,7 @@ class SessionKernelImpl<
         },
       },
       deltas,
+      warnings: mapped.warnings,
     };
   }
 
@@ -937,6 +1008,7 @@ class SessionKernelImpl<
     const draft = this.forkLive();
     const rawEvents: RawSessionEvent[] = [];
     const deltas: ObservationDelta<TView>[] = [];
+    const warnings: SessionWarning[] = [];
     try {
       const currentView = this.options.reducer.view(draft.reducerState);
       if (currentView.status !== 'playing') {
@@ -977,6 +1049,7 @@ class SessionKernelImpl<
           ? 'complete'
           : ready ? 'complete' : 'tick';
         const resolved = this.resolveOnce(draft, cause);
+        warnings.push(...resolved.warnings);
         if (resolved.rejection) {
           rawEvents.push(resolved.rejection);
           break;
@@ -989,7 +1062,7 @@ class SessionKernelImpl<
         if (this.options.reducer.view(draft.reducerState).status !== 'playing') break;
       }
       const digest = this.digestState(draft);
-      if (resolutions > 0) {
+      if (resolutions > 0 || rawEvents.at(-1)?.kind === 'rejection') {
         const rejection = rawEvents.at(-1)?.kind === 'rejection'
           ? rawEvents.pop()
           : undefined;
@@ -1003,6 +1076,7 @@ class SessionKernelImpl<
         tick: draft.tick,
         digest,
         deltas,
+        warnings,
       };
       return this.makePrepared(draft, rawEvents, deltas, result);
     } catch (error) {
@@ -1041,7 +1115,7 @@ class SessionKernelImpl<
       if (resolved.event) rawEvents.push(resolved.event);
       const deltas = resolved.deltas;
       const digest = this.digestState(draft);
-      if (resolved.event) {
+      if (resolved.event || resolved.rejection) {
         rawEvents.push({ kind: 'checkpoint', tick: draft.tick, digest });
       }
       const result: AdvanceSummary<TView> = {
@@ -1051,6 +1125,7 @@ class SessionKernelImpl<
         tick: draft.tick,
         digest,
         deltas,
+        warnings: resolved.warnings,
       };
       return this.makePrepared(draft, rawEvents, deltas, result);
     } catch (error) {
@@ -1060,6 +1135,9 @@ class SessionKernelImpl<
   }
 
   prepareExtension(lane: string, record: JsonObject): Prepared<void> {
+    if (this.options.reducer.view(this.live.reducerState).status !== 'playing') {
+      throw new SessionAdvanceError('terminal', 'session is already terminal');
+    }
     if (typeof lane !== 'string' || lane.length === 0) {
       throw new TypeError('lane must be a non-empty string');
     }
@@ -1068,12 +1146,17 @@ class SessionKernelImpl<
       throw new RangeError('extension record exceeds maxExtensionBytes');
     }
     const draft = this.forkLive();
-    return this.makePrepared(draft, [{
-      kind: 'extension',
-      tick: draft.tick,
-      lane,
-      record: structuredClone(record),
-    }], [], undefined);
+    try {
+      return this.makePrepared(draft, [{
+        kind: 'extension',
+        tick: draft.tick,
+        lane,
+        record: structuredClone(record),
+      }], [], undefined);
+    } catch (error) {
+      this.discardDraft(draft);
+      throw error;
+    }
   }
 
   commit(prepared: Prepared<unknown>): void {
@@ -1140,6 +1223,7 @@ class SessionKernelImpl<
       viewRevision: this.viewRevision(seat),
       tick: this.live.tick,
       codec: 'v1',
+      acknowledgements: [],
       body: { kind: 'snapshot', view },
       viewDigest: viewDigest(view),
     };
@@ -1233,6 +1317,14 @@ class SessionKernelImpl<
             });
             this.live.nextCommitmentIds.set(participantId, expected + 1);
           } else if (action.reveal) {
+            const identity = commitmentKey(
+              participantId,
+              action.reveal.commitmentId,
+            );
+            this.live.seenSalts.set(
+              action.reveal.salt,
+              this.live.seenSalts.get(action.reveal.salt) ?? identity,
+            );
             const commitment = this.live.commitments.get(
               commitmentKey(participantId, action.reveal.commitmentId),
             );
@@ -1274,6 +1366,11 @@ class SessionKernelImpl<
         }
         this.evictReceipts(this.live);
       } else if (event.kind === 'rejection') {
+        const identity = commitmentKey(event.participantId, event.commitmentId);
+        this.live.seenSalts.set(
+          event.attemptedReveal.salt,
+          this.live.seenSalts.get(event.attemptedReveal.salt) ?? identity,
+        );
         const intents = { ...this.live.window.intents };
         delete intents[event.participantId];
         this.live.window = { ...this.live.window, intents };
@@ -1349,6 +1446,10 @@ export function finalizeReplay<TLevel>(
   const records: ReplayRecord[] = [];
   for (const event of transcript.events) {
     if (event.kind === 'resolution') {
+      const legacySystemInput = event.cause === 'deadline' && !event.systemInput
+        ? [...event.inputs].reverse().find((input) => input.submissionId === null)
+        : undefined;
+      const systemInput = event.systemInput ?? legacySystemInput;
       records.push({
         kind: 'resolution',
         n: records.length,
@@ -1356,8 +1457,8 @@ export function finalizeReplay<TLevel>(
         tick: event.tick,
         inputs: event.inputs.map(replayInput),
         cause: event.cause,
-        ...(event.cause === 'deadline' && event.systemInput
-          ? { systemInput: replayInput(event.systemInput) }
+        ...(event.cause === 'deadline' && systemInput
+          ? { systemInput: replayInput(systemInput) }
           : {}),
       });
     } else if (event.kind === 'deadline') {
@@ -1433,6 +1534,95 @@ export function finalizeReplay<TLevel>(
       n,
       levelIndex: 0,
     })),
+    records,
+    ...(options.visibility === undefined ? {} : { visibility: options.visibility }),
+    ...(Object.keys(extensions).length === 0 ? {} : { extensions }),
+  });
+}
+
+/**
+ * Project an ordered, terminal sequence of one-level kernel transcripts into
+ * one portable multi-level run. Per-level seeds must already equal the
+ * derivation from `options.seed`.
+ */
+export function finalizeRunReplay<TLevel>(
+  transcripts: readonly SessionTranscript<TLevel>[],
+  options: FinalizeRunOptions,
+): ReplayArtifact<TLevel> {
+  if (transcripts.length === 0) {
+    throw new RangeError('a run replay requires at least one transcript');
+  }
+  if (!Number.isSafeInteger(options.seed)
+    || options.seed < 0
+    || options.seed > 0xffff_ffff) {
+    throw new RangeError('run seed must be an unsigned 32-bit integer');
+  }
+  const first = transcripts[0]!;
+  const game = canonicalJson(first.header.game);
+  const dmath = canonicalJson(first.header.dmath ?? null);
+  const levels = [];
+  const actions = [];
+  const records: ReplayRecord[] = [];
+  for (const [levelIndex, transcript] of transcripts.entries()) {
+    if (transcript.header.sessionId !== first.header.sessionId) {
+      throw new TypeError(`run transcript ${levelIndex} has a different sessionId`);
+    }
+    if (canonicalJson(transcript.header.game) !== game) {
+      throw new TypeError(`run transcript ${levelIndex} has a different game`);
+    }
+    if (canonicalJson(transcript.header.dmath ?? null) !== dmath) {
+      throw new TypeError(`run transcript ${levelIndex} has a different dmath declaration`);
+    }
+    const expectedSeed = runLevelSeed(options.seed, levelIndex);
+    if (transcript.header.seed !== expectedSeed) {
+      throw new TypeError(
+        `run transcript ${levelIndex} seed must equal runLevelSeed(runSeed, ${levelIndex})`,
+      );
+    }
+    const segment = finalizeReplay(transcript, {
+      perm: options.perm,
+      ...(options.visibility === undefined ? {} : { visibility: options.visibility }),
+    });
+    const level = segment.header.levels[0]!;
+    if (levelIndex < transcripts.length - 1 && level.result.status !== 'won') {
+      throw new TypeError(`run transcript ${levelIndex} must be won before another level`);
+    }
+    levels.push({
+      id: level.id,
+      ...(level.version === undefined ? {} : { version: level.version }),
+      level: level.level,
+      result: level.result,
+    });
+    for (const action of segment.actions) {
+      const { kind: _kind, ...input } = action;
+      actions.push({
+        ...input,
+        n: actions.length,
+        levelIndex,
+      });
+    }
+    for (const record of segment.records ?? []) {
+      records.push({
+        ...record,
+        n: records.length,
+        levelIndex,
+      });
+    }
+  }
+  const extensions: JsonObject = {
+    ...(options.extensions ?? {}),
+    ...(first.header.dmath === undefined
+      ? {}
+      : { dmath: structuredClone(first.header.dmath) as unknown as JsonValue }),
+  };
+  return createReplayArtifact({
+    sessionId: first.header.sessionId,
+    game: first.header.game,
+    seed: options.seed,
+    seedPolicy: GAOS_REPLAY_DERIVED_SEEDS,
+    perm: options.perm,
+    levels,
+    actions,
     records,
     ...(options.visibility === undefined ? {} : { visibility: options.visibility }),
     ...(Object.keys(extensions).length === 0 ? {} : { extensions }),

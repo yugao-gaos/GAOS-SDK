@@ -934,12 +934,14 @@ export function validateReplayArtifact(value: unknown): string[] {
             'attemptedReveal',
           ],
         };
-        rejectUnknownProperties(
-          record,
-          allowedByKind[kind as string]!,
-          `record ${index}`,
-          problems,
-        );
+        if (kind !== 'action') {
+          rejectUnknownProperties(
+            record,
+            allowedByKind[kind as string]!,
+            `record ${index}`,
+            problems,
+          );
+        }
         if (kind === 'action') {
           validateResolutionInput(record, `record ${index} action`, true);
         } else if (kind === 'resolution') {

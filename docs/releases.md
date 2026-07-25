@@ -12,11 +12,26 @@ This release adds the optional authoritative session and integrity layer:
 - `./session` prepared transitions enforce persist-before-publish ordering;
 - reducer drafts have explicit fork, discard, and retirement ownership;
 - accepted partial-window intents and receipts survive crash rehydration;
+- `finalizeRunReplay` composes ordered level transcripts with derived seeds,
+  global record numbering, aggregate totals, and run-terminal validation;
+- observation deltas carry applied submission acknowledgements in canonical
+  reducer order for prediction reconciliation;
 - replay v1.1 preserves grouped reducer calls plus deadline, extension, and
   commitment-mismatch audit records while retaining v1.0 parsing;
-- `dmath-1` supplies frozen deterministic trigonometry and rounding; and
+- `dmath-1` supplies deterministic trigonometry and rounding, frozen for the
+  first time by the v0.19 tag with independent-oracle and cross-runtime
+  evidence;
 - `gaos.commit.sha256.v1` supplies context-bound commit–reveal verification
-  with complete cross-language byte vectors.
+  with complete cross-language byte vectors;
+- replay recheck results add non-fatal `diagnostics`; consumers claiming
+  independent cryptographic verification must require an empty diagnostics
+  list in addition to `ok`;
+- session `AdvanceSummary` adds non-fatal `warnings`, currently used to
+  surface live commitment-salt reuse.
+
+The [sessions and integrity guide](/session-and-integrity) normatively defines
+the host's prepare → persist → commit → publish order, event-id idempotency,
+crash recovery, and reducer-state ownership callbacks.
 
 See [sessions and integrity](/session-and-integrity).
 

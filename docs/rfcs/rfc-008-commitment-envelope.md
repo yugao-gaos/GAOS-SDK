@@ -18,7 +18,9 @@ the golden-vector and strict-schema merge gates already stated. See §14.
 Implementation evidence (2026-07-25): `src/engine/commitment.ts`, session
 pre-reducer verification in `src/session.ts`, replay audit verification in
 `src/engine/replay-format.ts`, and the complete preimage vectors under
-`fixtures/commitment/`.
+`fixtures/commitment/`. TypeScript tests cover NIST/WebCrypto agreement,
+tampering, redacted unrevealed commitments, and audit behavior; the Python
+suite independently rebuilds every framed preimage and SHA-256 digest.
 
 Third review (2026-07-25): framing and lifecycle rules are resolved, but a
 live `commit_mismatch` audit record is not independently replay-verifiable
@@ -179,6 +181,9 @@ A commitment is bound to `(sessionId, seat, commitmentId, windowRef)`:
   session) — each fails with the specific expected code.
 - Replay: v1.1 artifact with commitments verifies; a doctored reveal fails;
   an unrevealed commitment survives finalization redacted.
+- Cross-language: Python independently reconstructs the u32/u64 framing,
+  canonical payload bytes, complete preimage, and SHA-256 for every published
+  vector.
 - WebCrypto-vs-shipped-SHA256 agreement vectors.
 
 ## 7. Open questions
@@ -376,8 +381,10 @@ All six required revisions **accepted**; §§2–5 updated in place. Decisions:
    depend on adapter-supplied crypto; the surface is one function and one
    test-vector file, a small price for universal verifiability.
 2. **Salt reuse:** allowed by the scheme (context binding keeps hashes
-   distinct); the verifier emits a non-fatal diagnostic warning on reuse
-   within a session, since reuse weakens offline-guessing resistance.
+   distinct); `AdvanceSummary.warnings` warns the live host and the replay
+   verifier emits a non-fatal diagnostic when reuse occurs within a session,
+   since reuse weakens offline-guessing resistance. Rehydration reconstructs
+   the live warning state from resolutions and mismatch audit records.
 3. **Payload bound:** 65536 bytes before hashing (also enforced at
    ingestion), preventing unbounded canonicalization/hash work.
 4. **Cross-level commitments:** v1 requires reveal within the same level
