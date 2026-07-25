@@ -9,7 +9,8 @@ from typing import Any
 
 
 GAOS_REPLAY_FORMAT_ID = "gaos.replay"
-GAOS_REPLAY_FORMAT_VERSION = "1.0"
+GAOS_REPLAY_FORMAT_VERSION = "1.1"
+GAOS_REPLAY_LEGACY_FORMAT_VERSION = "1.0"
 GAOS_REPLAY_MIME = "application/vnd.gaos.replay+jsonl"
 GAOS_REPLAY_EXTENSION = "gaos-replay.jsonl"
 GAOS_REPLAY_DERIVED_SEEDS = "gaos.run-level-seed.v1"
@@ -20,6 +21,9 @@ GAOS_REPLAY_MANIFEST_FORMAT = {
 }
 
 _ACTION_ID = re.compile(r"^Action ([1-9][0-9]*)$")
+_LOWER_HASH = re.compile(r"^[0-9a-f]{64}$")
+_LOWER_SALT = re.compile(r"^(?:[0-9a-f]{2}){16,64}$")
+_COMMITMENT_SCHEME = "gaos.commit.sha256.v1"
 _U32_MAX = 0xFFFF_FFFF
 _SAFE_INTEGER_MAX = (1 << 53) - 1
 
@@ -119,8 +123,14 @@ def validate_replay_artifact(value: Any) -> list[str]:
         problems.append("header.kind must be header")
     if header.get("format") != GAOS_REPLAY_FORMAT_ID:
         problems.append(f"header.format must be {GAOS_REPLAY_FORMAT_ID}")
-    if header.get("formatVersion") != GAOS_REPLAY_FORMAT_VERSION:
-        problems.append(f"header.formatVersion must be {GAOS_REPLAY_FORMAT_VERSION}")
+    if header.get("formatVersion") not in (
+        GAOS_REPLAY_LEGACY_FORMAT_VERSION,
+        GAOS_REPLAY_FORMAT_VERSION,
+    ):
+        problems.append(
+            "header.formatVersion must be "
+            f"{GAOS_REPLAY_LEGACY_FORMAT_VERSION} or {GAOS_REPLAY_FORMAT_VERSION}"
+        )
     if not isinstance(header.get("sessionId"), str) or not header["sessionId"]:
         problems.append("header.sessionId must be a non-empty string")
     if not _valid_u32(header.get("seed")):
@@ -326,6 +336,155 @@ def validate_replay_artifact(value: Any) -> list[str]:
                             problems.append(
                                 f"action {number} target {target_index} is invalid"
                             )
+            commit = action.get("commit")
+            reveal = action.get("reveal")
+            if commit is not None and reveal is not None:
+                problems.append(
+                    f"action {number} commit and reveal are mutually exclusive"
+                )
+            if "verifiedPayload" in action and reveal is None:
+                problems.append(
+                    f"action {number} verifiedPayload requires reveal"
+                )
+            if (
+                header.get("formatVersion") == GAOS_REPLAY_LEGACY_FORMAT_VERSION
+                and (
+                    commit is not None
+                    or reveal is not None
+                    or "verifiedPayload" in action
+                )
+            ):
+                problems.append(
+                    f"action {number} commitment fields require formatVersion 1.1"
+                )
+            if commit is not None and (
+                not isinstance(commit, dict)
+                or not _valid_u32(commit.get("commitmentId"))
+                or commit.get("scheme") != _COMMITMENT_SCHEME
+                or not isinstance(commit.get("hash"), str)
+                or not _LOWER_HASH.fullmatch(commit["hash"])
+            ):
+                problems.append(f"action {number} has an invalid commitment envelope")
+            if reveal is not None and (
+                not isinstance(reveal, dict)
+                or not _valid_u32(reveal.get("commitmentId"))
+                or not isinstance(reveal.get("salt"), str)
+                or not _LOWER_SALT.fullmatch(reveal["salt"])
+                or "payload" not in reveal
+            ):
+                problems.append(f"action {number} has an invalid reveal envelope")
+
+    records = value.get("records")
+    if records is not None:
+        if header.get("formatVersion") != GAOS_REPLAY_FORMAT_VERSION:
+            problems.append(
+                f"records require header.formatVersion {GAOS_REPLAY_FORMAT_VERSION}"
+            )
+        if not isinstance(records, list):
+            problems.append("records must be an array")
+        else:
+            previous_level_index = -1
+            allowed_kinds = {
+                "action",
+                "resolution",
+                "deadline",
+                "extension",
+                "checkpoint",
+                "commit-mismatch",
+            }
+            for index, record in enumerate(records):
+                if not isinstance(record, dict):
+                    problems.append(f"record at index {index} must be an object")
+                    continue
+                if record.get("n") != index:
+                    problems.append(
+                        f"record at index {index} must declare sequence number {index}"
+                    )
+                level_index = record.get("levelIndex")
+                if (
+                    not _valid_non_negative_integer(level_index)
+                    or level_index >= len(levels)
+                ):
+                    problems.append(
+                        f"record {index} has invalid levelIndex {level_index}"
+                    )
+                elif level_index < previous_level_index:
+                    problems.append(f"record {index} returns to an earlier level")
+                else:
+                    previous_level_index = level_index
+                kind = record.get("kind")
+                if kind not in allowed_kinds:
+                    problems.append(f"record {index} has unknown kind {kind}")
+                elif kind == "resolution":
+                    if not _valid_non_negative_integer(record.get("tick")):
+                        problems.append(
+                            f"resolution {index} tick must be a non-negative safe integer"
+                        )
+                    if not isinstance(record.get("inputs"), list):
+                        problems.append(f"resolution {index} inputs must be an array")
+                    if record.get("cause") not in ("complete", "deadline", "tick"):
+                        problems.append(
+                            f"resolution {index} cause must be complete, deadline, or tick"
+                        )
+                elif kind == "deadline":
+                    if not _valid_non_negative_integer(record.get("tick")):
+                        problems.append(
+                            f"deadline {index} tick must be a non-negative safe integer"
+                        )
+                    if (
+                        not isinstance(record.get("reason"), str)
+                        or not record["reason"]
+                    ):
+                        problems.append(
+                            f"deadline {index} reason must be a non-empty string"
+                        )
+                elif kind == "extension":
+                    if not isinstance(record.get("lane"), str) or not record["lane"]:
+                        problems.append(
+                            f"extension {index} lane must be a non-empty string"
+                        )
+                    if not isinstance(record.get("record"), dict):
+                        problems.append(f"extension {index} record must be an object")
+                elif kind == "checkpoint":
+                    if not _valid_non_negative_integer(record.get("tick")):
+                        problems.append(
+                            f"checkpoint {index} tick must be a non-negative safe integer"
+                        )
+                    if not _valid_u32(record.get("digest")):
+                        problems.append(
+                            f"checkpoint {index} digest must be an unsigned 32-bit integer"
+                        )
+                elif kind == "commit-mismatch":
+                    if not _valid_non_negative_integer(record.get("tick")):
+                        problems.append(
+                            f"commit-mismatch {index} tick must be a non-negative safe integer"
+                        )
+                    if not _valid_u32(record.get("commitmentId")):
+                        problems.append(
+                            f"commit-mismatch {index} commitmentId must be an unsigned 32-bit integer"
+                        )
+                    if record.get("scheme") != _COMMITMENT_SCHEME:
+                        problems.append(
+                            f"commit-mismatch {index} scheme must be {_COMMITMENT_SCHEME}"
+                        )
+                    for field in ("participantId", "submissionId"):
+                        if (
+                            not isinstance(record.get(field), str)
+                            or not record[field]
+                        ):
+                            problems.append(
+                                f"commit-mismatch {index} {field} must be a non-empty string"
+                            )
+                    attempt = record.get("attemptedReveal")
+                    if attempt is not None and (
+                        not isinstance(attempt, dict)
+                        or not isinstance(attempt.get("salt"), str)
+                        or not _LOWER_SALT.fullmatch(attempt["salt"])
+                        or "payload" not in attempt
+                    ):
+                        problems.append(
+                            f"commit-mismatch {index} attemptedReveal is invalid"
+                        )
 
     problems.extend(_validate_json_value(value))
     return problems
@@ -419,7 +578,45 @@ def parse_replay_jsonl(jsonl: str) -> dict[str, Any]:
             raise ReplayFormatError(
                 [f"line {index + 1} is not valid JSON: {error.msg}"]
             ) from error
-    artifact = {"header": parsed[0], "actions": parsed[1:]}
+    header = parsed[0]
+    stream = parsed[1:]
+    has_v11_records = (
+        isinstance(header, dict)
+        and header.get("formatVersion") == GAOS_REPLAY_FORMAT_VERSION
+        and any(
+            isinstance(record, dict) and record.get("kind") != "action"
+            for record in stream
+        )
+    )
+    actions = []
+    if has_v11_records:
+        for record in stream:
+            if not isinstance(record, dict):
+                continue
+            if record.get("kind") == "action":
+                actions.append(dict(record))
+            elif record.get("kind") == "resolution" and isinstance(
+                record.get("inputs"), list
+            ):
+                for replay_input in record["inputs"]:
+                    if isinstance(replay_input, dict):
+                        actions.append(
+                            {
+                                **replay_input,
+                                "kind": "action",
+                                "levelIndex": record.get("levelIndex"),
+                                "tick": record.get("tick"),
+                            }
+                        )
+        for index, action in enumerate(actions):
+            action["n"] = index
+    else:
+        actions = stream
+    artifact = {
+        "header": header,
+        "actions": actions,
+        **({"records": stream} if has_v11_records else {}),
+    }
     problems = validate_replay_artifact(artifact)
     if problems:
         raise ReplayFormatError(problems)
@@ -432,5 +629,6 @@ def serialize_replay_jsonl(artifact: dict[str, Any]) -> str:
     problems = validate_replay_artifact(artifact)
     if problems:
         raise ReplayFormatError(problems)
-    records = [artifact["header"], *artifact["actions"]]
+    stream = artifact.get("records", artifact["actions"])
+    records = [artifact["header"], *stream]
     return "\n".join(canonical_json(record) for record in records) + "\n"

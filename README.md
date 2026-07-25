@@ -20,6 +20,7 @@ content, benchmark claims, scoring meaning, hosting, and presentation.
 - [Agentic play](docs/agentic-play.md)
 - [Python SDK surface](docs/python.md)
 - [Portable replay and verification](docs/mechanisms/replay.md)
+- [Authoritative sessions and integrity](docs/session-and-integrity.md)
 - [Roadmap, including the future naming migration](docs/roadmap.md)
 
 The existing repository and package names remain active for compatibility; no

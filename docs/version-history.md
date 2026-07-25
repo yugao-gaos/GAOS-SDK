@@ -3,9 +3,30 @@
 GAOS uses the v0.x line to refine its contracts before v1.0. Products should
 review the migration notes when updating across minor versions.
 
-::: tip Latest release: v0.18.0
-The simulation, protocol, replay, and agent surfaces now share one tick model.
+::: tip Latest release: v0.19.0
+Authoritative sessions now share replayable grouped resolutions, deterministic
+math, and commit–reveal integrity primitives.
 :::
+
+## v0.19.0 — authoritative sessions and integrity
+
+Prepared July 25, 2026.
+
+- New optional `./session` kernel with persist-before-publish prepared
+  transitions, explicit commit/abort lifecycle, mutable-state isolation,
+  durable partial-window intents, crash rehydration, and per-seat observation
+  revisions.
+- `gaos.replay` v1.1 grouped resolutions preserve one reducer call per
+  authoritative resolution and add deadline, extension, and mismatch audit
+  records. The parser continues to accept and reproduce v1.0 artifacts.
+- Frozen `dmath-1` contexts provide deterministic `sin`, `cos`, `atan2`,
+  `clamp`, and `roundTo`, with an exported state-path math classification.
+- `gaos.commit.sha256.v1` provides byte-exact framing, canonical payload
+  validation, synchronous SHA-256 replay verification, and published complete
+  preimage vectors.
+
+[Sessions and integrity →](/session-and-integrity) ·
+[Portable replay →](/mechanisms/replay)
 
 ## v0.18.0 — one coherent tick model
 

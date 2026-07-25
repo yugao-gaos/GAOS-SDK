@@ -1,6 +1,6 @@
 {
   "name": "@yugao-gaos/turn-based-grid-sdk",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "description": "Deterministic game mechanisms and multiplayer infrastructure for agent-ready games.",
   "license": "Apache-2.0",
   "type": "module",
@@ -25,6 +25,10 @@
       "types": "./dist/engine/index.d.ts",
       "import": "./dist/engine/index.js"
     },
+    "./session": {
+      "types": "./dist/session.d.ts",
+      "import": "./dist/session.js"
+    },
     "./agent": {
       "types": "./dist/agent/index.d.ts",
       "import": "./dist/agent/index.js"
@@ -34,7 +38,9 @@
       "import": "./dist/agent-cli/index.js"
     },
     "./schemas/gaos.replay-v1.schema.json": "./schemas/gaos.replay-v1.schema.json",
-    "./fixtures/replay/gaos-replay-v1.golden.jsonl": "./fixtures/replay/gaos-replay-v1.golden.jsonl"
+    "./fixtures/replay/gaos-replay-v1.golden.jsonl": "./fixtures/replay/gaos-replay-v1.golden.jsonl",
+    "./fixtures/commitment/gaos.commit.sha256.v1.vectors.json": "./fixtures/commitment/gaos.commit.sha256.v1.vectors.json",
+    "./fixtures/dmath/dmath-1.vectors.json": "./fixtures/dmath/dmath-1.vectors.json"
   },
   "files": [
     "dist",

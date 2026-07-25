@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/v0.18.0/schemas/gaos.replay-v1.schema.json",
+  "$id": "https://raw.githubusercontent.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/v0.19.0/schemas/gaos.replay-v1.schema.json",
   "title": "GAOS portable replay v1",
-  "description": "Schema for a decoded gaos.replay v1 artifact. The JSONL transport stores the header first, followed by each action.",
+  "description": "Schema for a decoded gaos.replay v1 artifact. v1.0 stores actions after the header; v1.1 may instead store grouped resolution and audit records.",
   "type": "object",
   "additionalProperties": false,
   "required": ["header", "actions"],
@@ -11,6 +11,10 @@
     "actions": {
       "type": "array",
       "items": { "$ref": "#/$defs/action" }
+    },
+    "records": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/record" }
     }
   },
   "$defs": {
@@ -93,7 +97,7 @@
       "properties": {
         "kind": { "const": "header" },
         "format": { "const": "gaos.replay" },
-        "formatVersion": { "const": "1.0" },
+        "formatVersion": { "enum": ["1.0", "1.1"] },
         "sessionId": { "type": "string", "minLength": 1 },
         "game": { "$ref": "#/$defs/gameRef" },
         "seed": {
@@ -172,8 +176,171 @@
           "type": "array",
           "items": { "$ref": "#/$defs/locationRef" }
         },
-        "tick": { "type": "integer", "minimum": 0 }
+        "tick": { "type": "integer", "minimum": 0 },
+        "commit": { "$ref": "#/$defs/commit" },
+        "reveal": { "$ref": "#/$defs/reveal" },
+        "verifiedPayload": true
       }
+    },
+    "commit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commitmentId", "scheme", "hash"],
+      "properties": {
+        "commitmentId": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "scheme": { "const": "gaos.commit.sha256.v1" },
+        "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "reveal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commitmentId", "salt", "payload"],
+      "properties": {
+        "commitmentId": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "salt": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{2}){16,64}$"
+        },
+        "payload": true
+      }
+    },
+    "resolutionInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wireId", "canonicalId"],
+      "properties": {
+        "wireId": { "type": "string", "pattern": "^Action [1-9][0-9]*$" },
+        "canonicalId": { "type": "string", "pattern": "^Action [1-9][0-9]*$" },
+        "x": { "type": "integer" },
+        "y": { "type": "integer" },
+        "index": { "type": "integer" },
+        "boardId": { "type": "string", "minLength": 1 },
+        "zoneId": { "type": "string", "minLength": 1 },
+        "seat": { "type": "string", "minLength": 1 },
+        "targets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/locationRef" }
+        },
+        "commit": { "$ref": "#/$defs/commit" },
+        "reveal": { "$ref": "#/$defs/reveal" },
+        "verifiedPayload": true
+      }
+    },
+    "resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "n", "levelIndex", "tick", "inputs", "cause"],
+      "properties": {
+        "kind": { "const": "resolution" },
+        "n": { "type": "integer", "minimum": 0 },
+        "levelIndex": { "type": "integer", "minimum": 0 },
+        "tick": { "type": "integer", "minimum": 0 },
+        "inputs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/resolutionInput" }
+        },
+        "cause": { "enum": ["complete", "deadline", "tick"] },
+        "systemInput": { "$ref": "#/$defs/resolutionInput" }
+      }
+    },
+    "deadline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "n", "levelIndex", "tick", "reason"],
+      "properties": {
+        "kind": { "const": "deadline" },
+        "n": { "type": "integer", "minimum": 0 },
+        "levelIndex": { "type": "integer", "minimum": 0 },
+        "tick": { "type": "integer", "minimum": 0 },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "extension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "n", "levelIndex", "lane", "record"],
+      "properties": {
+        "kind": { "const": "extension" },
+        "n": { "type": "integer", "minimum": 0 },
+        "levelIndex": { "type": "integer", "minimum": 0 },
+        "lane": { "type": "string", "minLength": 1 },
+        "record": { "$ref": "#/$defs/jsonObject" }
+      }
+    },
+    "checkpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "n", "levelIndex", "tick", "digest"],
+      "properties": {
+        "kind": { "const": "checkpoint" },
+        "n": { "type": "integer", "minimum": 0 },
+        "levelIndex": { "type": "integer", "minimum": 0 },
+        "tick": { "type": "integer", "minimum": 0 },
+        "digest": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      }
+    },
+    "commitMismatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "n",
+        "levelIndex",
+        "tick",
+        "participantId",
+        "submissionId",
+        "commitmentId",
+        "scheme"
+      ],
+      "properties": {
+        "kind": { "const": "commit-mismatch" },
+        "n": { "type": "integer", "minimum": 0 },
+        "levelIndex": { "type": "integer", "minimum": 0 },
+        "tick": { "type": "integer", "minimum": 0 },
+        "participantId": { "type": "string", "minLength": 1 },
+        "submissionId": { "type": "string", "minLength": 1 },
+        "commitmentId": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "scheme": { "const": "gaos.commit.sha256.v1" },
+        "attemptedReveal": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["salt", "payload"],
+          "properties": {
+            "salt": {
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{2}){16,64}$"
+            },
+            "payload": true
+          }
+        }
+      }
+    },
+    "record": {
+      "oneOf": [
+        { "$ref": "#/$defs/action" },
+        { "$ref": "#/$defs/resolution" },
+        { "$ref": "#/$defs/deadline" },
+        { "$ref": "#/$defs/extension" },
+        { "$ref": "#/$defs/checkpoint" },
+        { "$ref": "#/$defs/commitMismatch" }
+      ]
     }
   }
 }

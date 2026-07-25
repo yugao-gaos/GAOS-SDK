@@ -6,8 +6,10 @@ evaluators, and third-party benchmark tools can exchange one self-identifying
 JSONL artifact instead of defining platform-specific wrappers around the same
 SDK transcript.
 
-The first line is a `ReplayHeader`. Every following line is a `ReplayAction`,
-which extends `TranscriptAction` with `kind: "action"` and `levelIndex`.
+The first line is a `ReplayHeader`. A v1.0 stream follows it with individual
+`ReplayAction` lines. A v1.1 stream may instead contain grouped
+`resolution`, `deadline`, `extension`, `checkpoint`, and `commit-mismatch`
+records.
 
 ```jsonl
 {"format":"gaos.replay","formatVersion":"1.0","game":{"adapter":{"id":"creator/demo/reducer","version":"commit:abc123"},"id":"creator/demo","version":"1.0.0"},"kind":"header","levels":[{"id":"intro","index":0,"level":{"goal":3},"result":{"actionsUsed":2,"stars":3,"status":"won"},"seed":2654435731}],"perm":[0,1],"seed":42,"seedPolicy":"gaos.run-level-seed.v1","sessionId":"run-42","totals":{"totalActionsUsed":2,"totalStars":3}}
@@ -23,7 +25,7 @@ artifact suitable for hashing, signing, and object storage.
 
 The header pins everything shared tooling needs before reducer execution:
 
-- `format` and `formatVersion`, currently `gaos.replay` / `1.0`;
+- `format` and `formatVersion`, currently `gaos.replay` / `1.1`;
 - a stable game id/version and historical adapter id/version;
 - the run seed and either explicit seeds or
   `gaos.run-level-seed.v1` derivation;
@@ -91,7 +93,7 @@ It declares MIME `application/vnd.gaos.replay+jsonl`, extension
 storage, but decompression must recover the canonical JSONL bytes.
 
 The npm archive includes the decoded-artifact
-[`gaos.replay` v1 JSON Schema](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/blob/v0.18.0/schemas/gaos.replay-v1.schema.json).
+[`gaos.replay` v1 JSON Schema](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/blob/v0.19.0/schemas/gaos.replay-v1.schema.json).
 The repository also carries a canonical JSONL fixture used by both language
 test suites, so independent implementations can verify byte-for-byte output.
 
@@ -110,9 +112,11 @@ engine and requires the product's pinned reducer registry.
 
 ## Whole-run recheck
 
-`recheckReplayArtifact` validates the envelope, groups actions by level, and
-calls the existing `recheckTranscript` for every segment. The product supplies
-only a trusted adapter registry:
+`recheckReplayArtifact` validates the envelope and checks every level. Legacy
+action streams use `recheckTranscript`; v1.1 resolution records invoke
+`advance` or `applyIntents` exactly once with the complete recorded input
+group. Commitment reveals are recomputed before reducer execution. The product
+supplies only a trusted adapter registry:
 
 ```ts
 const checked = recheckReplayArtifact(

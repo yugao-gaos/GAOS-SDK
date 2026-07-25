@@ -16,6 +16,7 @@ integrating game or benchmark.
 | package root | hosted Arena adapter and Arena observation types | `fetch` |
 | `./protocol` | Tick-oriented adapters over the published v1 tick envelopes, cursors, idempotency, simultaneous intents, game registry | JSON-serializable values |
 | `./engine` | Game mechanisms, layouts, settlement, solver, replay, scoring, agent environment and tools | Injected world/reducer policy |
+| `./session` | Prepared authoritative transitions, durable intent collection, per-seat observations, replay finalization | Synchronous IO-free host integration |
 | `./agent` | Provider-neutral driver contract and keyed HTTP model drivers | `fetch` and a provider key |
 | `./agent-cli` | CLI discovery, launch recipes, MCP configuration, subprocess lifecycle | Node.js |
 | Python distribution | hosted client, Gymnasium-compatible environment API, evaluation helpers and portable replay utilities | Python 3.10+, standard library only at runtime |

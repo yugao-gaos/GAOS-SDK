@@ -1,0 +1,17 @@
+[
+  { "function": "sin", "args": [0], "resultBits": "0000000000000000" },
+  { "function": "sin", "args": ["-0"], "resultBits": "8000000000000000" },
+  { "function": "sin", "args": [0.5235987755982988], "resultBits": "3fdfffffffffffff" },
+  { "function": "sin", "args": [1073741824], "resultBits": "bfe3c12353728caf" },
+  { "function": "cos", "args": [0], "resultBits": "3ff0000000000000" },
+  { "function": "cos", "args": [3.141592653589793], "resultBits": "bff0000000000000" },
+  { "function": "cos", "args": [-1073741824], "resultBits": "3fe92cb46a920144" },
+  { "function": "atan2", "args": [0, -1], "resultBits": "400921fb54442d18" },
+  { "function": "atan2", "args": ["-0", -1], "resultBits": "c00921fb54442d18" },
+  { "function": "atan2", "args": [1, 1], "resultBits": "3fe921fb54442d18" },
+  { "function": "atan2", "args": [-1, -1], "resultBits": "c002d97c7f3321d2" },
+  { "function": "clamp", "args": [4, 0, 3], "resultBits": "4008000000000000" },
+  { "function": "roundTo", "args": [1.25, 1], "resultBits": "3ff4cccccccccccd" },
+  { "function": "roundTo", "args": [-1.25, 1], "resultBits": "bff4cccccccccccd" },
+  { "function": "roundTo", "args": [123456, -3], "resultBits": "40fe078000000000" }
+]
