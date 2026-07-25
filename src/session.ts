@@ -34,6 +34,10 @@ import {
 } from './engine/index.js';
 
 export interface SessionLimits {
+  /** Maximum distance a tick target may be ahead of the open tick. */
+  maxFutureTicks?: number;
+  /** Maximum unresolved submissions retained for one seat. */
+  maxBufferedSubmissionsPerSeat?: number;
   /** Maximum ticks resolved by one `prepareAdvance` call. */
   maxCatchUpTicks?: number;
   /** Receipts retained per seat, measured in resolved windows. */
@@ -129,6 +133,8 @@ export type SessionEvent =
       submissionId: string;
     }>;
     inputs: readonly CanonicalInput[];
+    /** Exact host-derived input for a deadline resolution. */
+    systemInput?: CanonicalInput;
     result: {
       status: 'playing' | 'won' | 'failed';
       stars: number | null;
@@ -258,7 +264,7 @@ interface PreparedState<TState, TCommand extends JsonValue, TView> {
   owner: object;
   completion: PreparedCompletion;
   next: KernelState<TState, TCommand, TView>;
-  draft: TState;
+  drafts: readonly TState[];
   noop: boolean;
 }
 
@@ -277,6 +283,11 @@ export type PreparedTransitionErrorCode =
   | 'stale'
   | 'already_completed';
 
+export type SessionConflictErrorCode =
+  | 'conflict'
+  | 'unknown_submission'
+  | 'buffer_limit';
+
 export class PreparedTransitionError extends Error {
   constructor(
     public readonly code: PreparedTransitionErrorCode,
@@ -288,11 +299,18 @@ export class PreparedTransitionError extends Error {
 }
 
 export class SessionConflictError extends Error {
-  readonly code = 'conflict';
+  public readonly code: SessionConflictErrorCode;
 
-  constructor(message: string) {
-    super(message);
+  constructor(
+    code: SessionConflictErrorCode,
+    message: string,
+  );
+  constructor(message: string);
+  constructor(codeOrMessage: SessionConflictErrorCode | string, message?: string) {
+    const code = message === undefined ? 'conflict' : codeOrMessage as SessionConflictErrorCode;
+    super(message ?? codeOrMessage);
     this.name = 'SessionConflictError';
+    this.code = code;
   }
 }
 
@@ -328,7 +346,8 @@ export interface SessionKernel<TCommand extends JsonValue, TView> {
 }
 
 const DEFAULT_LIMITS = Object.freeze({
-  maxCatchUpTicks: 256,
+  maxBufferedSubmissionsPerSeat: 64,
+  maxCatchUpTicks: 600,
   receiptRetention: 64,
   maxExtensionBytes: 65_536,
 });
@@ -339,6 +358,14 @@ function cloneMapValues<T>(source: Map<string, T>): Map<string, T> {
 
 function actionCopy(action: SubmittedAction): SubmittedAction {
   return structuredClone(action);
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
 }
 
 function participantsForView<TView extends TickView<unknown, unknown>>(
@@ -381,6 +408,10 @@ class SessionKernelImpl<
   private readonly isolation: SessionStateIsolation<TState>;
   private readonly limits: Required<SessionLimits>;
   private readonly header: SessionHeader<TLevel>;
+  private readonly draftForks = new WeakMap<
+    KernelState<TState, TCommand, TView>,
+    TState
+  >();
   private live: KernelState<TState, TCommand, TView>;
 
   constructor(
@@ -397,6 +428,12 @@ class SessionKernelImpl<
       throw new TypeError('ticks cadence requires TickReducer.advance');
     }
     this.limits = {
+      maxFutureTicks: options.limits?.maxFutureTicks
+        ?? (options.cadence.mode === 'ticks'
+          ? options.cadence.rate.ticksPerSecond * 2
+          : 1),
+      maxBufferedSubmissionsPerSeat: options.limits?.maxBufferedSubmissionsPerSeat
+        ?? DEFAULT_LIMITS.maxBufferedSubmissionsPerSeat,
       maxCatchUpTicks: options.limits?.maxCatchUpTicks ?? DEFAULT_LIMITS.maxCatchUpTicks,
       receiptRetention: options.limits?.receiptRetention ?? DEFAULT_LIMITS.receiptRetention,
       maxExtensionBytes: options.limits?.maxExtensionBytes ?? DEFAULT_LIMITS.maxExtensionBytes,
@@ -486,7 +523,7 @@ class SessionKernelImpl<
 
   private forkLive(): KernelState<TState, TCommand, TView> {
     const reducerState = this.isolation.fork(this.live.reducerState);
-    return {
+    const draft: KernelState<TState, TCommand, TView> = {
       reducerState,
       window: structuredClone(this.live.window),
       transitionRevision: this.live.transitionRevision,
@@ -500,6 +537,25 @@ class SessionKernelImpl<
       commitments: cloneMapValues(this.live.commitments),
       nextCommitmentIds: new Map(this.live.nextCommitmentIds),
     };
+    this.draftForks.set(draft, reducerState);
+    return draft;
+  }
+
+  private takeDraftResources(
+    draft: KernelState<TState, TCommand, TView>,
+  ): readonly TState[] {
+    const original = this.draftForks.get(draft);
+    this.draftForks.delete(draft);
+    if (original === undefined || original === draft.reducerState) {
+      return [draft.reducerState];
+    }
+    return [original, draft.reducerState];
+  }
+
+  private discardDraft(draft: KernelState<TState, TCommand, TView>): void {
+    for (const resource of this.takeDraftResources(draft)) {
+      this.isolation.discard?.(resource);
+    }
   }
 
   private makePrepared<TResult>(
@@ -512,7 +568,7 @@ class SessionKernelImpl<
     const base = this.live.transitionRevision;
     const nextRevision = noop ? base : base + 1;
     const events = rawEvents.map((raw, index): SessionEvent => ({
-      ...raw,
+      ...structuredClone(raw),
       eventId: eventId(this.options.sessionId, nextRevision, index),
       transitionRevision: nextRevision,
     } as SessionEvent));
@@ -524,13 +580,14 @@ class SessionKernelImpl<
       owner: this.owner,
       completion: 'open',
       next: draft,
-      draft: draft.reducerState,
+      drafts: this.takeDraftResources(draft),
       noop,
     };
+    const publishedEvents = deepFreeze(structuredClone(events));
     return Object.freeze({
       baseTransitionRevision: base,
       nextTransitionRevision: nextRevision,
-      events: Object.freeze(events),
+      events: publishedEvents,
       deltas: Object.freeze(deltas),
       result,
       [preparedTransition]: state as PreparedState<unknown, JsonValue, unknown>,
@@ -554,6 +611,9 @@ class SessionKernelImpl<
   }
 
   prepareIngest(submission: CommandSubmission<TCommand>): Prepared<IngestReceipt> {
+    if (this.options.reducer.view(this.live.reducerState).status !== 'playing') {
+      throw new SessionAdvanceError('terminal', 'session is already terminal');
+    }
     const key = receiptKey(submission.participantId, submission.submissionId);
     const canonicalCommand = canonicalJson(submission.command);
     const existing = this.live.receipts.get(key);
@@ -571,7 +631,10 @@ class SessionKernelImpl<
       );
     }
     if (this.live.expiredReceiptKeys.has(key)) {
-      throw new SessionConflictError('unknown_submission: receipt retention has expired');
+      throw new SessionConflictError(
+        'unknown_submission',
+        'receipt retention has expired',
+      );
     }
     const preview = actionCopy(this.options.commandToAction(submission.command, {
       sessionId: this.options.sessionId,
@@ -622,6 +685,16 @@ class SessionKernelImpl<
         );
       }
     }
+    const bufferedForSeat = [...this.live.receipts.values()].filter(
+      (receipt) => receipt.cursor === this.live.cursor
+        && receipt.receipt.participantId === submission.participantId,
+    ).length;
+    if (bufferedForSeat >= this.limits.maxBufferedSubmissionsPerSeat) {
+      throw new SessionConflictError(
+        'buffer_limit',
+        'maxBufferedSubmissionsPerSeat was reached',
+      );
+    }
     const collected = collectIntent(this.live.window, submission);
     const draft = this.forkLive();
     draft.window = structuredClone(collected.window);
@@ -665,6 +738,8 @@ class SessionKernelImpl<
     rejection?: Omit<Extract<SessionEvent, { kind: 'rejection' }>, keyof SessionEventBase>;
   } {
     const inputs: CanonicalInput[] = [];
+    const commitments = cloneMapValues(draft.commitments);
+    const nextCommitmentIds = new Map(draft.nextCommitmentIds);
     for (const intent of intents) {
       const context: CommandContext = {
         sessionId: this.options.sessionId,
@@ -686,23 +761,23 @@ class SessionKernelImpl<
       }
       if (action.commit) {
         assertCommitmentEnvelope(action.commit);
-        const expected = draft.nextCommitmentIds.get(intent.participantId) ?? 0;
+        const expected = nextCommitmentIds.get(intent.participantId) ?? 0;
         if (action.commit.commitmentId !== expected) {
           throw new SessionConflictError(
             `commitmentId ${action.commit.commitmentId} must be ${expected}`,
           );
         }
-        draft.commitments.set(commitmentKey(intent.participantId, expected), {
+        commitments.set(commitmentKey(intent.participantId, expected), {
           envelope: structuredClone(action.commit),
           seat: intent.participantId,
-          windowRef: draft.cursor,
+          windowRef: draft.tick,
           revealed: false,
         });
-        draft.nextCommitmentIds.set(intent.participantId, expected + 1);
+        nextCommitmentIds.set(intent.participantId, expected + 1);
       }
       if (action.reveal) {
         const key = commitmentKey(intent.participantId, action.reveal.commitmentId);
-        const commitment = draft.commitments.get(key);
+        const commitment = commitments.get(key);
         if (!commitment || commitment.revealed) {
           throw new SessionConflictError('reveal references an unknown or revealed commitment');
         }
@@ -727,7 +802,10 @@ class SessionKernelImpl<
               submissionId: intent.submissionId,
               commitmentId: action.reveal.commitmentId,
               scheme: COMMITMENT_SCHEME,
-              attemptedReveal: structuredClone(action.reveal),
+              attemptedReveal: {
+                salt: action.reveal.salt,
+                payload: structuredClone(action.reveal.payload),
+              },
             },
           };
         }
@@ -740,6 +818,8 @@ class SessionKernelImpl<
         action,
       });
     }
+    draft.commitments = commitments;
+    draft.nextCommitmentIds = nextCommitmentIds;
     return { inputs };
   }
 
@@ -767,6 +847,10 @@ class SessionKernelImpl<
       const nextIntents = { ...draft.window.intents };
       delete nextIntents[rejectedSeat];
       draft.window = { ...draft.window, intents: nextIntents };
+      draft.receipts.delete(receiptKey(
+        mapped.rejection.participantId,
+        mapped.rejection.submissionId,
+      ));
       return { rejection: mapped.rejection, deltas: [] };
     }
     draft.reducerState = advanceTick(
@@ -817,6 +901,9 @@ class SessionKernelImpl<
           submissionId,
         })),
         inputs: mapped.inputs.map((entry) => structuredClone(entry)),
+        ...(forcedInputs?.[0] === undefined
+          ? {}
+          : { systemInput: structuredClone(forcedInputs[0]) }),
         result: {
           status: view.status,
           stars: view.stars ?? null,
@@ -848,7 +935,7 @@ class SessionKernelImpl<
 
   prepareAdvance(target?: number): Prepared<AdvanceSummary<TView>> {
     const draft = this.forkLive();
-      const rawEvents: RawSessionEvent[] = [];
+    const rawEvents: RawSessionEvent[] = [];
     const deltas: ObservationDelta<TView>[] = [];
     try {
       const currentView = this.options.reducer.view(draft.reducerState);
@@ -868,6 +955,12 @@ class SessionKernelImpl<
         }
         if (target < draft.tick) {
           throw new SessionAdvanceError('stale_target', 'target precedes the current tick');
+        }
+        if (target - draft.tick > this.limits.maxFutureTicks) {
+          throw new SessionAdvanceError(
+            'invalid_target',
+            'target exceeds maxFutureTicks',
+          );
         }
         requested = target - draft.tick + 1;
         if (requested > this.limits.maxCatchUpTicks) {
@@ -897,7 +990,11 @@ class SessionKernelImpl<
       }
       const digest = this.digestState(draft);
       if (resolutions > 0) {
+        const rejection = rawEvents.at(-1)?.kind === 'rejection'
+          ? rawEvents.pop()
+          : undefined;
         rawEvents.push({ kind: 'checkpoint', tick: draft.tick, digest });
+        if (rejection) rawEvents.push(rejection);
       }
       const result: AdvanceSummary<TView> = {
         resolutions,
@@ -909,7 +1006,7 @@ class SessionKernelImpl<
       };
       return this.makePrepared(draft, rawEvents, deltas, result);
     } catch (error) {
-      this.isolation.discard?.(draft.reducerState);
+      this.discardDraft(draft);
       throw error;
     }
   }
@@ -923,6 +1020,9 @@ class SessionKernelImpl<
     }
     const draft = this.forkLive();
     try {
+      if (this.options.reducer.view(draft.reducerState).status !== 'playing') {
+        throw new SessionAdvanceError('terminal', 'session is already terminal');
+      }
       const windowRef = draft.cursor;
       const canonical: CanonicalInput = {
         participantId: deadline.participantId ?? null,
@@ -954,7 +1054,7 @@ class SessionKernelImpl<
       };
       return this.makePrepared(draft, rawEvents, deltas, result);
     } catch (error) {
-      this.isolation.discard?.(draft.reducerState);
+      this.discardDraft(draft);
       throw error;
     }
   }
@@ -980,7 +1080,7 @@ class SessionKernelImpl<
     const state = this.preparedState(prepared);
     if (prepared.baseTransitionRevision !== this.live.transitionRevision) {
       state.completion = 'aborted';
-      this.isolation.discard?.(state.draft);
+      for (const draft of state.drafts) this.isolation.discard?.(draft);
       throw new PreparedTransitionError(
         'stale',
         `prepared base revision ${prepared.baseTransitionRevision} `
@@ -989,19 +1089,22 @@ class SessionKernelImpl<
     }
     if (state.noop) {
       state.completion = 'committed';
-      this.isolation.discard?.(state.draft);
+      for (const draft of state.drafts) this.isolation.discard?.(draft);
       return;
     }
     const previous = this.live.reducerState;
     this.live = state.next;
     state.completion = 'committed';
+    for (const draft of state.drafts) {
+      if (draft !== state.next.reducerState) this.isolation.discard?.(draft);
+    }
     this.isolation.retire?.(previous);
   }
 
   abort(prepared: Prepared<unknown>): void {
     const state = this.preparedState(prepared);
     state.completion = 'aborted';
-    this.isolation.discard?.(state.draft);
+    for (const draft of state.drafts) this.isolation.discard?.(draft);
   }
 
   observe(seat: string): TView {
@@ -1057,7 +1160,6 @@ class SessionKernelImpl<
     return fnv1a(canonicalJson({
       cursor: state.cursor,
       tick: state.tick,
-      transitionRevision: state.transitionRevision,
       views: Object.fromEntries(
         [...state.views.entries()].sort(([left], [right]) => left.localeCompare(right)),
       ),
@@ -1126,7 +1228,7 @@ class SessionKernelImpl<
             this.live.commitments.set(commitmentKey(participantId, expected), {
               envelope: structuredClone(action.commit),
               seat: participantId,
-              windowRef: event.cursor,
+              windowRef: event.tick,
               revealed: false,
             });
             this.live.nextCommitmentIds.set(participantId, expected + 1);
@@ -1170,10 +1272,15 @@ class SessionKernelImpl<
           this.live.views.set(seat, this.viewFor(this.live.reducerState, seat));
           this.live.viewRevisions.set(seat, (this.live.viewRevisions.get(seat) ?? 0) + 1);
         }
+        this.evictReceipts(this.live);
       } else if (event.kind === 'rejection') {
         const intents = { ...this.live.window.intents };
         delete intents[event.participantId];
         this.live.window = { ...this.live.window, intents };
+        this.live.receipts.delete(receiptKey(
+          event.participantId,
+          event.submissionId,
+        ));
       }
       this.live.transitionRevision = Math.max(
         this.live.transitionRevision,
@@ -1181,7 +1288,6 @@ class SessionKernelImpl<
       );
       this.live.events.push(structuredClone(event));
     }
-    this.evictReceipts(this.live);
   }
 }
 
@@ -1250,8 +1356,8 @@ export function finalizeReplay<TLevel>(
         tick: event.tick,
         inputs: event.inputs.map(replayInput),
         cause: event.cause,
-        ...(event.cause === 'deadline' && event.inputs.length > 0
-          ? { systemInput: replayInput(event.inputs[0]!) }
+        ...(event.cause === 'deadline' && event.systemInput
+          ? { systemInput: replayInput(event.systemInput) }
           : {}),
       });
     } else if (event.kind === 'deadline') {

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, webcrypto } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { JsonValue } from '../src/protocol.js';
@@ -37,8 +37,26 @@ describe('deterministic math', () => {
     }
     expect(dmath.roundTo(1.25, 1)).toBe(1.3);
     expect(dmath.roundTo(-1.25, 1)).toBe(-1.3);
+    expect(dmath.roundTo(0.49999999999999994, 0)).toBe(0);
+    expect(dmath.roundTo(-0.49999999999999994, 0)).toBe(-0);
     expect(Object.is(dmath.roundTo(-0.1, 0), -0)).toBe(true);
     expect(dmath.clamp(4, 0, 3)).toBe(3);
+  });
+
+  it('captures custom backend methods at construction', () => {
+    const backend = {
+      id: 'wasm' as const,
+      sin: () => 1,
+      cos: () => 1,
+      atan2: () => 1,
+    };
+    const dmath = createDmath({ backend });
+    backend.sin = () => 2;
+    backend.cos = () => 2;
+    backend.atan2 = () => 2;
+    expect(dmath.sin(0)).toBe(1);
+    expect(dmath.cos(0)).toBe(1);
+    expect(dmath.atan2(1, 1)).toBe(1);
   });
 
   it('rejects non-finite and out-of-contract values', () => {
@@ -94,6 +112,29 @@ describe('gaos.commit.sha256.v1', () => {
     expect(createCommitmentHash(binding, salt, payload)).toBe(nodeHash);
   });
 
+  it('matches NIST SHA-256 vectors, block boundaries, and WebCrypto', async () => {
+    const vectors = [
+      ['', 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'],
+      ['abc', 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'],
+      [
+        'abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq',
+        '248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1',
+      ],
+      ['a'.repeat(1_000_000), 'cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0'],
+    ] as const;
+    const encoder = new TextEncoder();
+    for (const [message, expected] of vectors) {
+      const bytes = encoder.encode(message);
+      expect(bytesToHex(sha256(bytes))).toBe(expected);
+      expect(bytesToHex(new Uint8Array(await webcrypto.subtle.digest('SHA-256', bytes))))
+        .toBe(expected);
+    }
+    for (const length of [55, 56, 63, 64, 65]) {
+      const bytes = new Uint8Array(length).fill(0x61);
+      expect(bytesToHex(sha256(bytes))).toBe(createHash('sha256').update(bytes).digest('hex'));
+    }
+  });
+
   it('keeps all published cross-language vectors byte-identical', () => {
     const vectors = JSON.parse(readFileSync(
       new URL(
@@ -132,6 +173,19 @@ describe('gaos.commit.sha256.v1', () => {
       commitment,
       { commitmentId: 0, salt, payload: { ...payload, ready: false } },
     )).toMatchObject({ ok: false, code: 'commit_mismatch' });
+    const honest = { commitmentId: 0, salt, payload };
+    for (const tamperedBinding of [
+      { ...binding, sessionId: 'other-session' },
+      { ...binding, seat: 'blue' },
+      { ...binding, windowRef: binding.windowRef + 1 },
+    ]) {
+      expect(verifyCommitmentReveal(tamperedBinding, commitment, honest))
+        .toMatchObject({ ok: false, code: 'commit_mismatch' });
+    }
+    expect(verifyCommitmentReveal(binding, commitment, {
+      ...honest,
+      salt: '11'.repeat(16),
+    })).toMatchObject({ ok: false, code: 'commit_mismatch' });
   });
 
   it('rejects malformed Unicode, hex, and identifier ranges before hashing', () => {
@@ -231,6 +285,14 @@ describe('gaos.commit.sha256.v1', () => {
     expect(checked.ok).toBe(false);
     expect(checked.problems.join('\n')).toMatch(/commit_mismatch.*red.*0/);
 
+    const redacted = structuredClone(artifact);
+    const redactedAudit = redacted.records?.[1];
+    if (redactedAudit?.kind === 'commit-mismatch') {
+      delete redactedAudit.attemptedReveal;
+    }
+    expect(recheckReplayArtifact(redacted, () => auditReducer).diagnostics.join('\n'))
+      .toMatch(/recorded but is not independently recheckable/);
+
     const inconsistent = structuredClone(artifact);
     const audit = inconsistent.records?.[1];
     if (audit?.kind === 'commit-mismatch') {
@@ -238,5 +300,82 @@ describe('gaos.commit.sha256.v1', () => {
     }
     expect(recheckReplayArtifact(inconsistent, () => auditReducer).problems.join('\n'))
       .toMatch(/is inconsistent/);
+  });
+
+  it('reports salt reuse across distinct commitments as a non-fatal diagnostic', () => {
+    interface AuditState { phase: number; actionsUsed: number }
+    const reuseReducer: TickReducer<{}, AuditState> = {
+      init: () => ({ phase: 0, actionsUsed: 0 }),
+      advance: (state, inputs) => ({
+        phase: state.phase + 1,
+        actionsUsed: state.actionsUsed + inputs.length,
+      }),
+      view: (state): TickView => ({
+        actions: [{ id: 'Action 1', params: 'none' }],
+        status: state.phase >= 4 ? 'won' : 'playing',
+        ...(state.phase >= 4 ? { stars: 3 } : {}),
+        hud: { actionsUsed: state.actionsUsed },
+      }),
+    };
+    const payload0 = { order: 'north' };
+    const payload1 = { order: 'south' };
+    const binding0 = { ...binding, commitmentId: 0, windowRef: 0 };
+    const binding1 = { ...binding, commitmentId: 1, windowRef: 2 };
+    const input = (
+      commitmentId: number,
+      hash: string,
+      revealPayload: JsonValue | undefined,
+    ) => revealPayload === undefined
+      ? {
+        wireId: 'Action 1',
+        canonicalId: 'Action 1',
+        seat: binding.seat,
+        commit: { commitmentId, scheme: COMMITMENT_SCHEME, hash },
+      }
+      : {
+        wireId: 'Action 1',
+        canonicalId: 'Action 1',
+        seat: binding.seat,
+        reveal: { commitmentId, salt, payload: revealPayload },
+        verifiedPayload: revealPayload,
+      };
+    const commit0 = input(0, createCommitmentHash(binding0, salt, payload0), undefined);
+    const reveal0 = input(0, '', payload0);
+    const commit1 = input(1, createCommitmentHash(binding1, salt, payload1), undefined);
+    const reveal1 = input(1, '', payload1);
+    const artifact = createReplayArtifact({
+      sessionId: binding.sessionId,
+      game: {
+        id: 'salt-reuse-test',
+        version: '1',
+        adapter: { id: 'salt-reuse-test/reducer', version: '1' },
+      },
+      seed: 1,
+      seedPolicy: 'explicit',
+      perm: [0],
+      levels: [{
+        id: 'only',
+        seed: 1,
+        level: {},
+        result: { status: 'won', stars: 3, actionsUsed: 4 },
+      }],
+      actions: [commit0, reveal0, commit1, reveal1].map((action, n) => ({
+        ...action,
+        n,
+        levelIndex: 0,
+      })),
+      records: [commit0, reveal0, commit1, reveal1].map((entry, n) => ({
+        kind: 'resolution' as const,
+        n,
+        levelIndex: 0,
+        tick: n,
+        inputs: [entry],
+        cause: 'complete' as const,
+      })),
+    });
+    const checked = recheckReplayArtifact(artifact, () => reuseReducer);
+    expect(checked.ok).toBe(true);
+    expect(checked.problems).toEqual([]);
+    expect(checked.diagnostics.join('\n')).toMatch(/salt reuse/);
   });
 });

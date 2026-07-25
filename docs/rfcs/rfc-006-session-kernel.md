@@ -1,10 +1,13 @@
 # RFC — `./session`: the authoritative session kernel (optional subpath)
 
-Status: **implemented (rev 6, v0.19.0, 2026-07-25)** · Target: v0.19 · Breaking: no
+Status: **implemented (rev 7, v0.19.0, 2026-07-25)** · Target: v0.19 · Breaking: no
 (new subpath; requires the gaos.replay v1.1 format bump, which lands first)
 
-Current disposition (rev 6, 2026-07-25): §§1–6 are the sole normative
-text. Rev 5 resolves the fourth review: §3.1 adds SessionStateIsolation
+Current disposition (rev 7, 2026-07-25): §§1–6 are the sole normative
+text except §3.2, whose client companion is deferred to v0.20. Its current
+delta shape does not carry authoritative acknowledgement identities, so it
+cannot deterministically decide which pending predictions to remove during
+reconciliation. Rev 5 resolves the fourth review: §3.1 adds SessionStateIsolation
 (fork/discard/retire) so mutable/COW reducers are first-class in prepared
 transitions — the kernel never assumes fresh-state reducers (§J) — and rev 6
 adds the exactly-once abort/retire lifecycle (§L). Earlier
@@ -210,7 +213,13 @@ only canonical order does; `advance` in ticks mode may fast-forward many
 empty ticks in one call (event-driven hosts batch on message/alarm arrival,
 which is how a DO avoids wall-clock ticking).
 
-### 3.2 Client companion
+### 3.2 Client companion (informative; deferred to v0.20)
+
+`PredictionSession` is deliberately not part of the v0.19 implementation.
+The v0.20 design must add an acknowledgement identity/order contract to
+`ObservationDelta` (or to a paired authoritative response) before freezing
+the construction, rollback, and pending-action APIs. The sketch below records
+the intended direction only and is not normative.
 
 ```ts
 export interface PredictionSession<TView> {
