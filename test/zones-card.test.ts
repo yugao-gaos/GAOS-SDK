@@ -36,8 +36,8 @@ import {
   validateDeck,
   type Cell,
   type TimedStatus,
-  type TurnReducer,
-  type TurnView,
+  type ActionReducer,
+  type TickView,
   type Visibility,
   type ZoneCollection,
   type ZoneVisibilityPolicy,
@@ -56,7 +56,7 @@ function zonesFixture(): ZoneCollection {
 
 describe('zone primitives', () => {
   it('covers preset identity/order visibility for three seats without bag or hand leaks', () => {
-    const full: TurnView = {
+    const full: TickView = {
       actions: [],
       status: 'playing',
       hud: { actionsUsed: 0 },
@@ -109,7 +109,7 @@ describe('zone primitives', () => {
       });
     }
 
-    const variant: TurnView = {
+    const variant: TickView = {
       ...full,
       zones: {
         ...full.zones,
@@ -137,7 +137,7 @@ describe('zone primitives', () => {
           identity: () => identity,
           order: () => order,
         };
-        const full: TurnView = {
+        const full: TickView = {
           actions: [],
           status: 'playing',
           hud: { actionsUsed: 0 },
@@ -350,7 +350,7 @@ describe('card composition mechanisms', () => {
   });
 
   it('enumerates declarative targets and reports truncation explicitly', () => {
-    const view: TurnView = { actions: [], status: 'playing', hud: { actionsUsed: 0 } };
+    const view: TickView = { actions: [], status: 'playing', hud: { actionsUsed: 0 } };
     const exact = enumerateTargetChoices({
       count: 2,
       distinct: true,
@@ -368,7 +368,7 @@ describe('card composition mechanisms', () => {
       truncated: true,
     });
 
-    const targetView: TurnView = {
+    const targetView: TickView = {
       actions: [{ id: 'select', params: 'targets', targetSpecId: 'pair' }],
       status: 'playing',
       hud: { actionsUsed: 0 },
@@ -413,14 +413,14 @@ describe('card composition mechanisms', () => {
     expect(hooks).toEqual(['exit:draw', 'enter:main']);
 
     const statuses: TimedStatus<string>[] = [
-      { id: 'later', authoredOrder: 2, duration: { kind: 'until-turn-end' }, value: 'b' },
+      { id: 'later', authoredOrder: 2, duration: { kind: 'until-phase-end' }, value: 'b' },
       { id: 'round', authoredOrder: 1, duration: { kind: 'rounds', remaining: 2 }, value: 'r' },
-      { id: 'first', authoredOrder: 0, duration: { kind: 'until-turn-end' }, value: 'a' },
+      { id: 'first', authoredOrder: 0, duration: { kind: 'until-phase-end' }, value: 'a' },
       { id: 'shield', authoredOrder: 3, duration: { kind: 'counters', remaining: 2 }, value: 's' },
     ];
-    const turn = advanceDurations(statuses, { kind: 'turn-end' });
-    expect(turn.expired.map(({ id }) => id)).toEqual(['first', 'later']);
-    const spent = spendStatusCounters(turn.active, 'shield', 2);
+    const phase = advanceDurations(statuses, { kind: 'phase-end', phaseId: 'main' });
+    expect(phase.expired.map(({ id }) => id)).toEqual(['first', 'later']);
+    const spent = spendStatusCounters(phase.active, 'shield', 2);
     expect(spent.expired.map(({ id }) => id)).toEqual(['shield']);
     const round1 = advanceDurations(spent.active, { kind: 'round-end' });
     const round2 = advanceDurations(round1.active, { kind: 'round-end' });
@@ -462,7 +462,7 @@ describe('card composition mechanisms', () => {
       cards: string[];
       used: number;
     }
-    const reducer: TurnReducer<readonly string[], State> = {
+    const reducer: ActionReducer<readonly string[], State> = {
       init: (level) => ({ cards: [...level], used: 0 }),
       apply: (state, action) => {
         if (action.id !== 'play' || action.index === undefined

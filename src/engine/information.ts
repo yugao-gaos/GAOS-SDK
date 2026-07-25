@@ -1,7 +1,7 @@
 import type {
   GridViewNamespace,
   Outcome,
-  TurnView,
+  TickView,
   ZoneViewNamespace,
 } from './contracts.js';
 
@@ -43,9 +43,9 @@ export interface InformationPartitionPolicies<
   TEntity = BoardEntityView<TCell>,
 > {
   zones?: Readonly<Record<string, ZoneVisibilityPolicy>>;
-  /** Policy for the single implicit board form of `TurnView.grid`. */
+  /** Policy for the single implicit board form of `TickView.grid`. */
   board?: BoardVisibilityPolicy<TCell>;
-  /** Policies for the board-id record form of `TurnView.grid`. */
+  /** Policies for the board-id record form of `TickView.grid`. */
   boards?: Readonly<Record<string, BoardVisibilityPolicy<TCell>>>;
   /** Stable identity used to mask hidden order. Defaults to canonical JSON. */
   entryKey?: (entry: TEntry) => string;
@@ -347,13 +347,13 @@ function redactBoard<TCell, TEntity>(
  * Derive a conventional per-seat view without mutating the full observation.
  *
  * Unconfigured zones/boards remain public. Products with custom view schemas
- * may implement `TurnReducer.viewFor` directly and still use the leak checker.
+ * may implement `TickReducer.viewFor` directly and still use the leak checker.
  */
 export function deriveSeatView<
   TCell,
   TEntry = unknown,
   TEntity = BoardEntityView<TCell>,
-  TView extends TurnView<unknown, unknown> = TurnView<unknown, unknown>,
+  TView extends TickView<unknown, unknown> = TickView<unknown, unknown>,
 >(
   fullView: TView,
   policies: InformationPartitionPolicies<TCell, TEntry, TEntity>,

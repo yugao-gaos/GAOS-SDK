@@ -3,6 +3,19 @@
 For the public chronological changelog, see the
 [complete version history](/version-history).
 
+## v0.18.0
+
+Released July 24, 2026.
+
+This is a breaking terminology and ownership cleanup:
+
+- the SDK simulation boundary is a tick;
+- existing settlement resolution steps run within a tick;
+- turn scheduling remains entirely product-owned;
+- the generic wire contract uses tick-native fields;
+- agent environment steps advance exactly one tick; and
+- product-controlled frame skipping was removed from the SDK.
+
 ## v0.17.0
 
 Released July 24, 2026.

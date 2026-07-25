@@ -47,7 +47,7 @@ describe('projectile mechanisms', () => {
     expect(active.map(({ id }) => id)).toEqual(['move']);
   });
 
-  it('runs relay hooks between same-turn flight passes', () => {
+  it('runs relay hooks between same-tick flight passes', () => {
     const state = { remaining: 3, headings: [] as number[] };
     const result = resolveFlightPasses(state, {
       maxPasses: 8,

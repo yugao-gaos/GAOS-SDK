@@ -74,7 +74,7 @@ priorities from a recorded seed before arbitration.
 Zonoid qualifies pickups, throws, landings, bat flights, and overlapping
 effects against one pre-commit world snapshot. If two independent intents claim
 the same Relic, destination, or flight cell, the platform passes both claims to
-the SDK and accepts neither. This keeps simultaneous turns fair; Zonoid then
+the SDK and accepts neither. This keeps simultaneous ticks fair; Zonoid then
 emits the appropriate bounce, collision, or no-op event.
 
 <figure class="mechanism-video">

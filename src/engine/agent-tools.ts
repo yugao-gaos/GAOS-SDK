@@ -1,4 +1,4 @@
-import type { SubmittedAction, TurnView } from './contracts.js';
+import type { SubmittedAction, TickView } from './contracts.js';
 import type { AgentEnvironment } from './agent-environment.js';
 import { locationKey } from './locations.js';
 
@@ -133,7 +133,7 @@ export interface AgentToolAdapter {
 }
 
 /** Bind the standard agent tools to one environment without an MCP dependency. */
-export function createAgentToolAdapter<TLevel, TState, TView extends TurnView<unknown, unknown>>(
+export function createAgentToolAdapter<TLevel, TState, TView extends TickView<unknown, unknown>>(
   environment: AgentEnvironment<TLevel, TState, TView>,
 ): AgentToolAdapter {
   return {

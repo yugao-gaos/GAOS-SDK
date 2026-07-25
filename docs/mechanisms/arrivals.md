@@ -43,7 +43,7 @@ An arrival normally follows a committed state move:
 1. movement, push, transport, or landing commits positions;
 2. one arrival job is enqueued for each resting entity;
 3. `resolveArrival` evaluates rules against the committed state;
-4. rule effects enqueue any further same-turn consequences.
+4. rule effects enqueue any further same-tick consequences.
 
 Using the [settlement kernel](/settlement) prevents an arrival-triggered
 teleport, pickup, gate update, or second movement from starting an uncontrolled
@@ -53,9 +53,9 @@ nested reducer call.
 
 - Supply unique stable rule ids. The helper does not reject duplicates.
 - Decide whether movement through a cell counts as arrival or only resting does.
-- Decide how many arrival jobs an entity may receive in one turn.
+- Decide how many arrival jobs an entity may receive in one tick.
 - Keep product event ordering deterministic inside each rule.
-- Prevent cycles using settlement identities or explicit next-turn deferral.
+- Prevent cycles using settlement identities or explicit next-tick deferral.
 
 The returned id list is useful for tests and traces, but product state and
 events remain the authoritative effect results.

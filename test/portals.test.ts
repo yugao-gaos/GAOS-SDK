@@ -7,8 +7,8 @@ import {
   type Cell,
   type PortalEdge,
   type PortalPolicy,
-  type TurnReducer,
-  type TurnView,
+  type ActionReducer,
+  type TickView,
 } from '../src/engine/index.js';
 
 interface Entity {
@@ -289,7 +289,7 @@ describe('portal transit', () => {
   });
 
   it('lets one atomic commit expose departure and hidden-zone count together', () => {
-    interface View extends TurnView {
+    interface View extends TickView {
       boardEntities: string[];
     }
     const before: View = {
@@ -331,7 +331,7 @@ describe('portal transit', () => {
       at: 'board' | 'zone';
       used: number;
     }
-    const reducer: TurnReducer<null, State> = {
+    const reducer: ActionReducer<null, State> = {
       init: () => ({ at: 'board', used: 0 }),
       apply: (state, action) => {
         if (action.id !== 'Action 1' || state.at !== 'board') throw new Error('illegal');

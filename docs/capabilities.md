@@ -1,8 +1,8 @@
 # Capabilities
 
 GAOS is a general-purpose SDK for deterministic, verifiable,
-agent-compatible games. A game can use one mechanism family by itself or
-combine several through a product-owned `TurnReducer`. Tabletop and board games
+agent-playable games. A game can use one mechanism family by itself or
+combine several through a product-owned `TickReducer`. Tabletop and board games
 are supported application families, not the SDK boundary. Card games, drafting
 games, hidden-role games, abstract graph games, tactics games, simulations, and
 hybrids can use the same reducer, agent, and replay contracts.
@@ -11,7 +11,7 @@ hybrids can use the same reducer, agent, and replay contracts.
 
 | Domain | SDK-owned capabilities | Example game shapes |
 | --- | --- | --- |
-| Turn models | Sequential rotation, simultaneous intent collection, response priority, phases, high-frequency lockstep, frame skip | Chess-like turns, WEGO strategy, reaction stacks, tick-based tactics |
+| Tick execution | Zero-, one-, or multi-input ticks, simultaneous intent collection, response priority, phases, fixed-rate lockstep | Turn-based products, WEGO strategy, reaction stacks, realtime tactics |
 | Boards and locations | Square, axial-hex, graph, multi-board, paths, lines, fields, keyed footprints | Tactics, territory maps, node networks, dungeon rooms |
 | Zones and collections | Ordered decks, hidden hands, bags, queues, sparse slots, atomic transfer, shuffle, draw, deal | Card games, drafting, inventories, production queues, worker placement |
 | Information | Per-seat observations, hidden identity/order, fog, shells, teams, revelations, spectators, leak assertions | Hidden cards, fog of war, social deduction, team games |
@@ -19,23 +19,22 @@ hybrids can use the same reducer, agent, and replay contracts.
 | Resolution | Settlement waves, movement contention, resource claims, arrivals, portals, pushes, projectiles, transport, gates, triggers | Chain reactions, simultaneous movement, hybrid board/zone transit |
 | Agents | Single- and multi-agent environments, legal-action expansion, rewards, batch evaluation, model drivers, CLI launchers | Model evaluation, self-play, tournaments, regression agents |
 | Verification | Seeded randomness, solver, state digests, resimulation, portable JSONL replay, multi-level recheck | Benchmarks, leaderboards, dispute verification, reproducible bug reports |
-| Integration | Genre-neutral turn protocol, retry-safe cursors, participation windows, TypeScript and Python clients | Local play, hosted sessions, P2P plus verifier, authoritative matches |
+| Integration | Genre-neutral tick protocol, retry-safe cursors, participation windows, TypeScript and Python clients | Local play, hosted sessions, P2P plus verifier, authoritative matches |
 
-## Turn models
+## Tick execution
 
 GAOS does not require one cadence.
 
-- **Sequential:** immutable seat rotation, reversals, skips, extra turns,
-  elimination, and round tracking.
+- **Sequential:** a product exposes one active seat for a tick.
 - **Simultaneous:** collect one intent per participating seat, then apply a
   canonical atomic batch without request-arrival bias.
 - **Response priority:** open a response window, rotate priority, collect
   passes or reactions, and unwind pending work deterministically.
 - **High frequency:** record sparse tick inputs, resimulate omitted empty
-  ticks, digest canonical state, and frame-skip between meaningful decisions.
+  ticks, and digest canonical state.
 
-The product decides when a turn ends, which seats may act, and which actions
-are legal. The SDK owns the reusable ordering and replay rules.
+The product decides which seats may act and which actions are legal. The SDK
+owns tick execution, canonical ordering, and replay rules.
 
 ## Containers, not just grids
 
@@ -71,7 +70,7 @@ Products compose it with:
 
 - layered static, granted, and suppressed keywords;
 - declarative targets across boards and zones;
-- turn/round/phase/tick durations;
+- round/phase/counter durations;
 - explicit phase hooks;
 - nested response windows and LIFO resolution;
 - deterministic shuffle, draw, round-robin deal, and batch deal;
@@ -118,7 +117,7 @@ ordering and failure semantics; the game owns rules content and presentation.
 
 `AgentEnvironment` and `MultiAgentEnvironment` expose concrete legal actions
 from the same reducer used by ordinary play. They support seat-redacted views,
-frame skip, per-seat rewards, safety truncation, batch evaluation, provider
+per-seat rewards, safety truncation, batch evaluation, provider
 drivers, portable tools, and CLI-backed agents.
 
 The `gaos.replay` JSONL envelope then packages the evidence:

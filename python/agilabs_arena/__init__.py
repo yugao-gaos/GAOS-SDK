@@ -8,9 +8,9 @@ from .client import (
     AsyncArenaClient,
     IllegalActionRejected,
     ProtocolMismatchError,
-    Turn,
+    Tick,
     parse_session_binding,
-    parse_turn_result,
+    parse_tick_result,
 )
 from .env import ArenaEnv
 from .agent import (
@@ -53,8 +53,8 @@ __all__ = [
     "ArenaAPIError",
     "IllegalActionRejected",
     "ProtocolMismatchError",
-    "Turn",
-    "parse_turn_result",
+    "Tick",
+    "parse_tick_result",
     "parse_session_binding",
     "GAOS_REPLAY_FORMAT_ID",
     "GAOS_REPLAY_FORMAT_VERSION",
@@ -69,4 +69,4 @@ __all__ = [
     "parse_replay_jsonl",
     "serialize_replay_jsonl",
 ]
-__version__ = "0.17.0"
+__version__ = "0.18.0"

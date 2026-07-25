@@ -86,6 +86,7 @@ export default defineConfig({
           { text: 'Capability map', link: '/capabilities' },
           { text: 'Quickstart', link: '/quickstart' },
           { text: 'Architecture map', link: '/architecture' },
+          { text: 'Terminology', link: '/terminology' },
         ],
       },
       {
@@ -93,9 +94,9 @@ export default defineConfig({
         items: [
           { text: 'Engine boundary', link: '/engine' },
           { text: 'Mechanism overview', link: '/mechanisms/' },
-          { text: 'Turn and reducer model', link: '/mechanisms/grid-model' },
+            { text: 'Tick and reducer model', link: '/mechanisms/grid-model' },
           { text: 'Locations and layouts', link: '/mechanisms/locations-and-layouts' },
-          { text: 'Turn order and lockstep', link: '/mechanisms/turn-order-and-lockstep' },
+            { text: 'Ticks and lockstep', link: '/mechanisms/ticks-and-lockstep' },
           { text: 'Information partitions', link: '/mechanisms/information-partitions' },
           { text: 'Zones and card play', link: '/mechanisms/zones-and-card-play' },
           { text: 'Portals', link: '/mechanisms/portals' },
@@ -130,15 +131,15 @@ export default defineConfig({
           { text: 'Scoring and AI action limits', link: '/mechanisms/scoring' },
           { text: 'Solver', link: '/mechanisms/solver' },
           { text: 'Portable replay and verification', link: '/mechanisms/replay' },
-          { text: 'High-frequency turns', link: '/high-frequency' },
+          { text: 'Fixed-rate ticks', link: '/high-frequency' },
         ],
       },
       {
         text: 'Agents and integration',
         items: [
           { text: 'Agentic play', link: '/agentic-play' },
-          { text: 'Turn protocol v1', link: '/protocol-v1' },
-          { text: 'Python client', link: '/python' },
+            { text: 'Tick protocol v1', link: '/protocol-v1' },
+          { text: 'Python SDK surface', link: '/python' },
         ],
       },
       {
@@ -148,8 +149,15 @@ export default defineConfig({
           { text: 'Roadmap', link: '/roadmap' },
           { text: 'Support and compatibility', link: '/support' },
           { text: 'Version history', link: '/version-history' },
-          { text: 'Batch implementation review', link: '/rfcs/implementation-review' },
           { text: 'Release process and migrations', link: '/releases' },
+        ],
+      },
+      {
+        text: 'Historical design records',
+        collapsed: true,
+        items: [
+          { text: 'RFC index', link: '/rfcs/0000-overview' },
+          { text: 'Batch implementation review', link: '/rfcs/implementation-review' },
         ],
       },
     ],

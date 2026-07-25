@@ -14,9 +14,9 @@ import {
   type CommandSubmission,
   type PendingEnvelope,
   type ProtocolExtensions,
-  type TurnCursor,
-  type TurnEnvelope,
-  type TurnResult,
+  type TickCursor,
+  type TickEnvelope,
+  type TickResult,
 } from './protocol.js';
 
 export {
@@ -28,6 +28,9 @@ export {
   canonicalJson,
   createParticipationIntentWindow,
   isParticipantId,
+  makeTickId,
+  resolveGameTick,
+  tickEnvelope,
   type CommandSubmission,
   type GameDefinition,
   type JsonObject,
@@ -36,15 +39,15 @@ export {
   type IntentParticipation,
   type PendingEnvelope,
   type ProtocolExtensions,
-  type TurnCursor,
-  type TurnEnvelope,
-  type TurnResult,
+  type TickCursor,
+  type TickEnvelope,
+  type TickResult,
 } from './protocol.js';
 
-/** Namespaced hosted-Arena concurrency extension; additive to Turns v1. */
+/** Namespaced hosted-Arena concurrency extension. */
 export const ARENA_CONTROL_EXTENSION = 'agilabs.arena' as const;
 
-/** Typed Arena payload carried inside the open Turns v1 extension object. */
+/** Typed Arena payload carried inside the protocol extension object. */
 export interface ArenaControlExtensions extends ProtocolExtensions {
   [ARENA_CONTROL_EXTENSION]: { controlRevision: number };
 }
@@ -60,7 +63,7 @@ export interface VisualEvent {
   [key: string]: unknown;
 }
 
-export interface TurnCharacter {
+export interface ObservationCharacter {
   id: string;
   /** Owning participant/seat in simultaneous modes such as Arena. */
   participantId?: string;
@@ -86,12 +89,12 @@ export interface TurnCharacter {
   }>;
 }
 
-export interface TurnUnit extends TurnCharacter {
+export interface ObservationUnit extends ObservationCharacter {
   hp: number;
   maxHp: number;
 }
 
-export interface TurnHud {
+export interface ObservationHud {
   /** Visible Archive File position in client coordinates [x, y]. */
   archiveAt?: [number, number];
   actionsUsed: number;
@@ -110,11 +113,11 @@ export interface TurnHud {
     targetKind: string;
   }>;
   /** Existing battle-unit integrity contract. */
-  units?: TurnUnit[];
+  units?: ObservationUnit[];
   /** Batteries seated in plug sockets, including their remaining charge. */
   pluggedBatteries?: Array<{ at: [number, number]; charge: number }>;
   /** Additive cast/control observation, also present outside combat. */
-  characters?: TurnCharacter[];
+  characters?: ObservationCharacter[];
   mode?: string;
   targetableCells?: Array<[number, number]>;
   actionTargeting?: Record<string, {
@@ -156,9 +159,9 @@ export interface TurnHud {
   dialogueEmotion?: string;
 }
 
-export interface Turn {
-  turnNumber: number;
-  /** Seat-local UI/control substep. Arena may advance this without resolving the world turn. */
+export interface GameObservation {
+  tickNumber: number;
+  /** Seat-local UI/control substep. Arena may advance this without resolving the world tick. */
   controlRevision?: number;
   narrative: string | null;
   grid: string;
@@ -168,7 +171,7 @@ export interface Turn {
   systemActions?: ActionDef[];
   status: 'playing' | 'won' | 'failed';
   stars?: number;
-  hud: TurnHud;
+  hud: ObservationHud;
 }
 
 export interface SessionRequest {
@@ -191,7 +194,7 @@ export interface SessionRequest {
   seasonId?: string;
   /** Debug console only: override the level's capability locks (e.g. ['attack']). */
   unlocks?: string[];
-  /** Required player seats for games with a simultaneous `resolveTurn` adapter. */
+  /** Required player seats for games with a simultaneous `resolveTick` adapter. */
   participants?: string[];
 }
 
@@ -220,7 +223,7 @@ export interface SubmitSummary {
   run?: RunSummary;
 }
 
-export interface SessionBinding extends TurnCursor {
+export interface SessionBinding extends TickCursor {
   sessionId: string;
   participantId: string;
   protocol: typeof PROTOCOL_ID;
@@ -239,7 +242,7 @@ export function parseSessionBinding(value: unknown): SessionBinding {
     throw new ProtocolMismatchError(`session binding must use ${PROTOCOL_ID} ${PROTOCOL_VERSION}`);
   }
   if (typeof binding['sessionId'] !== 'string' || !binding['sessionId'].trim()
-    || typeof binding['turnId'] !== 'string' || !binding['turnId'].trim()
+    || typeof binding['tickId'] !== 'string' || !binding['tickId'].trim()
     || !Number.isSafeInteger(binding['revision']) || (binding['revision'] as number) < 0
     || typeof binding['participantId'] !== 'string' || !isParticipantId(binding['participantId'])) {
     throw new ProtocolMismatchError('session binding cursor or participant is invalid');
@@ -252,7 +255,7 @@ export function parseSessionBinding(value: unknown): SessionBinding {
     protocol: PROTOCOL_ID,
     protocolVersion: PROTOCOL_VERSION,
     sessionId: binding['sessionId'],
-    turnId: binding['turnId'],
+    tickId: binding['tickId'],
     revision: binding['revision'] as number,
     participantId: binding['participantId'],
     ...(binding['controlRevision'] === undefined
@@ -262,7 +265,7 @@ export function parseSessionBinding(value: unknown): SessionBinding {
 
 export interface SessionStart {
   sessionId: string;
-  turn: Turn;
+  tick: GameObservation;
   /** Opaque concurrency binding to retain when handing a session between UIs. */
   binding: SessionBinding;
 }
@@ -342,13 +345,13 @@ export interface ArenaOutcome {
   gameReason?: string;
 }
 
-export interface ArenaRoom<TObservation = Turn> {
+export interface ArenaRoom<TObservation = GameObservation> {
   matchId: string;
   sessionId: string;
   status: 'connecting' | 'active' | 'completed' | 'expired';
   participantId: string;
   readyDeadline: number;
-  turnDeadline: number | null;
+  tickDeadline: number | null;
   expiresAt: number | null;
   participants: Array<{
     participantId: string;
@@ -356,9 +359,9 @@ export interface ArenaRoom<TObservation = Turn> {
     connected: boolean;
     reconnectDeadline: number | null;
   }>;
-  /** Authoritative when network policy completes a still-playing game turn. */
+  /** Authoritative when network policy completes a still-playing game tick. */
   outcome: ArenaOutcome | null;
-  turn: TurnResult<TObservation>;
+  tick: TickResult<TObservation>;
 }
 
 export class ProtocolMismatchError extends Error {
@@ -369,22 +372,22 @@ export class ProtocolMismatchError extends Error {
 }
 
 /** Runtime guard shared by clients that consume opaque game observations. */
-export function parseTurnResult<TObservation = unknown>(data: unknown): TurnResult<TObservation> {
+export function parseTickResult<TObservation = unknown>(data: unknown): TickResult<TObservation> {
   if (!data || typeof data !== 'object') throw new ProtocolMismatchError('response is not an object');
   const value = data as Record<string, unknown>;
   if (value['protocol'] !== PROTOCOL_ID || value['protocolVersion'] !== PROTOCOL_VERSION) {
     throw new ProtocolMismatchError(`expected ${PROTOCOL_ID} ${PROTOCOL_VERSION}`);
   }
-  if (value['kind'] !== 'turn' && value['kind'] !== 'pending') {
-    throw new ProtocolMismatchError('response kind must be turn or pending');
+  if (value['kind'] !== 'tick' && value['kind'] !== 'pending') {
+    throw new ProtocolMismatchError('response kind must be tick or pending');
   }
   if (
     typeof value['sessionId'] !== 'string'
     || !value['sessionId'].trim()
-    || typeof value['turnId'] !== 'string'
-    || !value['turnId'].trim()
+    || typeof value['tickId'] !== 'string'
+    || !value['tickId'].trim()
   ) {
-    throw new ProtocolMismatchError('response sessionId/turnId missing');
+    throw new ProtocolMismatchError('response sessionId/tickId missing');
   }
   if (Object.hasOwn(value, 'extensions')) {
     try {
@@ -396,9 +399,9 @@ export function parseTurnResult<TObservation = unknown>(data: unknown): TurnResu
   if (
     !Number.isSafeInteger(value['revision'])
     || (value['revision'] as number) < 0
-    || !Object.hasOwn(value, 'turn')
+    || !Object.hasOwn(value, 'tick')
   ) {
-    throw new ProtocolMismatchError('response revision/turn missing');
+    throw new ProtocolMismatchError('response revision/tick missing');
   }
   if (value['kind'] === 'pending') {
     if (
@@ -424,7 +427,7 @@ export function parseTurnResult<TObservation = unknown>(data: unknown): TurnResu
       throw new ProtocolMismatchError('pending acceptedParticipantId must be submitted');
     }
   }
-  return value as unknown as TurnResult<TObservation>;
+  return value as unknown as TickResult<TObservation>;
 }
 
 function isParticipantList(value: unknown): value is string[] {
@@ -459,7 +462,7 @@ export class ArenaApiError extends Error {
   }
 }
 
-/** 422 — the action was not in the legal set for this turn. */
+/** 422 — the action was not in the legal set for this tick. */
 export class IllegalActionRejected extends ArenaApiError {
   constructor(
     status: number,
@@ -559,7 +562,7 @@ function validateArenaOutcome(
 
 export class ArenaClient {
   private readonly bindings = new Map<string, SessionBinding>();
-  private readonly observedArenaCursors = new Map<string, TurnCursor & { controlRevision?: number }>();
+  private readonly observedArenaCursors = new Map<string, TickCursor & { controlRevision?: number }>();
   private readonly request: typeof fetch;
 
   constructor(
@@ -579,9 +582,9 @@ export class ArenaClient {
     }
   }
 
-  private remember<T>(result: TurnResult<T>, participantId?: string): SessionBinding {
+  private remember<T>(result: TickResult<T>, participantId?: string): SessionBinding {
     const previous = this.bindings.get(result.sessionId);
-    const observation = result.turn as T & { controlRevision?: unknown };
+    const observation = result.tick as T & { controlRevision?: unknown };
     const controlRevision = Number.isSafeInteger(observation?.controlRevision)
       && (observation.controlRevision as number) >= 0
       ? observation.controlRevision as number
@@ -590,7 +593,7 @@ export class ArenaClient {
       protocol: PROTOCOL_ID,
       protocolVersion: PROTOCOL_VERSION,
       sessionId: result.sessionId,
-      turnId: result.turnId,
+      tickId: result.tickId,
       revision: result.revision,
       participantId: participantId ?? previous?.participantId ?? 'player',
       ...(controlRevision !== undefined ? { controlRevision } : {}),
@@ -614,8 +617,8 @@ export class ArenaClient {
     return { ...binding };
   }
 
-  private parse<T>(data: unknown, expectedSessionId?: string): TurnResult<T> {
-    const result = parseTurnResult<T>(data);
+  private parse<T>(data: unknown, expectedSessionId?: string): TickResult<T> {
+    const result = parseTickResult<T>(data);
     if (expectedSessionId && result.sessionId !== expectedSessionId) {
       throw new ProtocolMismatchError('response session does not match request');
     }
@@ -642,7 +645,7 @@ export class ArenaClient {
       typeof value['status'] !== 'string'
       || !ARENA_ROOM_STATUSES.has(value['status'] as ArenaRoom['status'])
       || typeof value['readyDeadline'] !== 'number' || !Number.isFinite(value['readyDeadline'])
-      || !nullableFiniteNumber(value['turnDeadline'])
+      || !nullableFiniteNumber(value['tickDeadline'])
       || !nullableFiniteNumber(value['expiresAt'])
       || !Array.isArray(participants)
       || !participants.every((entry) => {
@@ -660,9 +663,9 @@ export class ArenaClient {
     ) {
       throw new ProtocolMismatchError('Arena room fields are invalid');
     }
-    const turn = this.parse<T>(value['turn'], expectedSessionId);
-    this.remember(turn, value['participantId']);
-    return { ...value, turn } as unknown as ArenaRoom<T>;
+    const tick = this.parse<T>(value['tick'], expectedSessionId);
+    this.remember(tick, value['participantId']);
+    return { ...value, tick } as unknown as ArenaRoom<T>;
   }
 
   private async call<T>(
@@ -726,18 +729,18 @@ export class ArenaClient {
     participantId = 'player',
     callOptions: ArenaCallOptions = {},
   ): Promise<SessionStart> {
-    const result = this.parse<Turn>(await this.call('POST', '/v1/sessions', req, callOptions));
-    if (result.kind !== 'turn') throw new ProtocolMismatchError('new session must start resolved');
+    const result = this.parse<GameObservation>(await this.call('POST', '/v1/sessions', req, callOptions));
+    if (result.kind !== 'tick') throw new ProtocolMismatchError('new session must start resolved');
     const binding = this.remember(result, participantId);
-    return { sessionId: result.sessionId, turn: result.turn, binding };
+    return { sessionId: result.sessionId, tick: result.tick, binding };
   }
 
-  async getTurnEnvelope(
+  async getTickEnvelope(
     sessionId: string,
     callOptions: ArenaCallOptions = {},
-  ): Promise<TurnResult<Turn>> {
-    const result = this.parse<Turn>(
-      await this.call('GET', `/v1/sessions/${encodeURIComponent(sessionId)}/turn`, undefined, callOptions),
+  ): Promise<TickResult<GameObservation>> {
+    const result = this.parse<GameObservation>(
+      await this.call('GET', `/v1/sessions/${encodeURIComponent(sessionId)}/tick`, undefined, callOptions),
       sessionId,
     );
     this.remember(result);
@@ -745,21 +748,21 @@ export class ArenaClient {
   }
 
   /** Compatibility view: returns the latest resolved observation while pending. */
-  async getTurn(sessionId: string, callOptions: ArenaCallOptions = {}): Promise<Turn> {
-    return (await this.getTurnEnvelope(sessionId, callOptions)).turn;
+  async getTick(sessionId: string, callOptions: ArenaCallOptions = {}): Promise<GameObservation> {
+    return (await this.getTickEnvelope(sessionId, callOptions)).tick;
   }
 
-  /** Stable v1 primitive for any JSON command and any game observation shape. */
-  async submitIntent<TCommand, TObservation = Turn>(
+  /** Stable primitive for any JSON command and any game observation shape. */
+  async submitIntent<TCommand, TObservation = GameObservation>(
     sessionId: string,
     command: TCommand,
     opts: {
       participantId?: string;
       submissionId?: string;
-      cursor?: TurnCursor;
+      cursor?: TickCursor;
       signal?: AbortSignal;
     } = {},
-  ): Promise<TurnResult<TObservation>> {
+  ): Promise<TickResult<TObservation>> {
     return this.submitIntentTo(
       `/v1/sessions/${encodeURIComponent(sessionId)}/actions`,
       sessionId,
@@ -775,11 +778,11 @@ export class ArenaClient {
     opts: {
       participantId?: string;
       submissionId?: string;
-      cursor?: TurnCursor;
+      cursor?: TickCursor;
       controlRevision?: number;
       signal?: AbortSignal;
     },
-  ): Promise<TurnResult<TObservation>> {
+  ): Promise<TickResult<TObservation>> {
     let binding = this.bindings.get(sessionId);
     if (!binding && !opts.cursor) {
       if (opts.submissionId !== undefined) {
@@ -787,7 +790,7 @@ export class ArenaClient {
           'explicit submissionId requires the original cursor or a restored session binding',
         );
       }
-      await this.getTurnEnvelope(sessionId, { signal: opts.signal });
+      await this.getTickEnvelope(sessionId, { signal: opts.signal });
       binding = this.bindings.get(sessionId);
     }
     const cursor = opts.cursor ?? binding;
@@ -797,11 +800,11 @@ export class ArenaClient {
       protocol: PROTOCOL_ID,
       protocolVersion: PROTOCOL_VERSION,
       sessionId,
-      turnId: cursor.turnId,
+      tickId: cursor.tickId,
       revision: cursor.revision,
       participantId,
       // Stable across an application retry after an ambiguous network error.
-      submissionId: opts.submissionId ?? `${participantId}:${cursor.turnId}`,
+      submissionId: opts.submissionId ?? `${participantId}:${cursor.tickId}`,
       command,
       ...(opts.controlRevision !== undefined
         ? { extensions: {
@@ -848,7 +851,7 @@ export class ArenaClient {
   }
 
   /** Read-only room recovery snapshot; it does not claim or heartbeat a seat. */
-  async getArenaRoom<TObservation = Turn>(
+  async getArenaRoom<TObservation = GameObservation>(
     matchId: string,
     callOptions: ArenaCallOptions = {},
   ): Promise<ArenaRoom<TObservation>> {
@@ -858,7 +861,7 @@ export class ArenaClient {
     );
   }
 
-  async setArenaPresence<TObservation = Turn>(
+  async setArenaPresence<TObservation = GameObservation>(
     matchId: string,
     connected: boolean,
     callOptions: ArenaCallOptions = {},
@@ -869,40 +872,40 @@ export class ArenaClient {
     );
   }
 
-  heartbeatArenaMatch<TObservation = Turn>(matchId: string, callOptions: ArenaCallOptions = {}): Promise<ArenaRoom<TObservation>> {
+  heartbeatArenaMatch<TObservation = GameObservation>(matchId: string, callOptions: ArenaCallOptions = {}): Promise<ArenaRoom<TObservation>> {
     return this.setArenaPresence<TObservation>(matchId, true, callOptions);
   }
 
-  /** Required after matching. The second claimed seat atomically starts turn timers. */
-  connectArenaMatch<TObservation = Turn>(matchId: string, callOptions: ArenaCallOptions = {}): Promise<ArenaRoom<TObservation>> {
+  /** Required after matching. The second claimed seat atomically starts tick timers. */
+  connectArenaMatch<TObservation = GameObservation>(matchId: string, callOptions: ArenaCallOptions = {}): Promise<ArenaRoom<TObservation>> {
     return this.setArenaPresence<TObservation>(matchId, true, callOptions);
   }
 
-  disconnectArenaMatch<TObservation = Turn>(matchId: string, callOptions: ArenaCallOptions = {}): Promise<ArenaRoom<TObservation>> {
+  disconnectArenaMatch<TObservation = GameObservation>(matchId: string, callOptions: ArenaCallOptions = {}): Promise<ArenaRoom<TObservation>> {
     return this.setArenaPresence<TObservation>(matchId, false, callOptions);
   }
 
-  async getArenaTurnEnvelope<TObservation = Turn>(
+  async getArenaTickEnvelope<TObservation = GameObservation>(
     matchId: string,
     callOptions: ArenaCallOptions = {},
-  ): Promise<TurnResult<TObservation>> {
+  ): Promise<TickResult<TObservation>> {
     const result = this.parse<TObservation>(
-      await this.call('GET', `/v1/arena/matches/${encodeURIComponent(matchId)}/turn`, undefined, callOptions),
+      await this.call('GET', `/v1/arena/matches/${encodeURIComponent(matchId)}/tick`, undefined, callOptions),
       matchId,
     );
     const binding = this.bindings.get(matchId);
-    // Turn envelopes intentionally omit authenticated seat identity. Avoid
+    // Tick envelopes intentionally omit authenticated seat identity. Avoid
     // inventing the ordinary solo `player` seat when callers poll first;
     // submitArenaIntent will recover the real room binding on demand.
     if (binding) this.remember(result, binding.participantId);
     else {
-      const observation = result.turn as TObservation & { controlRevision?: unknown };
+      const observation = result.tick as TObservation & { controlRevision?: unknown };
       const controlRevision = Number.isSafeInteger(observation?.controlRevision)
         && (observation.controlRevision as number) >= 0
         ? observation.controlRevision as number
         : undefined;
       this.observedArenaCursors.set(matchId, {
-        turnId: result.turnId,
+        tickId: result.tickId,
         revision: result.revision,
         ...(controlRevision === undefined ? {} : { controlRevision }),
       });
@@ -910,16 +913,16 @@ export class ArenaClient {
     return result;
   }
 
-  async submitArenaIntent<TCommand, TObservation = Turn>(
+  async submitArenaIntent<TCommand, TObservation = GameObservation>(
     matchId: string,
     command: TCommand,
     opts: {
       submissionId?: string;
-      cursor?: TurnCursor & { controlRevision?: number };
+      cursor?: TickCursor & { controlRevision?: number };
       controlRevision?: number;
       signal?: AbortSignal;
     } = {},
-  ): Promise<TurnResult<TObservation>> {
+  ): Promise<TickResult<TObservation>> {
     let binding = this.bindings.get(matchId);
     const observedCursor = opts.submissionId !== undefined
       ? this.observedArenaCursors.get(matchId)
@@ -953,13 +956,13 @@ export class ArenaClient {
         controlRevision,
         participantId,
         submissionId: opts.submissionId
-          ?? `${participantId}:${cursor.turnId}:control:${controlRevision}`,
+          ?? `${participantId}:${cursor.tickId}:control:${controlRevision}`,
       },
     );
   }
 
   /**
-   * Arena convenience wrapper. Solo turns still resolve in one request; if a
+   * Arena convenience wrapper. Solo ticks resolve in one request; if a
    * future multiplayer Arena adapter returns pending, poll for a bounded time.
    * Generic games should call `submitIntent` and handle the discriminated union.
    */
@@ -973,17 +976,17 @@ export class ArenaClient {
       maxPollAttempts?: number;
       signal?: AbortSignal;
     } = {},
-  ): Promise<Turn> {
-    const result = await this.submitIntent<ActionSubmit, Turn>(sessionId, action, opts);
-    if (result.kind === 'turn') return result.turn;
+  ): Promise<GameObservation> {
+    const result = await this.submitIntent<ActionSubmit, GameObservation>(sessionId, action, opts);
+    if (result.kind === 'tick') return result.tick;
     const interval = opts.pollIntervalMs ?? 250;
     const attempts = opts.maxPollAttempts ?? 120;
     for (let attempt = 0; attempt < attempts; attempt++) {
       await awaitWithSignal(new Promise<void>((resolve) => setTimeout(resolve, interval)), opts.signal);
-      const polled = await this.getTurnEnvelope(sessionId, { signal: opts.signal });
-      if (polled.kind === 'turn' && polled.revision > result.revision) return polled.turn;
+      const polled = await this.getTickEnvelope(sessionId, { signal: opts.signal });
+      if (polled.kind === 'tick' && polled.revision > result.revision) return polled.tick;
     }
-    throw new ArenaApiError(408, `timed out waiting for turn after ${attempts} polls`);
+    throw new ArenaApiError(408, `timed out waiting for tick after ${attempts} polls`);
   }
 
   submitSession(

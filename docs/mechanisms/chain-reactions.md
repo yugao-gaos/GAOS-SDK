@@ -1,7 +1,7 @@
 # Chain reactions
 
 `resolveChainReaction` resolves connected reactions breadth-first within one
-logical turn. It is appropriate for explosions, signal propagation, collapsing
+logical tick. It is appropriate for explosions, signal propagation, collapsing
 tiles, spreading status, or any causal graph where each stable node identity
 must activate at most once.
 
@@ -56,7 +56,7 @@ instead of using an arbitrary large constant.
 
 The SDK does not decide adjacency, damage, immunity, destruction, event payloads,
 or whether a changed node should trigger again under a new state. Encode the
-latter in the node key: use one stable object id for once-per-turn behavior, or
+latter in the node key: use one stable object id for once-per-tick behavior, or
 include a product-owned phase/version when distinct activations are legitimate.
 
 The `react` callback should return neighbors in a stable order. Iterating an
@@ -64,7 +64,7 @@ unordered external collection can make same-wave effects differ between runs.
 
 ## Zonoid example
 
-Zonoid uses the chain-reaction primitive for same-turn effect propagation. A
+Zonoid uses the chain-reaction primitive for same-tick effect propagation. A
 laser or explosive battery can create a seed effect, then the platform’s
 callback applies damage or destruction and returns newly affected entities.
 The SDK guarantees breadth-first ordering and once-per-identity activation;

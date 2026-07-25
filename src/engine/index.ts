@@ -122,26 +122,31 @@ export {
 } from './scoring.js';
 export {
   type ActionDefinition,
+  type ActionReducer,
   type GridTargetingView,
   type GridViewNamespace,
   type Outcome,
   type Participation,
   type SubmittedAction,
   type TargetChoiceView,
-  type TurnReducer,
-  type TurnView,
+  advanceTick,
+  type Reducer,
+  type TickReducer,
+  type TickView,
   type ZoneEntryView,
   type ZoneViewNamespace,
   type ZoneViews,
   /** @deprecated Use `ActionDefinition`. */
   type GridActionDefinition,
-  /** @deprecated Use `TurnReducer`. */
-  type GridReducer,
   /** @deprecated Use `SubmittedAction`. */
   type GridSubmittedAction,
-  /** @deprecated Use `TurnView`. */
-  type GridTurnView,
 } from './contracts.js';
+export {
+  createTickRate,
+  elapsedMillisecondsAtTick,
+  tickAtElapsedMilliseconds,
+  type TickRate,
+} from './ticks.js';
 export {
   enumerateActions,
   solveLevel,
@@ -225,17 +230,6 @@ export {
   type ShortestPathOptions,
   type SquareLayoutOptions,
 } from './layouts.js';
-export {
-  activeSeat,
-  advanceTurn,
-  createTurnOrder,
-  eliminateSeat,
-  queueExtraTurn,
-  queueSkip,
-  reorderSeats,
-  reverseTurnOrder,
-  type TurnOrderState,
-} from './turn-order.js';
 export {
   findPatterns,
   type PatternMatch,
@@ -403,8 +397,8 @@ export {
   type AgentTerminationReason,
   type AgentTranscript,
   type AgentTranscriptAction,
-  type AgentTurn,
-  type AgentTurnInfo,
+  type AgentStep,
+  type AgentStepInfo,
 } from './agent-environment.js';
 export {
   evaluateAgentEpisodes,
@@ -431,8 +425,8 @@ export {
   type MultiAgentEnvironmentOptions,
   type MultiAgentEpisodeResult,
   type MultiAgentPolicy,
-  type MultiAgentSeatTurn,
+  type MultiAgentSeatStep,
+  type MultiAgentStep,
   type MultiAgentTranscript,
-  type MultiAgentTranscriptRound,
-  type MultiAgentTurn,
+  type MultiAgentTranscriptTick,
 } from './multi-agent-environment.js';

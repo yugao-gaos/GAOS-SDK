@@ -3,17 +3,17 @@ import {
   AgentEnvironment,
   MultiAgentEnvironment,
   runMultiAgentEpisode,
-  type TurnReducer,
-  type TurnView,
+  type ActionReducer,
+  type TickView,
 } from '../src/engine/index.js';
 
-describe('high-frequency agent decisions', () => {
+describe('agent decision cadence', () => {
   interface State {
     tick: number;
     actions: string[];
   }
 
-  const reducer: TurnReducer<null, State> = {
+  const reducer: ActionReducer<null, State> = {
     init: () => ({ tick: 0, actions: [] }),
     apply: (state, action) => ({
       tick: state.tick + 1,
@@ -26,36 +26,33 @@ describe('high-frequency agent decisions', () => {
     }),
   };
 
-  it('repeats one decision across frames and records every replayable tick', () => {
-    const environment = new AgentEnvironment({
-      reducer,
-      level: null,
-      frameSkip: 4,
-    });
+  it('advances exactly one tick per environment step', () => {
+    const environment = new AgentEnvironment({ reducer, level: null });
     environment.reset();
-    const final = environment.step({ id: 'hold' });
-    expect(final).toMatchObject({
-      done: true,
-      reward: 1,
-      info: { steps: 3, actionsUsed: 3 },
+    const first = environment.step({ id: 'hold' });
+    expect(first).toMatchObject({
+      done: false,
+      info: { ticks: 1, actionsUsed: 1 },
     });
+    environment.step({ id: 'hold' });
+    const final = environment.step({ id: 'hold' });
+    expect(final).toMatchObject({ done: true, info: { ticks: 3 } });
     const transcript = environment.transcript();
     expect(transcript).toMatchObject({
-      version: '1.2',
-      frameSkip: 4,
+      version: '1.3',
       actions: [
         { n: 1, action: { id: 'hold' } },
         { n: 2, action: { id: 'hold' } },
         { n: 3, action: { id: 'hold' } },
       ],
     });
-    const replayed = new AgentEnvironment({ reducer, level: null, frameSkip: 4 });
+    const replayed = new AgentEnvironment({ reducer, level: null });
     replayed.replay(transcript.actions.map(({ action }) => action));
     expect(replayed.transcript()).toEqual(transcript);
   });
 
-  it('ends frame skipping early when a held continuation becomes illegal', () => {
-    const changing: TurnReducer<null, State> = {
+  it('leaves action repetition to the product policy', () => {
+    const changing: ActionReducer<null, State> = {
       ...reducer,
       view: (state) => ({
         actions: state.tick === 0
@@ -67,19 +64,15 @@ describe('high-frequency agent decisions', () => {
         hud: { actionsUsed: state.tick },
       }),
     };
-    const environment = new AgentEnvironment({
-      reducer: changing,
-      level: null,
-      frameSkip: 5,
-    });
+    const environment = new AgentEnvironment({ reducer: changing, level: null });
     environment.reset();
     expect(environment.step({ id: 'charge' })).toMatchObject({
       done: false,
-      info: { steps: 1 },
+      info: { ticks: 1 },
     });
     expect(environment.step({ id: 'release' })).toMatchObject({
       done: true,
-      info: { steps: 2 },
+      info: { ticks: 2 },
     });
   });
 });
@@ -90,11 +83,11 @@ describe('multi-agent episodes', () => {
     trace: string[];
   }
 
-  interface View extends TurnView {
+  interface View extends TickView {
     privateValue: string;
   }
 
-  const reducer: TurnReducer<null, State, View> = {
+  const reducer: ActionReducer<null, State, View> = {
     init: () => ({ round: 0, trace: [] }),
     apply: () => {
       throw new Error('simultaneous reducer must not serially apply intents');
@@ -160,13 +153,13 @@ describe('multi-agent episodes', () => {
     });
     const transcript = environment.transcript();
     expect(transcript).toMatchObject({
-      version: '1.0',
+      version: '1.1',
       seats: ['a', 'b'],
       initialObservations: {
         a: { privateValue: 'only:a' },
         b: { privateValue: 'only:b' },
       },
-      rounds: [{
+      ticks: [{
         actions: [
           { id: 'move-a', seat: 'a' },
           { id: 'move-b', seat: 'b' },
@@ -186,7 +179,7 @@ describe('multi-agent episodes', () => {
       seats: ['a', 'b'],
       seed: 7,
     });
-    replayed.replay(transcript.rounds.map(({ actions }) => actions));
+    replayed.replay(transcript.ticks.map(({ actions }) => actions));
     expect(replayed.transcript()).toEqual(transcript);
   });
 
@@ -197,10 +190,10 @@ describe('multi-agent episodes', () => {
       seats: ['a', 'b'],
     });
     const episode = await runMultiAgentEpisode(environment, {
-      a: (turn) => turn.legalActions[0],
-      b: (turn) => turn.legalActions[0],
+      a: (step) => step.legalActions[0],
+      b: (step) => step.legalActions[0],
     });
-    expect(episode.finalTurn.done).toBe(true);
-    expect(episode.transcript.rounds).toHaveLength(1);
+    expect(episode.finalStep.done).toBe(true);
+    expect(episode.transcript.ticks).toHaveLength(1);
   });
 });

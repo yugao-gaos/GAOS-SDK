@@ -1,9 +1,14 @@
-# GAOS Turn-Based Grid Toolkit for Python
+# GAOS deterministic game SDK for Python
 
-Gymnasium-style client for the AgiLabs Arena session API — the environment
-wrapper for the hosted Arena API.
-Zero runtime dependencies; duck-type-compatible with Gymnasium and
-`verifiers`-style harnesses.
+Hosted client, Gymnasium-compatible environment API, evaluation helpers, and
+portable replay tools for protocol-compatible Arena sessions. The package has
+zero runtime dependencies and is duck-type-compatible with Gymnasium and
+`verifiers`-style harnesses without importing either.
+
+This Python distribution does not contain the TypeScript mechanism engine,
+local `TickReducer` runtime, replay re-simulation, model-provider drivers, or
+agent CLI launchers. It is the research and hosted-integration surface for a
+game whose authoritative reducer runs in a compatible host.
 
 ## Portable replay
 
@@ -20,16 +25,20 @@ canonical_bytes = serialize_replay_jsonl(artifact)
 ```
 
 `validate_replay_artifact` performs transport-level checks without executing
-game code. Reducer re-simulation remains product-owned; select the historical
-adapter declared in `artifact["header"]["game"]["adapter"]`.
+game code. Reducer re-simulation requires the TypeScript engine plus the
+product-owned historical adapter declared in
+`artifact["header"]["game"]["adapter"]`.
 
-The client speaks the stable `agilabs.turns` v1 envelope on `/v1/sessions`.
+The client speaks the stable `agilabs.ticks` v1 envelope on `/v1/sessions`.
+New code can use the canonical `Tick`, `parse_tick_result()`, `get_tick()`, and
+`get_tick_envelope()` names. They deliberately wrap the unchanged v1
+`tickId`/`tick` JSON fields so deployed hosts remain compatible.
 Each command carries the session cursor, participant, and a deterministic
 `submissionId`: stable for an exact retry, new for each logical control
 substep. Solo Arena sessions still feel synchronous;
 `submit_action()` transparently polls a bounded number of times when a
 multiplayer host returns a `202` pending envelope. Use `submit_intent()` and
-`get_turn_envelope()` when integrating a non-grid game with opaque command and
+`get_tick_envelope()` when integrating a non-grid game with opaque command and
 observation shapes.
 
 Hosted live Arena play is explicit and seat-authenticated:
@@ -62,11 +71,11 @@ have to fetch and silently pair it with a newer cursor.
 Hosted Arena observations include a seat-local `controlRevision`. The client
 remembers it and automatically sends the `agilabs.arena` extension plus a new
 deterministic submission id for each targeting or conversation substep. A free
-control step can therefore return `kind="turn"` at the same world `revision`;
+control step can therefore return `kind="tick"` at the same world `revision`;
 only a committed intent returns `pending` while the opponent is still choosing.
 
 `room["outcome"]` is authoritative: a disconnect/idle forfeit can complete the
-network room while its nested last resolved game turn still says `playing`.
+network room while its nested last resolved game tick still says `playing`.
 The hosted preview is disabled unless the operator configures the Arena adapter
 and map; it does not consume the future paid Arena-ticket economy.
 
@@ -80,7 +89,11 @@ standard-library HTTP thread; configure `timeout` to bound that work.
 ```python
 from agilabs_arena import ArenaEnv
 
-env = ArenaEnv("od-l1", base_url="http://localhost:8899", play_method="human")
+env = ArenaEnv(
+    "od-l1",
+    base_url="http://localhost:8899",
+    play_method="autonomous_local",
+)
 obs, info = env.reset()
 print(obs["grid"])          # text grid — row per line, token per cell
 print(obs["legal_actions"]) # ["Action 2", "Action 4", "Action 8", "Action 9"] …
@@ -92,7 +105,7 @@ obs, reward, terminated, truncated, info = env.step("Action 4")
   generic `legal_actions`, `carrying`, `energy_left`, interaction `mode`,
   targeting metadata, and dialogue/portrait metadata. What each action does
   is not documented anywhere in the observation — inferring it is the task.
-- **Reward** = stars (1–3) on the terminal winning turn, else 0.
+- **Reward** = stars (1–3) on the terminal winning tick, else 0.
 - **Scored sessions** use a full-game run: call
   `ArenaClient.create_session(game_id="object-delivery",
   play_method="autonomous_scored")`. They get a per-session shuffled action-id

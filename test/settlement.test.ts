@@ -9,8 +9,8 @@ interface Job extends SettlementJob {
   value?: number;
 }
 
-describe('deterministic turn settlement', () => {
-  it('resolves consequences in later waves of the same turn', () => {
+describe('deterministic tick settlement', () => {
+  it('resolves consequences in later waves of the same tick', () => {
     const seen: string[] = [];
     const result = runSettlementCascade({ total: 0 }, [
       { kind: 'move', key: 'actor' },
@@ -58,7 +58,7 @@ describe('deterministic turn settlement', () => {
     expect(seen).toEqual(['0:source', '0:source', '1:doors', '2:doors']);
   });
 
-  it('runs a once identity only once during the complete turn', () => {
+  it('runs a once identity only once during the complete tick', () => {
     const once: Job = { kind: 'arrival', key: 'actor:7', policy: 'once' };
     const seen: string[] = [];
     runSettlementCascade({}, [once, once], (job, context) => {

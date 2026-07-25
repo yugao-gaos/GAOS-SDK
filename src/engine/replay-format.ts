@@ -3,7 +3,7 @@ import {
   canonicalJson,
   type JsonObject,
 } from '../protocol.js';
-import type { TurnReducer, TurnView } from './contracts.js';
+import type { Reducer, TickView } from './contracts.js';
 import { locationKey } from './locations.js';
 import {
   recheckTranscript,
@@ -153,8 +153,8 @@ export interface ReplayReducerContext<TLevel> {
 export type ReplayReducerResolver<
   TLevel,
   TState,
-  TView extends TurnView<unknown, unknown>,
-> = (context: ReplayReducerContext<TLevel>) => TurnReducer<TLevel, TState, TView> | undefined;
+  TView extends TickView<unknown, unknown>,
+> = (context: ReplayReducerContext<TLevel>) => Reducer<TLevel, TState, TView> | undefined;
 
 export interface ReplayArtifactRecheckOptions<TLevel, TState> {
   optionsForLevel?: (
@@ -558,7 +558,7 @@ export function parseReplayJsonl<TLevel = unknown>(jsonl: string): ReplayArtifac
 export function recheckReplayArtifact<
   TLevel,
   TState,
-  TView extends TurnView<unknown, unknown>,
+  TView extends TickView<unknown, unknown>,
 >(
   artifact: ReplayArtifact<TLevel>,
   resolveReducer: ReplayReducerResolver<TLevel, TState, TView>,

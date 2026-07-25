@@ -1,5 +1,5 @@
 from agilabs_arena import ArenaEnv, evaluate_agent_episodes, run_agent_episode
-from agilabs_arena.client import Turn
+from agilabs_arena.client import Tick
 
 
 class CountingEnv:
@@ -29,22 +29,22 @@ def test_runs_one_provider_neutral_episode():
     assert result.terminated is True
     assert result.truncated is False
     assert result.total_reward == 1.0
-    assert result.steps == 2
+    assert result.ticks == 2
     assert [step.action for step in result.transcript] == [1, 1]
 
 
-def test_aggregates_deterministic_batches_and_step_limits():
+def test_aggregates_deterministic_batches_and_tick_limits():
     won = evaluate_agent_episodes(lambda _seed: CountingEnv(), lambda _observation, _info: 1, [1, 2])
-    assert (won.won, won.failed, won.truncated, won.mean_reward, won.mean_steps) == (2, 0, 0, 1.0, 2.0)
+    assert (won.won, won.failed, won.truncated, won.mean_reward, won.mean_ticks) == (2, 0, 0, 1.0, 2.0)
 
-    capped = run_agent_episode(CountingEnv(target=9), lambda _observation, _info: 1, max_steps=1)
+    capped = run_agent_episode(CountingEnv(target=9), lambda _observation, _info: 1, max_ticks=1)
     assert capped.truncated is True
-    assert capped.info["termination_reason"] == "step_limit"
+    assert capped.info["termination_reason"] == "tick_limit"
 
 
 def test_arena_observation_exposes_action_schemas_and_concrete_actions():
-    turn = Turn.from_json({
-        "turnNumber": 0,
+    tick = Tick.from_json({
+        "tickNumber": 0,
         "narrative": None,
         "grid": "@.",
         "visualEvents": [],
@@ -62,8 +62,8 @@ def test_arena_observation_exposes_action_schemas_and_concrete_actions():
             "actionTargeting": {"move": {"targetableCells": [[1, 0]]}},
         },
     })
-    observation = ArenaEnv._observation(turn)
-    assert observation["action_definitions"] == turn.actions
+    observation = ArenaEnv._observation(tick)
+    assert observation["action_definitions"] == tick.actions
     assert observation["concrete_actions"] == [
         {"id": "wait"},
         {"id": "use", "index": 2},

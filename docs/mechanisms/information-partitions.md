@@ -6,9 +6,9 @@ continue to expose one perfect-information `view(state)`, or add
 allowed to receive.
 
 ```ts
-const reducer: TurnReducer<Level, State, View> = {
+const reducer: TickReducer<Level, State, View> = {
   init,
-  apply,
+  advance,
   view: fullView,
   viewFor(state, seat) {
     return deriveSeatView(fullView(state), visibilityPolicies, seat);
@@ -16,8 +16,8 @@ const reducer: TurnReducer<Level, State, View> = {
 };
 ```
 
-`deriveSeatView` is a conventional adapter for `TurnView.zones` and
-`TurnView.grid`. Products with another observation schema can implement
+`deriveSeatView` is a conventional adapter for `TickView.zones` and
+`TickView.grid`. Products with another observation schema can implement
 `viewFor` directly.
 
 ## Visibility algebra
@@ -60,7 +60,7 @@ can use the same team declaration for shared resources without making resource
 pooling an SDK rule.
 
 `SpectatorVisibilityPolicy` documents the two supported host policies:
-public information, or a full view with an optional turn delay. The host owns
+public information, or a full view with an optional tick delay. The host owns
 spectator buffering and delivery; a spectator is not a player seat and cannot
 submit actions.
 
@@ -92,8 +92,8 @@ hidden state.
 Configure `AgentEnvironment` with `seat`. The environment uses `viewFor` when
 available, enumerates legal actions only from that redacted view, injects the
 seat into the reducer submission, and rejects an action naming another seat.
-Agent transcript version 1.2 records frame skip plus the redacted initial and
-per-tick post-action observations. Multi-agent transcripts retain one
+Agent transcript version 1.3 records the redacted initial and per-tick
+post-action observations. Multi-agent transcripts retain one
 redacted stream per seat and a shared canonical intent batch.
 
 Observation and level snapshots use `structuredClone` by default. Supply

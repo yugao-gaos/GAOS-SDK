@@ -11,13 +11,13 @@ from agilabs_arena import (
     ArenaEnv,
     AsyncArenaClient,
     ProtocolMismatchError,
-    Turn,
-    parse_turn_result,
+    Tick,
+    parse_tick_result,
 )
 
 
-TURN = {
-    "turnNumber": 0,
+OBSERVATION = {
+    "tickNumber": 0,
     "controlRevision": 0,
     "narrative": None,
     "grid": "@ .",
@@ -28,54 +28,58 @@ TURN = {
 }
 
 
-def envelope(kind="turn", revision=0, **extra):
+def envelope(kind="tick", revision=0, **extra):
     return {
-        "protocol": "agilabs.turns",
+        "protocol": "agilabs.ticks",
         "protocolVersion": "1.0",
         "kind": kind,
         "sessionId": "s1",
-        "turnId": f"s1:{revision}",
+        "tickId": f"s1:{revision}",
         "revision": revision,
-        "turn": {**TURN, "turnNumber": revision},
+        "tick": {**OBSERVATION, "tickNumber": revision},
         **extra,
     }
 
 
-def test_rejects_unversioned_turn_shape():
+def test_tick_native_transport():
+    assert parse_tick_result(envelope())["kind"] == "tick"
+
+
+def test_rejects_unversioned_tick_shape():
     with pytest.raises(ProtocolMismatchError):
-        parse_turn_result(TURN)
+        parse_tick_result(OBSERVATION)
     with pytest.raises(ProtocolMismatchError):
-        parse_turn_result({**envelope(), "sessionId": ""})
+        parse_tick_result({**envelope(), "sessionId": ""})
     with pytest.raises(ProtocolMismatchError):
-        parse_turn_result({**envelope(), "turnId": ""})
+        parse_tick_result({**envelope(), "tickId": ""})
     with pytest.raises(ProtocolMismatchError):
-        parse_turn_result({**envelope(), "revision": -1})
+        parse_tick_result({**envelope(), "revision": -1})
     with pytest.raises(ProtocolMismatchError, match="extensions"):
-        parse_turn_result({**envelope(), "extensions": 7})
+        parse_tick_result({**envelope(), "extensions": 7})
 
 
 def test_pending_participants_are_unique_disjoint_and_accepted_is_submitted():
     pending = envelope(
         "pending",
-        turnId="opaque-turn-token",
+        tickId="opaque-tick-token",
         submittedParticipants=["north"],
         awaitingParticipants=["south"],
         acceptedParticipantId="north",
     )
-    assert parse_turn_result(pending)["turnId"] == "opaque-turn-token"
+    assert parse_tick_result(pending)["tickId"] == "opaque-tick-token"
     with pytest.raises(ProtocolMismatchError, match="unique"):
-        parse_turn_result({**pending, "submittedParticipants": ["north", "north"]})
+        parse_tick_result({**pending, "submittedParticipants": ["north", "north"]})
     with pytest.raises(ProtocolMismatchError, match="disjoint"):
-        parse_turn_result({**pending, "awaitingParticipants": ["north"]})
+        parse_tick_result({**pending, "awaitingParticipants": ["north"]})
     with pytest.raises(ProtocolMismatchError, match="must await"):
-        parse_turn_result({**pending, "awaitingParticipants": []})
+        parse_tick_result({**pending, "awaitingParticipants": []})
     with pytest.raises(ProtocolMismatchError, match="must be submitted"):
-        parse_turn_result({**pending, "acceptedParticipantId": "south"})
+        parse_tick_result({**pending, "acceptedParticipantId": "south"})
     with pytest.raises(ProtocolMismatchError, match="must be submitted"):
-        parse_turn_result({**pending, "acceptedParticipantId": None})
+        parse_tick_result({**pending, "acceptedParticipantId": None})
 
 
-def test_turn_retains_unit_integrity_and_character_metadata():
+def test_tick_retains_unit_integrity_and_character_metadata():
     unit = {
         "id": "hacker",
         "team": "player",
@@ -92,10 +96,10 @@ def test_turn_retains_unit_integrity_and_character_metadata():
     }
     character = {key: value for key, value in unit.items() if key not in {"hp", "maxHp"}}
 
-    turn = Turn.from_json({
-        **TURN,
+    tick = Tick.from_json({
+        **OBSERVATION,
         "hud": {
-            **TURN["hud"],
+            **OBSERVATION["hud"],
             "units": [unit],
             "characters": [character],
             "arenaOutcome": "draw",
@@ -115,22 +119,22 @@ def test_turn_retains_unit_integrity_and_character_metadata():
         },
     })
 
-    assert turn.units == [unit]
-    assert turn.characters == [character]
-    assert turn.arena_outcome == "draw"
-    assert turn.control_revision == 0
-    assert turn.mode == "dialogue"
-    assert turn.targetable_cells == [[1, 2]]
-    assert turn.dialogue_options == [{"index": 0, "text": "Hold position."}]
-    assert turn.talking_to["character"] == "hacker"
-    assert turn.dialogue_speaker == "npc"
-    assert turn.dialogue_emotion == "focused"
-    assert Turn.from_json(TURN).units == []
-    assert Turn.from_json(TURN).characters == []
-    assert Turn.from_json(TURN).arena_outcome is None
+    assert tick.units == [unit]
+    assert tick.characters == [character]
+    assert tick.arena_outcome == "draw"
+    assert tick.control_revision == 0
+    assert tick.mode == "dialogue"
+    assert tick.targetable_cells == [[1, 2]]
+    assert tick.dialogue_options == [{"index": 0, "text": "Hold position."}]
+    assert tick.talking_to["character"] == "hacker"
+    assert tick.dialogue_speaker == "npc"
+    assert tick.dialogue_emotion == "focused"
+    assert Tick.from_json(OBSERVATION).units == []
+    assert Tick.from_json(OBSERVATION).characters == []
+    assert Tick.from_json(OBSERVATION).arena_outcome is None
 
 
-def test_wraps_commands_and_polls_a_pending_turn_once():
+def test_wraps_commands_and_polls_a_pending_tick_once():
     responses = [
         envelope(),
         envelope(
@@ -149,26 +153,26 @@ def test_wraps_commands_and_polls_a_pending_turn_once():
 
     client._call = fake_call  # type: ignore[method-assign]
     session_id, _ = client.create_session(level_id="test", play_method="human")
-    turn = client.submit_action(
+    tick = client.submit_action(
         session_id,
         "Action 1",
         submission_id="request-1",
         poll_interval=0,
         max_poll_attempts=1,
     )
-    assert turn.turn_number == 1
+    assert tick.tick_number == 1
     assert calls[1][1] == "/v1/sessions/s1/actions"
     assert calls[1][2] == {
-        "protocol": "agilabs.turns",
+        "protocol": "agilabs.ticks",
         "protocolVersion": "1.0",
         "sessionId": "s1",
-        "turnId": "s1:0",
+        "tickId": "s1:0",
         "revision": 0,
         "participantId": "player",
         "submissionId": "request-1",
         "command": {"id": "Action 1"},
     }
-    assert calls[2][1] == "/v1/sessions/s1/turn"
+    assert calls[2][1] == "/v1/sessions/s1/tick"
 
 
 def test_explicit_empty_participants_is_not_silently_changed_to_solo():
@@ -189,7 +193,7 @@ def test_preserves_stable_conflict_codes(monkeypatch):
 
     def fail(_request, **_kwargs):
         raise urllib.error.HTTPError(
-            "https://example.test/v1/sessions/s1/turn",
+            "https://example.test/v1/sessions/s1/tick",
             409,
             "Conflict",
             {},
@@ -198,14 +202,14 @@ def test_preserves_stable_conflict_codes(monkeypatch):
 
     monkeypatch.setattr("urllib.request.urlopen", fail)
     with pytest.raises(ArenaAPIError) as caught:
-        ArenaClient("https://example.test").get_turn_envelope("s1")
+        ArenaClient("https://example.test").get_tick_envelope("s1")
     assert caught.value.status == 409
     assert caught.value.code == "stale_turn"
 
 
 def test_configures_timeout_quotes_paths_and_preserves_non_json_error(monkeypatch):
     def fail(request, **kwargs):
-        assert request.full_url.endswith("/v1/sessions/room%2Fwith%20space/turn")
+        assert request.full_url.endswith("/v1/sessions/room%2Fwith%20space/tick")
         assert kwargs["timeout"] == 4.5
         raise urllib.error.HTTPError(
             request.full_url,
@@ -217,7 +221,7 @@ def test_configures_timeout_quotes_paths_and_preserves_non_json_error(monkeypatc
 
     monkeypatch.setattr("urllib.request.urlopen", fail)
     with pytest.raises(ArenaAPIError) as caught:
-        ArenaClient("https://example.test", timeout=4.5).get_turn_envelope("room/with space")
+        ArenaClient("https://example.test", timeout=4.5).get_tick_envelope("room/with space")
     assert caught.value.status == 502
     assert caught.value.error == "upstream unavailable"
     assert caught.value.body == "upstream unavailable"
@@ -252,8 +256,8 @@ def test_rejects_non_finite_and_huge_json_numbers_portably(monkeypatch):
 
 def test_async_client_runs_sync_requests_off_the_event_loop():
     client = AsyncArenaClient("https://example.test")
-    client.sync_client.get_turn_envelope = lambda session_id: {"sessionId": session_id}  # type: ignore[method-assign]
-    assert asyncio.run(client.get_turn_envelope("s1")) == {"sessionId": "s1"}
+    client.sync_client.get_tick_envelope = lambda session_id: {"sessionId": session_id}  # type: ignore[method-assign]
+    assert asyncio.run(client.get_tick_envelope("s1")) == {"sessionId": "s1"}
     assert ArenaEnv("level-1").play_method == "autonomous_local"
 
 
@@ -270,12 +274,12 @@ def test_async_client_serializes_mutable_binding_operations():
         active -= 1
         return {"sessionId": session_id}
 
-    client.sync_client.get_turn_envelope = fake_get  # type: ignore[method-assign]
+    client.sync_client.get_tick_envelope = fake_get  # type: ignore[method-assign]
 
     async def run_both():
         return await asyncio.gather(
-            client.get_turn_envelope("s1"),
-            client.get_turn_envelope("s2"),
+            client.get_tick_envelope("s1"),
+            client.get_tick_envelope("s2"),
         )
 
     assert asyncio.run(run_both()) == [{"sessionId": "s1"}, {"sessionId": "s2"}]
@@ -295,13 +299,13 @@ def test_async_client_keeps_serialization_after_cancellation():
         active -= 1
         return {"sessionId": session_id}
 
-    client.sync_client.get_turn_envelope = fake_get  # type: ignore[method-assign]
+    client.sync_client.get_tick_envelope = fake_get  # type: ignore[method-assign]
 
     async def cancel_then_call():
-        first = asyncio.create_task(client.get_turn_envelope("s1"))
+        first = asyncio.create_task(client.get_tick_envelope("s1"))
         await asyncio.sleep(0.005)
         first.cancel()
-        second = asyncio.create_task(client.get_turn_envelope("s2"))
+        second = asyncio.create_task(client.get_tick_envelope("s2"))
         with pytest.raises(asyncio.CancelledError):
             await first
         assert await second == {"sessionId": "s2"}
@@ -327,30 +331,30 @@ def test_discovers_hosted_arena_catalog():
     assert calls == [("GET", "/v1/arena/maps", None)]
 
 
-def test_arena_single_match_queue_turn_presence_and_room_outcome():
-    def match_envelope(kind="turn", **extra):
+def test_arena_single_match_queue_tick_presence_and_room_outcome():
+    def match_envelope(kind="tick", **extra):
         out = envelope(kind, **extra)
         out["sessionId"] = "m1"
-        out["turnId"] = "m1:0"
+        out["tickId"] = "m1:0"
         return out
 
-    resolved_turn = match_envelope(revision=1)
-    resolved_turn["turnId"] = "m1:1"
-    resolved_turn["turn"]["turnNumber"] = 1
+    resolved_tick = match_envelope(revision=1)
+    resolved_tick["tickId"] = "m1:1"
+    resolved_tick["tick"]["tickNumber"] = 1
     active = {
         "matchId": "m1",
         "sessionId": "m1",
         "status": "active",
         "participantId": "north",
         "readyDeadline": 120_000,
-        "turnDeadline": 30_000,
+        "tickDeadline": 30_000,
         "expiresAt": None,
         "participants": [
             {"participantId": "north", "claimed": True, "connected": True, "reconnectDeadline": None},
             {"participantId": "south", "claimed": True, "connected": True, "reconnectDeadline": None},
         ],
         "outcome": None,
-        "turn": match_envelope(),
+        "tick": match_envelope(),
     }
     disconnected = {
         **active,
@@ -363,14 +367,14 @@ def test_arena_single_match_queue_turn_presence_and_room_outcome():
             },
             {"participantId": "south", "claimed": True, "connected": True, "reconnectDeadline": None},
         ],
-        "turn": resolved_turn,
+        "tick": resolved_tick,
     }
     completed = {
         **disconnected,
         "status": "completed",
         "outcome": {"winner": "north", "loser": "south", "reason": "disconnect"},
-        # Network policy ended the room; its last reducer turn remains playing.
-        "turn": resolved_turn,
+        # Network policy ended the room; its last reducer tick remains playing.
+        "tick": resolved_tick,
     }
     responses = [
         {
@@ -401,8 +405,8 @@ def test_arena_single_match_queue_turn_presence_and_room_outcome():
             submittedParticipants=["north"],
             awaitingParticipants=["south"],
         ),
-        resolved_turn,
-        {**active, "turn": resolved_turn},
+        resolved_tick,
+        {**active, "tick": resolved_tick},
         disconnected,
         completed,
     ]
@@ -421,8 +425,8 @@ def test_arena_single_match_queue_turn_presence_and_room_outcome():
     client.connect_arena_match("m1")
     pending = client.submit_arena_intent("m1", {"id": "Action 1"}, "north-0")
     assert pending["kind"] == "pending"
-    resolved = client.get_arena_turn_envelope("m1")
-    assert resolved["kind"] == "turn"
+    resolved = client.get_arena_tick_envelope("m1")
+    assert resolved["kind"] == "tick"
     assert resolved["revision"] == 1
     client.heartbeat_arena_match("m1")
     disconnected_room = client.disconnect_arena_match("m1")
@@ -430,22 +434,22 @@ def test_arena_single_match_queue_turn_presence_and_room_outcome():
     assert disconnected_room["participants"][0]["reconnectDeadline"] == 20_000
     room = client.get_arena_room("m1")
     assert room["outcome"] == {"winner": "north", "loser": "south", "reason": "disconnect"}
-    assert room["turn"]["turn"]["status"] == "playing"
+    assert room["tick"]["tick"]["status"] == "playing"
     assert [call[1] for call in calls] == [
         "/v1/arena/matchmaking",
         "/v1/arena/matchmaking/global.open/request_1",
         "/v1/arena/matches/m1/presence",
         "/v1/arena/matches/m1/actions",
-        "/v1/arena/matches/m1/turn",
+        "/v1/arena/matches/m1/tick",
         "/v1/arena/matches/m1/presence",
         "/v1/arena/matches/m1/presence",
         "/v1/arena/matches/m1",
     ]
     assert calls[3][2] == {
-        "protocol": "agilabs.turns",
+        "protocol": "agilabs.ticks",
         "protocolVersion": "1.0",
         "sessionId": "m1",
-        "turnId": "m1:0",
+        "tickId": "m1:0",
         "revision": 0,
         "participantId": "north",
         "submissionId": "north-0",
@@ -463,22 +467,22 @@ def test_arena_single_match_queue_turn_presence_and_room_outcome():
 
 
 def test_strictly_validates_arena_room_metadata():
-    room_turn = envelope()
-    room_turn["sessionId"] = "m1"
-    room_turn["turnId"] = "m1:0"
+    room_tick = envelope()
+    room_tick["sessionId"] = "m1"
+    room_tick["tickId"] = "m1:0"
     valid = {
         "matchId": "m1",
         "sessionId": "m1",
         "status": "active",
         "participantId": "north",
         "readyDeadline": 120_000,
-        "turnDeadline": 30_000,
+        "tickDeadline": 30_000,
         "expiresAt": None,
         "participants": [
             {"participantId": "north", "claimed": True, "connected": True, "reconnectDeadline": None}
         ],
         "outcome": None,
-        "turn": room_turn,
+        "tick": room_tick,
     }
     client = ArenaClient("https://example.test")
     for invalid in (
@@ -525,29 +529,29 @@ def test_cancels_waiting_arena_ticket():
     )
 
 
-def test_arena_turn_poll_does_not_invent_a_solo_seat_binding():
-    turn = {**envelope(), "sessionId": "m1", "turnId": "m1:0"}
+def test_arena_tick_poll_does_not_invent_a_solo_seat_binding():
+    tick = {**envelope(), "sessionId": "m1", "tickId": "m1:0"}
     room = {
         "matchId": "m1",
         "sessionId": "m1",
         "status": "active",
         "participantId": "south",
         "readyDeadline": 120_000,
-        "turnDeadline": 30_000,
+        "tickDeadline": 30_000,
         "expiresAt": None,
         "participants": [
             {"participantId": "south", "claimed": True, "connected": True, "reconnectDeadline": None}
         ],
         "outcome": None,
-        "turn": turn,
+        "tick": tick,
     }
     pending = {
-        **turn,
+        **tick,
         "kind": "pending",
         "submittedParticipants": ["south"],
         "awaitingParticipants": ["north"],
     }
-    responses = [turn, room, pending]
+    responses = [tick, room, pending]
     calls = []
     client = ArenaClient("https://example.test", "ak_player")
 
@@ -556,11 +560,11 @@ def test_arena_turn_poll_does_not_invent_a_solo_seat_binding():
         return responses.pop(0)
 
     client._call = fake_call  # type: ignore[method-assign]
-    client.get_arena_turn_envelope("m1")
+    client.get_arena_tick_envelope("m1")
     client.submit_arena_intent("m1", {"id": "Action 8"}, "south-0")
 
     assert [call[1] for call in calls] == [
-        "/v1/arena/matches/m1/turn",
+        "/v1/arena/matches/m1/tick",
         "/v1/arena/matches/m1",
         "/v1/arena/matches/m1/actions",
     ]
@@ -571,8 +575,8 @@ def test_arena_same_world_control_steps_get_distinct_retry_keys():
     def match_envelope(control_revision):
         value = envelope()
         value["sessionId"] = "m1"
-        value["turnId"] = "m1:0"
-        value["turn"] = {**TURN, "controlRevision": control_revision}
+        value["tickId"] = "m1:0"
+        value["tick"] = {**OBSERVATION, "controlRevision": control_revision}
         return value
 
     active = {
@@ -581,13 +585,13 @@ def test_arena_same_world_control_steps_get_distinct_retry_keys():
         "status": "active",
         "participantId": "north",
         "readyDeadline": 120_000,
-        "turnDeadline": 30_000,
+        "tickDeadline": 30_000,
         "expiresAt": None,
         "participants": [
             {"participantId": "north", "claimed": True, "connected": True, "reconnectDeadline": None}
         ],
         "outcome": None,
-        "turn": match_envelope(0),
+        "tick": match_envelope(0),
     }
     responses = [active, match_envelope(1), match_envelope(2)]
     calls = []
@@ -620,10 +624,10 @@ def test_persists_and_restores_original_binding_for_exact_retry():
     calls = []
     client = ArenaClient("https://example.test")
     binding = {
-        "protocol": "agilabs.turns",
+        "protocol": "agilabs.ticks",
         "protocolVersion": "1.0",
         "sessionId": "s1",
-        "turnId": "s1:0",
+        "tickId": "s1:0",
         "revision": 0,
         "participantId": "player",
     }
@@ -636,7 +640,7 @@ def test_persists_and_restores_original_binding_for_exact_retry():
 
     client._call = fake_call  # type: ignore[method-assign]
     client.submit_intent("s1", {"id": "Action 1"}, submission_id="retry-revision-0")
-    assert calls[0][2]["turnId"] == "s1:0"
+    assert calls[0][2]["tickId"] == "s1:0"
     assert calls[0][2]["revision"] == 0
     with pytest.raises(ProtocolMismatchError):
         client.restore_session_binding({**binding, "revision": -1})
@@ -650,20 +654,20 @@ def test_restored_arena_binding_overrides_observed_cursor_for_retry():
         calls.append((method, path, body))
         result = envelope(revision=5 if len(calls) == 1 else 1)
         result["sessionId"] = "m1"
-        result["turnId"] = "m1:5" if len(calls) == 1 else "m1:1"
-        result["turn"] = {**TURN, "controlRevision": 5 if len(calls) == 1 else 1}
+        result["tickId"] = "m1:5" if len(calls) == 1 else "m1:1"
+        result["tick"] = {**OBSERVATION, "controlRevision": 5 if len(calls) == 1 else 1}
         return result
 
     client._call = fake_call  # type: ignore[method-assign]
-    client.get_arena_turn_envelope("m1")
+    client.get_arena_tick_envelope("m1")
     client.restore_session_binding({
-        "protocol": "agilabs.turns", "protocolVersion": "1.0",
-        "sessionId": "m1", "turnId": "m1:0", "revision": 0,
+        "protocol": "agilabs.ticks", "protocolVersion": "1.0",
+        "sessionId": "m1", "tickId": "m1:0", "revision": 0,
         "participantId": "north", "controlRevision": 0,
     })
     client.submit_arena_intent("m1", {"id": "Action 1"}, submission_id="retry-0")
 
-    assert calls[1][2]["turnId"] == "m1:0"
+    assert calls[1][2]["tickId"] == "m1:0"
     assert calls[1][2]["revision"] == 0
     assert calls[1][2]["extensions"] == {
         "agilabs.arena": {"controlRevision": 0}
@@ -687,11 +691,11 @@ def test_explicit_retry_key_never_fetches_a_newer_cursor():
 
 def test_python_commands_and_extensions_require_plain_json():
     with pytest.raises(ProtocolMismatchError, match="finite"):
-        parse_turn_result({**envelope(), "extensions": {"bad": float("nan")}})
+        parse_tick_result({**envelope(), "extensions": {"bad": float("nan")}})
     client = ArenaClient("https://example.test")
     client.restore_session_binding({
-        "protocol": "agilabs.turns", "protocolVersion": "1.0",
-        "sessionId": "s1", "turnId": "s1:0", "revision": 0,
+        "protocol": "agilabs.ticks", "protocolVersion": "1.0",
+        "sessionId": "s1", "tickId": "s1:0", "revision": 0,
         "participantId": "player",
     })
     with pytest.raises(ProtocolMismatchError, match="finite"):

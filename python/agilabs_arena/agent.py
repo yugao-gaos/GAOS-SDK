@@ -35,7 +35,7 @@ class AgentEpisodeResult:
     info: dict[str, Any]
     transcript: tuple[AgentStep, ...]
     total_reward: float
-    steps: int
+    ticks: int
     terminated: bool
     truncated: bool
 
@@ -47,7 +47,7 @@ class AgentBatchResult:
     failed: int
     truncated: int
     mean_reward: float
-    mean_steps: float
+    mean_ticks: float
 
 
 def run_agent_episode(
@@ -55,21 +55,21 @@ def run_agent_episode(
     policy: AgentPolicy,
     *,
     seed: int | None = None,
-    max_steps: int = 10_000,
+    max_ticks: int = 10_000,
 ) -> AgentEpisodeResult:
     """Run one deterministic episode without depending on an LLM provider."""
 
-    if max_steps <= 0:
-        raise ValueError("max_steps must be positive")
+    if max_ticks <= 0:
+        raise ValueError("max_ticks must be positive")
     observation, info = environment.reset(seed=seed)
     transcript: list[AgentStep] = []
     total_reward = 0.0
     terminated = False
     truncated = False
     while not terminated and not truncated:
-        if len(transcript) >= max_steps:
+        if len(transcript) >= max_ticks:
             truncated = True
-            info = {**info, "termination_reason": "step_limit"}
+            info = {**info, "termination_reason": "tick_limit"}
             break
         action = policy(observation, info)
         observation, reward, terminated, truncated, info = environment.step(action)
@@ -90,7 +90,7 @@ def run_agent_episode(
         info=info,
         transcript=tuple(transcript),
         total_reward=total_reward,
-        steps=len(transcript),
+        ticks=len(transcript),
         terminated=terminated,
         truncated=truncated,
     )
@@ -101,7 +101,7 @@ def evaluate_agent_episodes(
     policy: AgentPolicy,
     seeds: Sequence[int | None],
     *,
-    max_steps: int = 10_000,
+    max_ticks: int = 10_000,
 ) -> AgentBatchResult:
     """Run a deterministic batch and aggregate provider-neutral metrics."""
 
@@ -110,7 +110,7 @@ def evaluate_agent_episodes(
             environment_factory(seed),
             policy,
             seed=seed,
-            max_steps=max_steps,
+            max_ticks=max_ticks,
         )
         for seed in seeds
     )
@@ -122,5 +122,5 @@ def evaluate_agent_episodes(
         failed=statuses.count("failed"),
         truncated=sum(episode.truncated for episode in episodes),
         mean_reward=(sum(episode.total_reward for episode in episodes) / count if count else 0.0),
-        mean_steps=(sum(episode.steps for episode in episodes) / count if count else 0.0),
+        mean_ticks=(sum(episode.ticks for episode in episodes) / count if count else 0.0),
     )

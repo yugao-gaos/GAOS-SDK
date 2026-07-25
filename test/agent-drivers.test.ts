@@ -11,15 +11,15 @@ import {
 } from '../src/agent/index.js';
 import {
   AgentEnvironment,
-  type GridReducer,
-  type GridTurnView,
+  type ActionReducer,
+  type TickView,
 } from '../src/engine/index.js';
 
 interface Level { goal: number }
 interface State { at: number; actionsUsed: number }
-interface View extends GridTurnView { at: number }
+interface View extends TickView { at: number }
 
-const reducer: GridReducer<Level, State, View> = {
+const reducer: ActionReducer<Level, State, View> = {
   init: () => ({ at: 0, actionsUsed: 0 }),
   apply: (state, action) => ({
     at: state.at + (action.id === 'jump' ? (action.index ?? 0) : 1),
@@ -54,7 +54,7 @@ describe('agent driver contracts', () => {
       seed: 1,
     }), driver);
     expect(result.decisions).toEqual([{ action: { id: 'jump', index: 2 } }]);
-    expect(result.finalTurn.info).toMatchObject({ terminationReason: 'won', steps: 1 });
+    expect(result.finalStep.info).toMatchObject({ terminationReason: 'won', ticks: 1 });
   });
 
   it('parses nested JSON without being confused by braces in strings', () => {

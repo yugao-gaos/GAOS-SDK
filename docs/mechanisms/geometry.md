@@ -80,7 +80,7 @@ typical product computes current visibility from rays or cones, then owns:
 - remembered cells and last-known entity state; and
 - redaction of the observation sent to an agent.
 
-Keep current visibility and remembered knowledge separate. Replaying a turn
+Keep current visibility and remembered knowledge separate. Replaying a tick
 should recompute the same current field from state; presentation may then merge
 it with product-owned memory.
 
@@ -88,7 +88,7 @@ it with product-owned memory.
 
 - Keep a stable step order for equal shortest paths.
 - Do not derive blocker answers from animation progress or client frame state.
-- Normalize dynamic occupancy to the same turn snapshot used by movement.
+- Normalize dynamic occupancy to the same tick snapshot used by movement.
 - Treat all coordinates and board dimensions as integers at the input boundary.
 
 ## Zonoid example

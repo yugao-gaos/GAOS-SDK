@@ -69,8 +69,8 @@ def test_illegal_action_is_rejected_not_wasted():
     with pytest.raises(IllegalActionRejected):
         env.step("Action 1")
     # rejection must not consume energy
-    turn = env.client.get_turn(env.session_id)
-    assert turn.actions_used == 0
+    tick = env.client.get_tick(env.session_id)
+    assert tick.actions_used == 0
 
 
 def test_scored_sessions_permute_wire_ids_sometimes():
@@ -79,10 +79,10 @@ def test_scored_sessions_permute_wire_ids_sometimes():
     canonical_first = {"Action 2", "Action 4", "Action 8", "Action 9"}
     saw_non_canonical = False
     for _ in range(8):
-        _, turn = ArenaClient(BASE_URL).create_session(
+        _, tick = ArenaClient(BASE_URL).create_session(
             game_id="object-delivery", play_method="autonomous_scored"
         )
-        if set(t for t in (a["id"] for a in turn.actions)) != canonical_first:
+        if set(t for t in (a["id"] for a in tick.actions)) != canonical_first:
             saw_non_canonical = True
             break
     assert saw_non_canonical, "scored sessions never showed a permuted action set"

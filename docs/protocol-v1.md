@@ -1,22 +1,22 @@
-# GAOS turn protocol v1
+# GAOS tick protocol v1
 
-The stable protocol coordinates turns without imposing a particular game's
+The stable protocol coordinates ticks without imposing a particular game's
 state, observation, or command shape. Values crossing the wire must be JSON
 serializable.
 
-## Resolved turns
+## Resolved ticks
 
 A resolved envelope contains:
 
-- `protocol: "agilabs.turns"`
+- `protocol: "agilabs.ticks"`
 - `protocolVersion: "1.0"`
-- `kind: "turn"`
-- `sessionId`, `turnId`, and monotonic `revision`
-- a game-owned `turn` observation
+- `kind: "tick"`
+- `sessionId`, `tickId`, and monotonic `revision`
+- a game-owned `tick` observation
 
 Only resolved envelopes advance a renderer or agent.
 
-## Pending turns
+## Pending ticks
 
 A simultaneous host can accept one participant's committed intent before the
 other participants have submitted. It returns `kind: "pending"` with:
@@ -31,7 +31,7 @@ A pending envelope acknowledges an intent but does not advance the world.
 ## Commands and retries
 
 Every command submission binds the command to the current `sessionId`,
-`turnId`, and `revision`. It also includes:
+`tickId`, and `revision`. It also includes:
 
 - a portable participant ID matching `[A-Za-z0-9_.:@-]{1,128}`;
 - a caller-generated `submissionId`; and
@@ -62,7 +62,7 @@ episodes.
 `GameDefinition` is an optional host-side seam for deterministic games. A game
 owns its configuration, state, observation, command, and legal-command types.
 It supplies state creation, participant enumeration, observation, legality,
-and complete-batch resolution.
+and complete-batch `resolveTick` resolution.
 
 `GameRegistry` is instance-local and permits multiple explicit versions of a
 game to coexist in one host process.

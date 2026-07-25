@@ -5,14 +5,14 @@ import {
   createAgentToolAdapter,
   evaluateAgentEpisodes,
   runAgentEpisode,
-  type GridReducer,
-  type GridTurnView,
+  type ActionReducer,
+  type TickView,
 } from '../src/engine/index.js';
 
 interface Level { goal: number }
 interface State { at: number; actionsUsed: number }
 
-const reducer: GridReducer<Level, State> = {
+const reducer: ActionReducer<Level, State> = {
   init: () => ({ at: 0, actionsUsed: 0 }),
   apply: (state, action) => {
     if (action.id === 'advance') return { at: state.at + 1, actionsUsed: state.actionsUsed + 1 };
@@ -22,7 +22,7 @@ const reducer: GridReducer<Level, State> = {
     if (action.id === 'restart') return { at: 0, actionsUsed: state.actionsUsed + 1 };
     throw new Error('reducer rejected action');
   },
-  view: (state): GridTurnView => ({
+  view: (state): TickView => ({
     actions: [
       { id: 'advance', params: 'none' },
       { id: 'jump', params: 'index' },
@@ -34,11 +34,11 @@ const reducer: GridReducer<Level, State> = {
   }),
 };
 
-const environment = (maxSteps = 10) => new AgentEnvironment({
+const environment = (maxTicks = 10) => new AgentEnvironment({
   reducer,
   level: { goal: 3 },
   seed: 42,
-  maxSteps,
+  maxTicks,
 });
 
 describe('AgentEnvironment', () => {
@@ -47,13 +47,13 @@ describe('AgentEnvironment', () => {
     expect(() => env.observe()).toThrowError(
       expect.objectContaining<Partial<AgentEnvironmentError>>({ code: 'not_started' }),
     );
-    const turn = env.reset();
-    expect(turn.legalActions).toEqual([
+    const step = env.reset();
+    expect(step.legalActions).toEqual([
       { id: 'advance' },
       { id: 'jump', index: 2 },
     ]);
-    expect(turn.systemActions).toEqual([{ id: 'restart' }]);
-    expect(turn.info).toMatchObject({ seed: 42, steps: 0, totalReward: 0 });
+    expect(step.systemActions).toEqual([{ id: 'restart' }]);
+    expect(step.info).toMatchObject({ seed: 42, ticks: 0, totalReward: 0 });
   });
 
   it('validates system actions separately from legal gameplay actions', () => {
@@ -75,10 +75,10 @@ describe('AgentEnvironment', () => {
     env.step({ id: 'advance' });
     const final = env.step({ id: 'jump', index: 2 });
     expect(final).toMatchObject({ reward: 3, terminated: true, truncated: false, done: true });
-    expect(final.info).toMatchObject({ steps: 2, totalReward: 3, terminationReason: 'won' });
+    expect(final.info).toMatchObject({ ticks: 2, totalReward: 3, terminationReason: 'won' });
     expect(final.legalActions).toEqual([]);
     expect(env.transcript()).toMatchObject({
-      version: '1.2',
+      version: '1.3',
       seed: 42,
       actions: [
         { n: 1, action: { id: 'advance' }, reward: 0 },
@@ -98,7 +98,7 @@ describe('AgentEnvironment', () => {
       done: true,
       terminated: false,
       truncated: true,
-      info: { terminationReason: 'step_limit' },
+      info: { terminationReason: 'tick_limit' },
     });
   });
 
@@ -123,7 +123,7 @@ describe('AgentEnvironment', () => {
 
   it('supports an explicit snapshot function for non-cloneable level values', () => {
     const level = { goal: 3, helper: () => 3 };
-    const customReducer: GridReducer<typeof level, State> = reducer;
+    const customReducer: ActionReducer<typeof level, State> = reducer;
     const env = new AgentEnvironment({
       reducer: customReducer,
       level,
@@ -136,8 +136,8 @@ describe('AgentEnvironment', () => {
 
 describe('agent evaluation', () => {
   it('runs async policies and aggregates deterministic batches', async () => {
-    const single = await runAgentEpisode(environment(), async (turn) => turn.legalActions.at(-1)!);
-    expect(single.finalTurn.info).toMatchObject({ terminationReason: 'won', steps: 2 });
+    const single = await runAgentEpisode(environment(), async (step) => step.legalActions.at(-1)!);
+    expect(single.finalStep.info).toMatchObject({ terminationReason: 'won', ticks: 2 });
 
     const cases = [
       { id: 'seed-1', level: { goal: 3 }, seed: 1 },
@@ -146,7 +146,7 @@ describe('agent evaluation', () => {
     const batch = await evaluateAgentEpisodes(
       cases,
       (episode) => new AgentEnvironment({ reducer, level: episode.level, seed: episode.seed }),
-      (turn) => turn.legalActions.at(-1)!,
+      (step) => step.legalActions.at(-1)!,
     );
     expect(batch.summary).toEqual({
       episodes: 2,
@@ -154,7 +154,7 @@ describe('agent evaluation', () => {
       failed: 0,
       truncated: 0,
       meanReward: 3,
-      meanSteps: 2,
+      meanTicks: 2,
     });
   });
 });
@@ -175,8 +175,8 @@ describe('agent tool adapter', () => {
     ]);
     expect(tools.call('reset', { seed: 7 })).toMatchObject({ info: { seed: 7 } });
     expect(tools.call('act', { action: { id: 'jump', index: 2 } }))
-      .toMatchObject({ done: false, info: { steps: 1 } });
-    expect(tools.call('observe')).toMatchObject({ info: { seed: 7, steps: 1 } });
+      .toMatchObject({ done: false, info: { ticks: 1 } });
+    expect(tools.call('observe')).toMatchObject({ info: { seed: 7, ticks: 1 } });
     expect(tools.call('transcript')).toMatchObject({
       seed: 7,
       actions: [{ action: { id: 'jump', index: 2 } }],

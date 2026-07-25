@@ -1,12 +1,13 @@
 import type {
   Outcome,
   SubmittedAction,
-  TurnReducer,
-  TurnView,
+  Reducer,
+  TickView,
 } from './contracts.js';
+import { advanceTick } from './contracts.js';
 import { enumerateActions } from './solver.js';
 
-export const AGENT_TRANSCRIPT_VERSION = '1.2' as const;
+export const AGENT_TRANSCRIPT_VERSION = '1.3' as const;
 
 export type AgentEnvironmentErrorCode = 'not_started' | 'episode_done' | 'illegal_action';
 
@@ -20,25 +21,26 @@ export class AgentEnvironmentError extends Error {
   }
 }
 
-export type AgentTerminationReason = 'won' | 'failed' | 'decided' | 'step_limit';
+export type AgentTerminationReason = 'won' | 'failed' | 'decided' | 'tick_limit';
 
 export interface AgentMetrics {
-  steps: number;
+  /** Authoritative reducer ticks advanced in this episode. */
+  ticks: number;
   totalReward: number;
-  status: TurnView['status'];
+  status: TickView['status'];
   stars: number | null;
   actionsUsed: number;
   outcome?: Outcome;
 }
 
-export interface AgentTurnInfo extends AgentMetrics {
+export interface AgentStepInfo extends AgentMetrics {
   seed: number;
   seat?: string;
   terminationReason: AgentTerminationReason | null;
 }
 
 /** One Gym-style interaction result with both schemas and concrete actions. */
-export interface AgentTurn<TView extends TurnView<unknown, unknown>> {
+export interface AgentStep<TView extends TickView<unknown, unknown>> {
   observation: TView;
   actionDefinitions: TView['actions'];
   legalActions: SubmittedAction[];
@@ -47,14 +49,14 @@ export interface AgentTurn<TView extends TurnView<unknown, unknown>> {
   terminated: boolean;
   truncated: boolean;
   done: boolean;
-  info: AgentTurnInfo;
+  info: AgentStepInfo;
 }
 
-export interface AgentTranscriptAction<TView extends TurnView<unknown, unknown> = TurnView<unknown, unknown>> {
+export interface AgentTranscriptAction<TView extends TickView<unknown, unknown> = TickView<unknown, unknown>> {
   n: number;
   action: SubmittedAction;
   reward: number;
-  status: TurnView['status'];
+  status: TickView['status'];
   actionsUsed: number;
   /** Observation returned to this agent after the action. */
   observation: TView;
@@ -62,38 +64,26 @@ export interface AgentTranscriptAction<TView extends TurnView<unknown, unknown> 
 
 export interface AgentTranscript<
   TLevel,
-  TView extends TurnView<unknown, unknown> = TurnView<unknown, unknown>,
+  TView extends TickView<unknown, unknown> = TickView<unknown, unknown>,
 > {
   version: typeof AGENT_TRANSCRIPT_VERSION;
   level: TLevel;
   seed: number;
   seat?: string;
-  frameSkip: number;
   /** Redacted initial observation for the configured seat. */
   initialObservation: TView;
   actions: Array<AgentTranscriptAction<TView>>;
-  result: AgentTurnInfo;
+  result: AgentStepInfo;
 }
 
-export interface AgentEnvironmentOptions<TLevel, TState, TView extends TurnView<unknown, unknown>> {
-  reducer: TurnReducer<TLevel, TState, TView>;
+export interface AgentEnvironmentOptions<TLevel, TState, TView extends TickView<unknown, unknown>> {
+  reducer: Reducer<TLevel, TState, TView>;
   level: TLevel;
   seed?: number;
   /** Agent seat. Uses reducer.viewFor when available. */
   seat?: string;
-  /** Independent safety bound for an agent episode. Defaults to 10,000 steps. */
-  maxSteps?: number;
-  /** Reducer ticks applied per agent decision. Defaults to one. */
-  frameSkip?: number;
-  /**
-   * Product-defined held/continue input for skipped frames. Defaults to
-   * repeating the chosen action. An illegal continuation ends the skip early.
-   */
-  continueAction?: (
-    chosen: SubmittedAction,
-    frame: number,
-    view: TView,
-  ) => SubmittedAction;
+  /** Independent safety bound for an agent episode. Defaults to 10,000 ticks. */
+  maxTicks?: number;
   enumerateActions?: (view: TView) => SubmittedAction[];
   isActionLegal?: (
     action: SubmittedAction,
@@ -104,7 +94,7 @@ export interface AgentEnvironmentOptions<TLevel, TState, TView extends TurnView<
     previous: TView,
     next: TView,
     action: SubmittedAction,
-    step: number,
+    tick: number,
     seat?: string,
   ) => number;
   /** Snapshot level data for deterministic transcripts. Defaults to structuredClone. */
@@ -165,16 +155,15 @@ function assertSeed(seed: number): void {
  * Products inject their reducer and content. The SDK owns episode lifecycle,
  * concrete action discovery, validation, reward accounting, and transcripts.
  */
-export class AgentEnvironment<TLevel, TState, TView extends TurnView<unknown, unknown>> {
+export class AgentEnvironment<TLevel, TState, TView extends TickView<unknown, unknown>> {
   private level: TLevel;
   private seed: number;
-  private readonly maxSteps: number;
-  private readonly frameSkip: number;
+  private readonly maxTicks: number;
   private readonly enumerateActions: (view: TView) => SubmittedAction[];
   private readonly isActionLegal: NonNullable<AgentEnvironmentOptions<TLevel, TState, TView>['isActionLegal']>;
   private readonly rewardFor: NonNullable<AgentEnvironmentOptions<TLevel, TState, TView>['reward']>;
   private state: TState | undefined;
-  private steps = 0;
+  private ticks = 0;
   private totalReward = 0;
   private lastReward = 0;
   private ended = false;
@@ -192,16 +181,9 @@ export class AgentEnvironment<TLevel, TState, TView extends TurnView<unknown, un
     if (options.seat !== undefined && (typeof options.seat !== 'string' || options.seat.length === 0)) {
       throw new TypeError('seat must be a non-empty string');
     }
-    this.maxSteps = options.maxSteps ?? 10_000;
-    if (!Number.isSafeInteger(this.maxSteps) || this.maxSteps <= 0) {
-      throw new RangeError('maxSteps must be a positive safe integer');
-    }
-    this.frameSkip = options.frameSkip ?? 1;
-    if (!Number.isSafeInteger(this.frameSkip) || this.frameSkip < 1) {
-      throw new RangeError('frameSkip must be a positive safe integer');
-    }
-    if (options.continueAction !== undefined && typeof options.continueAction !== 'function') {
-      throw new TypeError('continueAction must be a function');
+    this.maxTicks = options.maxTicks ?? 10_000;
+    if (!Number.isSafeInteger(this.maxTicks) || this.maxTicks <= 0) {
+      throw new RangeError('maxTicks must be a positive safe integer');
     }
     this.enumerateActions = options.enumerateActions ?? ((view) => enumerateActions(view));
     this.isActionLegal = options.isActionLegal ?? ((action, _view, concrete) => {
@@ -239,13 +221,13 @@ export class AgentEnvironment<TLevel, TState, TView extends TurnView<unknown, un
     });
   }
 
-  reset(options: AgentResetOptions<TLevel> = {}): AgentTurn<TView> {
+  reset(options: AgentResetOptions<TLevel> = {}): AgentStep<TView> {
     if (options.level !== undefined) this.level = options.level;
     if (options.seed !== undefined) this.seed = options.seed;
     assertSeed(this.seed);
     this.transcriptLevel = this.snapshotLevel(this.level);
     this.state = this.options.reducer.init(this.level, this.seed);
-    this.steps = 0;
+    this.ticks = 0;
     this.totalReward = 0;
     this.lastReward = 0;
     this.ended = false;
@@ -257,99 +239,82 @@ export class AgentEnvironment<TLevel, TState, TView extends TurnView<unknown, un
       this.ended = true;
       this.terminationReason = view.status !== 'playing' ? view.status : 'decided';
     }
-    return this.turn(view);
+    return this.result(view);
   }
 
-  observe(): AgentTurn<TView> {
-    return this.turn(this.currentView());
+  observe(): AgentStep<TView> {
+    return this.result(this.currentView());
   }
 
-  step(action: SubmittedAction): AgentTurn<TView> {
-    return this.stepInternal(action, this.frameSkip);
+  step(action: SubmittedAction): AgentStep<TView> {
+    return this.stepInternal(action);
   }
 
-  private stepInternal(action: SubmittedAction, requestedFrames: number): AgentTurn<TView> {
+  private stepInternal(action: SubmittedAction): AgentStep<TView> {
     if (this.state === undefined) {
       throw new AgentEnvironmentError('not_started', 'call reset() before step()');
     }
     if (this.ended) {
       throw new AgentEnvironmentError('episode_done', 'reset the environment before another step');
     }
-    let next = this.currentView();
-    let accumulatedReward = 0;
-    let chosen = copyAction(action);
-    for (let frame = 0; frame < requestedFrames && !this.ended; frame++) {
-      const previous = next;
-      const gameplay = this.enumerateActions(previous);
-      const systems = previous.systemActions
-        ? enumerateActions({ ...previous, actions: previous.systemActions })
-        : [];
-      const candidate = frame === 0
-        ? chosen
-        : copyAction(this.options.continueAction?.(chosen, frame, previous) ?? chosen);
-      const concrete = [...gameplay, ...systems];
-      if (!this.isActionLegal(candidate, previous, concrete)) {
-        if (frame > 0) break;
-        throw new AgentEnvironmentError(
-          'illegal_action',
-          `action is not legal this turn: ${actionKey(candidate)}`,
-        );
-      }
-      if (this.options.seat && candidate.seat !== undefined
-        && candidate.seat !== this.options.seat) {
-        throw new AgentEnvironmentError(
-          'illegal_action',
-          `action seat ${candidate.seat} does not match environment seat ${this.options.seat}`,
-        );
-      }
-      const appliedAction = this.options.seat && candidate.seat === undefined
-        ? { ...candidate, seat: this.options.seat }
-        : candidate;
-      this.state = this.options.reducer.apply(this.state!, appliedAction);
-      this.steps++;
-      next = this.viewOf(this.state);
-      const reward = this.rewardFor(
-        previous,
-        next,
-        appliedAction,
-        this.steps,
-        this.options.seat,
+    const previous = this.currentView();
+    const gameplay = this.enumerateActions(previous);
+    const systems = previous.systemActions
+      ? enumerateActions({ ...previous, actions: previous.systemActions })
+      : [];
+    const candidate = copyAction(action);
+    const concrete = [...gameplay, ...systems];
+    if (!this.isActionLegal(candidate, previous, concrete)) {
+      throw new AgentEnvironmentError(
+        'illegal_action',
+        `action is not legal for this tick: ${actionKey(candidate)}`,
       );
-      if (!Number.isFinite(reward)) throw new TypeError('reward must be finite');
-      accumulatedReward += reward;
-      this.totalReward += reward;
-
-      if (next.status !== 'playing' || next.outcome?.kind === 'decided') {
-        this.ended = true;
-        this.terminationReason = next.status !== 'playing' ? next.status : 'decided';
-      } else if (this.steps >= this.maxSteps) {
-        this.ended = true;
-        this.terminationReason = 'step_limit';
-      }
-      this.records.push({
-        n: this.steps,
-        action: copyAction(appliedAction),
-        reward,
-        status: next.status,
-        actionsUsed: next.hud.actionsUsed,
-        observation: this.snapshotObservation(next),
-      });
-      // Semantic host controls are one-shot and never held across frames.
-      if (systems.some((system) => actionKey(system) === actionKey(candidate))) break;
     }
-    this.lastReward = accumulatedReward;
-    return this.turn(next);
+    if (this.options.seat && candidate.seat !== undefined
+      && candidate.seat !== this.options.seat) {
+      throw new AgentEnvironmentError(
+        'illegal_action',
+        `action seat ${candidate.seat} does not match environment seat ${this.options.seat}`,
+      );
+    }
+    const appliedAction = this.options.seat && candidate.seat === undefined
+      ? { ...candidate, seat: this.options.seat }
+      : candidate;
+    this.state = advanceTick(this.options.reducer, this.state, [appliedAction]);
+    this.ticks++;
+    const next = this.viewOf(this.state);
+    const reward = this.rewardFor(previous, next, appliedAction, this.ticks, this.options.seat);
+    if (!Number.isFinite(reward)) throw new TypeError('reward must be finite');
+    this.lastReward = reward;
+    this.totalReward += reward;
+
+    if (next.status !== 'playing' || next.outcome?.kind === 'decided') {
+      this.ended = true;
+      this.terminationReason = next.status !== 'playing' ? next.status : 'decided';
+    } else if (this.ticks >= this.maxTicks) {
+      this.ended = true;
+      this.terminationReason = 'tick_limit';
+    }
+    this.records.push({
+      n: this.ticks,
+      action: copyAction(appliedAction),
+      reward,
+      status: next.status,
+      actionsUsed: next.hud.actionsUsed,
+      observation: this.snapshotObservation(next),
+    });
+    return this.result(next);
   }
 
   /** Reset and deterministically replay a canonical action list. */
-  replay(actions: readonly SubmittedAction[], options: AgentResetOptions<TLevel> = {}): AgentTurn<TView> {
-    let turn = this.reset(options);
-    for (const action of actions) turn = this.stepInternal(action, 1);
-    return turn;
+  replay(actions: readonly SubmittedAction[], options: AgentResetOptions<TLevel> = {}): AgentStep<TView> {
+    let step = this.reset(options);
+    for (const action of actions) step = this.stepInternal(action);
+    return step;
   }
 
   transcript(): AgentTranscript<TLevel, TView> {
-    const turn = this.observe();
+    const step = this.observe();
     if (this.transcriptLevel === undefined || this.initialObservation === undefined) {
       throw new AgentEnvironmentError('not_started', 'call reset() before transcript()');
     }
@@ -358,7 +323,6 @@ export class AgentEnvironment<TLevel, TState, TView extends TurnView<unknown, un
       level: this.snapshotLevel(this.transcriptLevel),
       seed: this.seed,
       ...(this.options.seat ? { seat: this.options.seat } : {}),
-      frameSkip: this.frameSkip,
       initialObservation: this.snapshotObservation(this.initialObservation),
       actions: this.records.map((record) => ({
         ...record,
@@ -366,8 +330,8 @@ export class AgentEnvironment<TLevel, TState, TView extends TurnView<unknown, un
         observation: this.snapshotObservation(record.observation),
       })),
       result: {
-        ...turn.info,
-        ...(turn.info.outcome ? { outcome: copyOutcome(turn.info.outcome) } : {}),
+        ...step.info,
+        ...(step.info.outcome ? { outcome: copyOutcome(step.info.outcome) } : {}),
       },
     };
   }
@@ -385,9 +349,9 @@ export class AgentEnvironment<TLevel, TState, TView extends TurnView<unknown, un
       : this.options.reducer.view(state);
   }
 
-  private turn(view: TView): AgentTurn<TView> {
-    const terminated = this.ended && this.terminationReason !== 'step_limit';
-    const truncated = this.terminationReason === 'step_limit';
+  private result(view: TView): AgentStep<TView> {
+    const terminated = this.ended && this.terminationReason !== 'tick_limit';
+    const truncated = this.terminationReason === 'tick_limit';
     return {
       observation: view,
       actionDefinitions: view.actions,
@@ -402,7 +366,7 @@ export class AgentEnvironment<TLevel, TState, TView extends TurnView<unknown, un
       info: {
         seed: this.seed,
         ...(this.options.seat ? { seat: this.options.seat } : {}),
-        steps: this.steps,
+        ticks: this.ticks,
         totalReward: this.totalReward,
         status: view.status,
         stars: view.stars ?? null,

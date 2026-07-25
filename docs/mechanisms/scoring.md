@@ -47,13 +47,13 @@ const failure = budgetFailure({
 });
 ```
 
-When both limits are reached on the same turn, `out_of_energy` wins over
+When both limits are reached on the same tick, `out_of_energy` wins over
 `out_of_action_budget`. This explicit precedence keeps client, server, replay,
 and agent evaluation from reporting different terminal reasons.
 
 The helper does not spend resources, reject an action before execution, or
 decide whether reaching a cap is checked before or after settlement. The product
-must call it at its authored point in the turn pipeline.
+must call it at its authored point in the tick pipeline.
 
 ## Suggested thresholds
 
@@ -81,7 +81,7 @@ Changing authored thresholds does not require changing the SDK engine.
 ## Zonoid example
 
 Zonoid stores per-level suggested-action thresholds and calls `scoreStars` only
-after the universal reducer has settled a winning turn. Story and Challenge
+after the universal reducer has settled a winning tick. Story and Challenge
 levels therefore share the same 1–3 star calculation, while Energy capacity
 and autonomous action limits remain product policy and are checked separately.
 Zonoid uses solver measurements as authoring input, then tunes thresholds with

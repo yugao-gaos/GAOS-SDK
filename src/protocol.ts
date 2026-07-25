@@ -1,13 +1,12 @@
 /**
- * Stable, genre-neutral wire contracts for turn-based games.
+ * Stable wire contracts for deterministic tick-based games.
  *
  * Observations and commands are deliberately opaque generic values. A grid
  * game may put a text board in an observation; a card game may put hands and
- * piles there. The protocol coordinates turns without freezing either shape.
- * Values crossing the wire must be JSON-serializable.
+ * piles there. Values crossing the wire must be JSON-serializable.
  */
 
-export const PROTOCOL_ID = 'agilabs.turns' as const;
+export const PROTOCOL_ID = 'agilabs.ticks' as const;
 export const PROTOCOL_VERSION = '1.0' as const;
 /** Portable seat ids keep canonical ordering identical across SDK languages. */
 export const PARTICIPANT_ID_PATTERN = '^[A-Za-z0-9_.:@-]{1,128}$' as const;
@@ -26,14 +25,14 @@ export interface JsonObject { [key: string]: JsonValue }
 
 export interface ProtocolExtensions extends JsonObject {}
 
-export interface TurnCursor {
+export interface TickCursor {
   /** Stable identity of this revision, unique within a session. */
-  turnId: string;
-  /** Monotonically increasing resolved-turn revision, starting at zero. */
+  tickId: string;
+  /** Monotonically increasing resolved-tick revision, starting at zero. */
   revision: number;
 }
 
-interface EnvelopeBase extends TurnCursor {
+interface EnvelopeBase extends TickCursor {
   protocol: typeof PROTOCOL_ID;
   protocolVersion: typeof PROTOCOL_VERSION;
   sessionId: string;
@@ -41,29 +40,29 @@ interface EnvelopeBase extends TurnCursor {
 }
 
 /** A fully resolved observation. This is the only envelope renderers animate. */
-export interface TurnEnvelope<TObservation = unknown> extends EnvelopeBase {
-  kind: 'turn';
-  turn: TObservation;
+export interface TickEnvelope<TObservation = unknown> extends EnvelopeBase {
+  kind: 'tick';
+  tick: TObservation;
 }
 
 /**
- * Acknowledges one collected intent without advancing the turn. `turn` is the
+ * Acknowledges one collected input without advancing the tick. `tick` is the
  * last resolved observation, so clients can keep rendering while they wait.
  */
 export interface PendingEnvelope<TObservation = unknown> extends EnvelopeBase {
   kind: 'pending';
-  turn: TObservation;
+  tick: TObservation;
   acceptedParticipantId?: string;
   submittedParticipants: string[];
   awaitingParticipants: string[];
 }
 
-export type TurnResult<TObservation = unknown> =
-  | TurnEnvelope<TObservation>
+export type TickResult<TObservation = unknown> =
+  | TickEnvelope<TObservation>
   | PendingEnvelope<TObservation>;
 
-/** One participant's command for a specific unresolved turn. */
-export interface CommandSubmission<TCommand = unknown> extends TurnCursor {
+/** One participant's command for a specific unresolved tick. */
+export interface CommandSubmission<TCommand = unknown> extends TickCursor {
   protocol: typeof PROTOCOL_ID;
   protocolVersion: typeof PROTOCOL_VERSION;
   sessionId: string;
@@ -102,10 +101,21 @@ export interface GameDefinition<
   legalCommands(state: TState, participantId: string): readonly TCommandDefinition[];
   /** Authoritative host-side validation for an opaque submitted command. */
   isCommandLegal(state: TState, participantId: string, command: TCommand): boolean;
-  resolveTurn(
+  /** One collected input batch resolves exactly one tick. */
+  resolveTick(
     state: TState,
     intents: readonly CollectedIntent<TCommand>[],
   ): TState;
+}
+
+/** Resolve one canonical simulation tick through either adapter generation. */
+export function resolveGameTick<TState, TCommand>(
+  definition:
+    Pick<GameDefinition<unknown, TState, unknown, TCommand>, 'resolveTick'>,
+  state: TState,
+  intents: readonly CollectedIntent<TCommand>[],
+): TState {
+  return definition.resolveTick(state, intents);
 }
 
 /** Instance-local registry: hosts opt games in explicitly without global state. */
@@ -151,7 +161,7 @@ export class GameRegistry {
 }
 
 /** Plain-JSON state suitable for Durable Object/database persistence. */
-export interface IntentWindow<TCommand = unknown> extends TurnCursor {
+export interface IntentWindow<TCommand = unknown> extends TickCursor {
   sessionId: string;
   /** Canonical lexicographic order used for deterministic resolution. */
   participants: string[];
@@ -164,7 +174,7 @@ export type IntentParticipation =
   | { mode: 'simultaneous'; seats: readonly string[] };
 
 /**
- * Map one engine collection turn to the protocol's eligible participant set.
+ * Map one engine collection tick to the protocol's eligible participant set.
  * Sequential play creates a one-seat window; simultaneous play includes every
  * declared seat. Portable seat-id validation is delegated to the normal
  * intent-window constructor.
@@ -207,7 +217,7 @@ export type IntentCollectionResult<TCommand = unknown> =
 export type IntentErrorCode =
   | 'invalid_protocol'
   | 'wrong_session'
-  | 'stale_turn'
+  | 'stale_tick'
   | 'unknown_participant'
   | 'invalid_submission'
   | 'conflicting_intent';
@@ -222,7 +232,7 @@ export class IntentCollectionError extends Error {
   }
 }
 
-export function makeTurnId(sessionId: string, revision: number): string {
+export function makeTickId(sessionId: string, revision: number): string {
   if (typeof sessionId !== 'string' || !sessionId.trim()) {
     throw new Error('sessionId must be a non-empty string');
   }
@@ -237,7 +247,7 @@ export function createIntentWindow<TCommand>(
   revision: number,
   participantIds: readonly string[],
 ): IntentWindow<TCommand> {
-  makeTurnId(sessionId, revision);
+  makeTickId(sessionId, revision);
   if (!Array.isArray(participantIds) || participantIds.some(
     (id) => !isParticipantId(id),
   )) {
@@ -250,7 +260,7 @@ export function createIntentWindow<TCommand>(
   }
   return {
     sessionId,
-    turnId: makeTurnId(sessionId, revision),
+    tickId: makeTickId(sessionId, revision),
     revision,
     participants,
     intents: {},
@@ -297,7 +307,7 @@ export function collectIntent<TCommand>(
     }
     throw new IntentCollectionError(
       'conflicting_intent',
-      `participant ${submission.participantId} submitted a different intent for ${window.turnId}`,
+      `participant ${submission.participantId} submitted a different intent for ${window.tickId}`,
     );
   }
 
@@ -337,10 +347,10 @@ export function validateIntentSubmission<TCommand>(
   if (submission.sessionId !== window.sessionId) {
     throw new IntentCollectionError('wrong_session', 'submission session does not match endpoint');
   }
-  if (submission.turnId !== window.turnId || submission.revision !== window.revision) {
+  if (submission.tickId !== window.tickId || submission.revision !== window.revision) {
     throw new IntentCollectionError(
-      'stale_turn',
-      `expected turn ${window.turnId} revision ${window.revision}`,
+      'stale_tick',
+      `expected tick ${window.tickId} revision ${window.revision}`,
     );
   }
   if (!window.participants.includes(submission.participantId)) {
@@ -441,28 +451,28 @@ function stableJson(value: unknown): string {
   return canonicalJson(value);
 }
 
-export function turnEnvelope<TObservation>(
+export function tickEnvelope<TObservation>(
   sessionId: string,
   revision: number,
-  turn: TObservation,
+  tick: TObservation,
   extensions?: ProtocolExtensions,
-): TurnEnvelope<TObservation> {
+): TickEnvelope<TObservation> {
   if (extensions !== undefined) assertJsonObject(extensions, 'extensions');
   return {
     protocol: PROTOCOL_ID,
     protocolVersion: PROTOCOL_VERSION,
-    kind: 'turn',
+    kind: 'tick',
     sessionId,
-    turnId: makeTurnId(sessionId, revision),
+    tickId: makeTickId(sessionId, revision),
     revision,
-    turn,
+    tick,
     ...(extensions ? { extensions } : {}),
   };
 }
 
 export function pendingEnvelope<TObservation, TCommand>(
   window: IntentWindow<TCommand>,
-  turn: TObservation,
+  tick: TObservation,
   acceptedParticipantId?: string,
   extensions?: ProtocolExtensions,
 ): PendingEnvelope<TObservation> {
@@ -473,9 +483,9 @@ export function pendingEnvelope<TObservation, TCommand>(
     protocolVersion: PROTOCOL_VERSION,
     kind: 'pending',
     sessionId: window.sessionId,
-    turnId: window.turnId,
+    tickId: window.tickId,
     revision: window.revision,
-    turn,
+    tick,
     ...(acceptedParticipantId ? { acceptedParticipantId } : {}),
     submittedParticipants,
     awaitingParticipants: window.participants.filter((id) => !hasIntent(window, id)),

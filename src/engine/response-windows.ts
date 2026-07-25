@@ -155,7 +155,7 @@ export function unwindResponseWindow<TResponse>(
   return [...window.stack].reverse().map((entry) => ({ ...entry }));
 }
 
-/** Participation descriptor for the ordinary collection turn backing a window. */
+/** Participation descriptor for the ordinary collection tick backing a window. */
 export function responseWindowParticipation<TResponse>(
   window: ResponseWindow<TResponse>,
 ): Participation {

@@ -15,8 +15,8 @@ import {
   validateReplayArtifact,
   type ReplayArtifact,
   type ReplayGameRef,
-  type TurnReducer,
-  type TurnView,
+  type ActionReducer,
+  type TickView,
 } from '../src/engine/index.js';
 
 interface Level {
@@ -29,13 +29,13 @@ interface State {
   actionsUsed: number;
 }
 
-const reducer: TurnReducer<Level, State> = {
+const reducer: ActionReducer<Level, State> = {
   init: () => ({ at: 0, actionsUsed: 0 }),
   apply: (state, action) => {
     if (action.id !== 'Action 1') throw new Error('illegal action');
     return { at: state.at + 1, actionsUsed: state.actionsUsed + 1 };
   },
-  view: (state): TurnView => ({
+  view: (state): TickView => ({
     actions: [{ id: 'Action 1', params: 'none' }],
     status: state.at >= 1 ? 'won' : 'playing',
     ...(state.at >= 1 ? { stars: 3 } : {}),

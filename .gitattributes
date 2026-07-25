@@ -1,1 +1,2 @@
 .graph/** merge=ours
+fixtures/replay/*.jsonl text eol=lf

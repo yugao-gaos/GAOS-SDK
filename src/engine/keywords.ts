@@ -10,7 +10,7 @@ export interface KeywordDefinition<TContext, TEffect> {
 
 export interface ActiveKeyword {
   id: string;
-  /** Product-owned acquisition turn/tick. Lower values resolve first. */
+  /** Product-owned acquisition tick. Lower values resolve first. */
   acquiredAt: number;
   /** Stable source identity for duplicate keyword instances. */
   sourceId?: string;

@@ -74,7 +74,7 @@ The zone primitive is accompanied by reusable composition algorithms:
   pass consecutively, and expose a LIFO unwind;
 - `TargetSpec` and `enumerateTargetChoices` enumerate bounded concrete target
   tuples and report truncation explicitly;
-- durations advance only on explicit phase, turn, or round boundaries, with
+- durations advance only on explicit phase, tick, or round boundaries, with
   simultaneous expiries returned in authored order;
 - the optional phase runner emits exit, cycle-complete, and enter events in
   deterministic order; and
@@ -82,7 +82,7 @@ The zone primitive is accompanied by reusable composition algorithms:
   decks, squads, or loadouts and returns structured violations.
 
 `ActionDefinition.params: 'targets'` references a `targetSpecId`.
-`TurnView.targetChoices` carries the already-enumerated choices and whether
+`TickView.targetChoices` carries the already-enumerated choices and whether
 the product cap truncated them. Generic action enumeration refuses truncated
 sets because a solver or agent must never mistake a partial legal surface for
 the complete one.
@@ -94,7 +94,7 @@ systems.
 
 ## Observation and security
 
-`TurnView.zones` always exposes a count. It exposes identities, order, or slots
+`TickView.zones` always exposes a count. It exposes identities, order, or slots
 only when the seat's independent policies allow them. Hidden list order is
 canonicalized before observation so insertion history cannot leak.
 

@@ -1,12 +1,13 @@
 import type {
   Outcome,
   SubmittedAction,
-  TurnReducer,
-  TurnView,
+  Reducer,
+  TickView,
 } from './contracts.js';
+import { advanceTick } from './contracts.js';
 import { enumerateActions } from './solver.js';
 
-export const MULTI_AGENT_TRANSCRIPT_VERSION = '1.0' as const;
+export const MULTI_AGENT_TRANSCRIPT_VERSION = '1.1' as const;
 
 export type MultiAgentEnvironmentErrorCode =
   | 'not_started'
@@ -24,7 +25,7 @@ export class MultiAgentEnvironmentError extends Error {
   }
 }
 
-export interface MultiAgentSeatTurn<TView extends TurnView<unknown, unknown>> {
+export interface MultiAgentSeatStep<TView extends TickView<unknown, unknown>> {
   seat: string;
   observation: TView;
   legalActions: readonly SubmittedAction[];
@@ -34,19 +35,19 @@ export interface MultiAgentSeatTurn<TView extends TurnView<unknown, unknown>> {
   totalReward: number;
 }
 
-export interface MultiAgentTurn<TView extends TurnView<unknown, unknown>> {
-  seats: Readonly<Record<string, MultiAgentSeatTurn<TView>>>;
+export interface MultiAgentStep<TView extends TickView<unknown, unknown>> {
+  seats: Readonly<Record<string, MultiAgentSeatStep<TView>>>;
   participatingSeats: readonly string[];
-  step: number;
-  status: TurnView['status'];
+  tick: number;
+  status: TickView['status'];
   outcome?: Outcome;
   terminated: boolean;
   truncated: boolean;
   done: boolean;
 }
 
-export interface MultiAgentTranscriptRound<
-  TView extends TurnView<unknown, unknown>,
+export interface MultiAgentTranscriptTick<
+  TView extends TickView<unknown, unknown>,
 > {
   n: number;
   actions: readonly SubmittedAction[];
@@ -56,17 +57,17 @@ export interface MultiAgentTranscriptRound<
 
 export interface MultiAgentTranscript<
   TLevel,
-  TView extends TurnView<unknown, unknown>,
+  TView extends TickView<unknown, unknown>,
 > {
   version: typeof MULTI_AGENT_TRANSCRIPT_VERSION;
   level: TLevel;
   seed: number;
   seats: readonly string[];
   initialObservations: Readonly<Record<string, TView>>;
-  rounds: readonly MultiAgentTranscriptRound<TView>[];
+  ticks: readonly MultiAgentTranscriptTick<TView>[];
   result: {
-    steps: number;
-    status: TurnView['status'];
+    ticks: number;
+    status: TickView['status'];
     outcome?: Outcome;
     totalRewards: Readonly<Record<string, number>>;
     terminated: boolean;
@@ -77,13 +78,13 @@ export interface MultiAgentTranscript<
 export interface MultiAgentEnvironmentOptions<
   TLevel,
   TState,
-  TView extends TurnView<unknown, unknown>,
+  TView extends TickView<unknown, unknown>,
 > {
-  reducer: TurnReducer<TLevel, TState, TView>;
+  reducer: Reducer<TLevel, TState, TView>;
   level: TLevel;
   seats: readonly string[];
   seed?: number;
-  maxSteps?: number;
+  maxTicks?: number;
   enumerateActions?: (view: TView) => SubmittedAction[];
   waitAction?: (seat: string, view: TView) => SubmittedAction;
   isActionLegal?: (
@@ -96,7 +97,7 @@ export interface MultiAgentEnvironmentOptions<
     previous: TView,
     next: TView,
     actions: readonly SubmittedAction[],
-    step: number,
+    tick: number,
     seat: string,
   ) => number;
   snapshotLevel?: (level: TLevel) => TLevel;
@@ -164,27 +165,27 @@ function validateSeats(seats: readonly string[]): string[] {
 
 /**
  * Deterministic shared-state environment for multiple seat-scoped policies.
- * Simultaneous participation requires `TurnReducer.applyIntents`.
+ * Simultaneous participation resolves one canonical input batch per tick.
  */
 export class MultiAgentEnvironment<
   TLevel,
   TState,
-  TView extends TurnView<unknown, unknown>,
+  TView extends TickView<unknown, unknown>,
 > {
   private readonly seats: string[];
   private readonly seed: number;
-  private readonly maxSteps: number;
+  private readonly maxTicks: number;
   private readonly actionsFor: (view: TView) => SubmittedAction[];
   private readonly snapshotLevel: (level: TLevel) => TLevel;
   private readonly snapshotObservation: (view: TView) => TView;
   private state: TState | undefined;
-  private steps = 0;
+  private ticks = 0;
   private ended = false;
   private truncated = false;
   private totalRewards: Record<string, number>;
   private lastRewards: Record<string, number>;
   private initialObservations: Record<string, TView> | undefined;
-  private records: Array<MultiAgentTranscriptRound<TView>> = [];
+  private records: Array<MultiAgentTranscriptTick<TView>> = [];
   private transcriptLevel: TLevel | undefined;
 
   constructor(private readonly options: MultiAgentEnvironmentOptions<TLevel, TState, TView>) {
@@ -193,9 +194,9 @@ export class MultiAgentEnvironment<
     if (!Number.isSafeInteger(this.seed) || this.seed < 0 || this.seed > 0xffff_ffff) {
       throw new RangeError('multi-agent seed must be an unsigned 32-bit integer');
     }
-    this.maxSteps = options.maxSteps ?? 10_000;
-    if (!Number.isSafeInteger(this.maxSteps) || this.maxSteps < 1) {
-      throw new RangeError('multi-agent maxSteps must be a positive safe integer');
+    this.maxTicks = options.maxTicks ?? 10_000;
+    if (!Number.isSafeInteger(this.maxTicks) || this.maxTicks < 1) {
+      throw new RangeError('multi-agent maxTicks must be a positive safe integer');
     }
     this.actionsFor = options.enumerateActions ?? ((view) => enumerateActions(view));
     this.snapshotLevel = options.snapshotLevel
@@ -206,10 +207,10 @@ export class MultiAgentEnvironment<
     this.lastRewards = Object.fromEntries(this.seats.map((seat) => [seat, 0]));
   }
 
-  reset(): MultiAgentTurn<TView> {
+  reset(): MultiAgentStep<TView> {
     this.transcriptLevel = this.snapshotLevel(this.options.level);
     this.state = this.options.reducer.init(this.options.level, this.seed);
-    this.steps = 0;
+    this.ticks = 0;
     this.ended = false;
     this.truncated = false;
     this.records = [];
@@ -222,19 +223,19 @@ export class MultiAgentEnvironment<
     ]));
     const full = this.options.reducer.view(this.state);
     if (full.status !== 'playing' || full.outcome?.kind === 'decided') this.ended = true;
-    return this.turn(views, full);
+    return this.tick(views, full);
   }
 
-  observe(): MultiAgentTurn<TView> {
+  observe(): MultiAgentStep<TView> {
     if (this.state === undefined) {
       throw new MultiAgentEnvironmentError('not_started', 'call reset() before observe()');
     }
-    return this.turn(this.views(), this.options.reducer.view(this.state));
+    return this.tick(this.views(), this.options.reducer.view(this.state));
   }
 
   step(
     intents: Readonly<Record<string, SubmittedAction | undefined>>,
-  ): MultiAgentTurn<TView> {
+  ): MultiAgentStep<TView> {
     if (this.state === undefined) {
       throw new MultiAgentEnvironmentError('not_started', 'call reset() before step()');
     }
@@ -251,7 +252,7 @@ export class MultiAgentEnvironment<
       if (!participating.includes(seat)) {
         throw new MultiAgentEnvironmentError(
           'invalid_participation',
-          `seat ${seat} is not participating in this collection turn`,
+          `seat ${seat} is not participating in this collection tick`,
         );
       }
     }
@@ -287,13 +288,13 @@ export class MultiAgentEnvironment<
     }
 
     if (full.participation?.mode === 'simultaneous') {
-      if (!this.options.reducer.applyIntents) {
+      if (!('advance' in this.options.reducer) && !this.options.reducer.applyIntents) {
         throw new MultiAgentEnvironmentError(
           'invalid_participation',
-          'simultaneous participation requires reducer.applyIntents',
+          'simultaneous participation requires TickReducer.advance or reducer.applyIntents',
         );
       }
-      this.state = this.options.reducer.applyIntents(this.state, actions);
+      this.state = advanceTick(this.options.reducer, this.state, actions);
     } else {
       if (actions.length !== 1) {
         throw new MultiAgentEnvironmentError(
@@ -301,15 +302,15 @@ export class MultiAgentEnvironment<
           'sequential or implicit participation must resolve exactly one action',
         );
       }
-      this.state = this.options.reducer.apply(this.state, actions[0]!);
+      this.state = advanceTick(this.options.reducer, this.state, actions);
     }
-    this.steps++;
+    this.ticks++;
     const nextViews = this.views();
     const nextFull = this.options.reducer.view(this.state);
     const rewards: Record<string, number> = {};
     for (const seat of this.seats) {
       const reward = this.options.reward
-        ? this.options.reward(previousViews[seat]!, nextViews[seat]!, actions, this.steps, seat)
+        ? this.options.reward(previousViews[seat]!, nextViews[seat]!, actions, this.ticks, seat)
         : this.defaultReward(nextViews[seat]!, seat);
       if (!Number.isFinite(reward)) throw new TypeError(`reward for seat ${seat} must be finite`);
       rewards[seat] = reward;
@@ -318,12 +319,12 @@ export class MultiAgentEnvironment<
     }
     if (nextFull.status !== 'playing' || nextFull.outcome?.kind === 'decided') {
       this.ended = true;
-    } else if (this.steps >= this.maxSteps) {
+    } else if (this.ticks >= this.maxTicks) {
       this.ended = true;
       this.truncated = true;
     }
     this.records.push({
-      n: this.steps,
+      n: this.ticks,
       actions: actions.map(copyAction),
       rewards: { ...rewards },
       observations: Object.fromEntries(this.seats.map((seat) => [
@@ -331,15 +332,15 @@ export class MultiAgentEnvironment<
         this.snapshotObservation(nextViews[seat]!),
       ])),
     });
-    return this.turn(nextViews, nextFull);
+    return this.tick(nextViews, nextFull);
   }
 
-  /** Reset and replay canonical per-round action batches from a transcript. */
+  /** Reset and replay canonical per-tick action batches from a transcript. */
   replay(
-    rounds: readonly (readonly SubmittedAction[])[],
-  ): MultiAgentTurn<TView> {
-    let turn = this.reset();
-    for (const actions of rounds) {
+    ticks: readonly (readonly SubmittedAction[])[],
+  ): MultiAgentStep<TView> {
+    let step = this.reset();
+    for (const actions of ticks) {
       const intents: Record<string, SubmittedAction> = {};
       for (const action of actions) {
         if (typeof action.seat !== 'string' || action.seat.length === 0) {
@@ -350,13 +351,13 @@ export class MultiAgentEnvironment<
         }
         intents[action.seat] = copyAction(action);
       }
-      turn = this.step(intents);
+      step = this.step(intents);
     }
-    return turn;
+    return step;
   }
 
   transcript(): MultiAgentTranscript<TLevel, TView> {
-    const turn = this.observe();
+    const step = this.observe();
     if (this.transcriptLevel === undefined || this.initialObservations === undefined) {
       throw new MultiAgentEnvironmentError('not_started', 'call reset() before transcript()');
     }
@@ -369,22 +370,22 @@ export class MultiAgentEnvironment<
         seat,
         this.snapshotObservation(this.initialObservations![seat]!),
       ])),
-      rounds: this.records.map((round) => ({
-        n: round.n,
-        actions: round.actions.map(copyAction),
-        rewards: { ...round.rewards },
+      ticks: this.records.map((tick) => ({
+        n: tick.n,
+        actions: tick.actions.map(copyAction),
+        rewards: { ...tick.rewards },
         observations: Object.fromEntries(this.seats.map((seat) => [
           seat,
-          this.snapshotObservation(round.observations[seat]!),
+          this.snapshotObservation(tick.observations[seat]!),
         ])),
       })),
       result: {
-        steps: this.steps,
-        status: turn.status,
-        ...(turn.outcome ? { outcome: copyOutcome(turn.outcome) } : {}),
+        ticks: this.ticks,
+        status: step.status,
+        ...(step.outcome ? { outcome: copyOutcome(step.outcome) } : {}),
         totalRewards: { ...this.totalRewards },
-        terminated: turn.terminated,
-        truncated: turn.truncated,
+        terminated: step.terminated,
+        truncated: step.truncated,
       },
     };
   }
@@ -435,7 +436,7 @@ export class MultiAgentEnvironment<
     return view.status === 'won' ? (view.stars ?? 1) : 0;
   }
 
-  private turn(views: Record<string, TView>, full: TView): MultiAgentTurn<TView> {
+  private tick(views: Record<string, TView>, full: TView): MultiAgentStep<TView> {
     const participating = this.ended ? [] : this.participatingSeats(full);
     return {
       seats: Object.fromEntries(this.seats.map((seat) => {
@@ -454,7 +455,7 @@ export class MultiAgentEnvironment<
         }];
       })),
       participatingSeats: participating,
-      step: this.steps,
+      tick: this.ticks,
       status: full.status,
       ...(full.outcome ? { outcome: copyOutcome(full.outcome) } : {}),
       terminated: this.ended && !this.truncated,
@@ -464,16 +465,16 @@ export class MultiAgentEnvironment<
   }
 }
 
-export type MultiAgentPolicy<TView extends TurnView<unknown, unknown>> = (
-  turn: MultiAgentSeatTurn<TView>,
-  shared: MultiAgentTurn<TView>,
+export type MultiAgentPolicy<TView extends TickView<unknown, unknown>> = (
+  step: MultiAgentSeatStep<TView>,
+  shared: MultiAgentStep<TView>,
 ) => SubmittedAction | undefined | Promise<SubmittedAction | undefined>;
 
 export interface MultiAgentEpisodeResult<
   TLevel,
-  TView extends TurnView<unknown, unknown>,
+  TView extends TickView<unknown, unknown>,
 > {
-  finalTurn: MultiAgentTurn<TView>;
+  finalStep: MultiAgentStep<TView>;
   transcript: MultiAgentTranscript<TLevel, TView>;
 }
 
@@ -481,19 +482,19 @@ export interface MultiAgentEpisodeResult<
 export async function runMultiAgentEpisode<
   TLevel,
   TState,
-  TView extends TurnView<unknown, unknown>,
+  TView extends TickView<unknown, unknown>,
 >(
   environment: MultiAgentEnvironment<TLevel, TState, TView>,
   policies: Readonly<Record<string, MultiAgentPolicy<TView>>>,
 ): Promise<MultiAgentEpisodeResult<TLevel, TView>> {
-  let turn = environment.reset();
-  while (!turn.done) {
-    const decisions = await Promise.all(turn.participatingSeats.map(async (seat) => {
+  let step = environment.reset();
+  while (!step.done) {
+    const decisions = await Promise.all(step.participatingSeats.map(async (seat) => {
       const policy = policies[seat];
       if (!policy) return [seat, undefined] as const;
-      return [seat, await policy(turn.seats[seat]!, turn)] as const;
+      return [seat, await policy(step.seats[seat]!, step)] as const;
     }));
-    turn = environment.step(Object.fromEntries(decisions));
+    step = environment.step(Object.fromEntries(decisions));
   }
-  return { finalTurn: turn, transcript: environment.transcript() };
+  return { finalStep: step, transcript: environment.transcript() };
 }

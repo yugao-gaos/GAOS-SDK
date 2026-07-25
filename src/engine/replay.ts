@@ -1,4 +1,9 @@
-import type { SubmittedAction, TurnReducer, TurnView } from './contracts.js';
+import {
+  advanceTick,
+  type Reducer,
+  type SubmittedAction,
+  type TickView,
+} from './contracts.js';
 import type { LocationRef } from './locations.js';
 import { locationKey } from './locations.js';
 import { applyCanonicalActions } from './lockstep.js';
@@ -29,7 +34,7 @@ export interface TranscriptAction {
   zoneId?: string;
   seat?: string;
   targets?: readonly LocationRef[];
-  /** High-frequency turn/tick. Empty ticks between records are omitted. */
+  /** High-frequency tick. Empty ticks between records are omitted. */
   tick?: number;
 }
 
@@ -45,8 +50,8 @@ export interface RecheckOptions<TState> {
 }
 
 /** Re-simulate a transcript and compare its deterministic recorded outcome. */
-export function recheckTranscript<TLevel, TState, TView extends TurnView<unknown, unknown>>(
-  reducer: TurnReducer<TLevel, TState, TView>,
+export function recheckTranscript<TLevel, TState, TView extends TickView<unknown, unknown>>(
+  reducer: Reducer<TLevel, TState, TView>,
   header: TranscriptHeader<TLevel>,
   actions: TranscriptAction[],
   options: RecheckOptions<TState> = {},
@@ -168,10 +173,12 @@ export function recheckTranscript<TLevel, TState, TView extends TurnView<unknown
   for (const { action, valid, effectiveTick } of parsedActions) {
     if (!action) continue;
     if (effectiveTick > lastTick) {
-      if (options.applyEmptyTick) {
+      if ('advance' in reducer || options.applyEmptyTick) {
         try {
           for (let tick = lastTick + 1; tick < effectiveTick; tick++) {
-            state = options.applyEmptyTick(state, tick);
+            state = 'advance' in reducer
+              ? advanceTick(reducer, state, [])
+              : options.applyEmptyTick!(state, tick);
           }
         } catch (error) {
           replayError = `empty tick before action ${action.n} rejected on replay: ${(error as Error).message}`;

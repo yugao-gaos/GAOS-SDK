@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-PROTOCOL_ID = "agilabs.turns"
+PROTOCOL_ID = "agilabs.ticks"
 PROTOCOL_VERSION = "1.0"
 ARENA_CONTROL_EXTENSION = "agilabs.arena"
 PARTICIPANT_ID_PATTERN = r"^[A-Za-z0-9_.:@-]{1,128}$"
@@ -46,7 +46,7 @@ class ArenaAPIError(Exception):
 
 
 class IllegalActionRejected(ArenaAPIError):
-    """422 — the action was not in the legal set for this turn."""
+    """422 — the action was not in the legal set for this tick."""
 
 
 class ProtocolMismatchError(Exception):
@@ -115,7 +115,7 @@ def parse_session_binding(value: Any) -> dict[str, Any]:
     participant = value.get("participantId")
     if (
         not isinstance(value.get("sessionId"), str) or not value["sessionId"].strip()
-        or not isinstance(value.get("turnId"), str) or not value["turnId"].strip()
+        or not isinstance(value.get("tickId"), str) or not value["tickId"].strip()
         or not isinstance(revision, int) or isinstance(revision, bool)
         or revision < 0 or revision > _MAX_SAFE_INTEGER
         or not isinstance(participant, str) or _PARTICIPANT_ID_RE.fullmatch(participant) is None
@@ -131,37 +131,37 @@ def parse_session_binding(value: Any) -> dict[str, Any]:
         "protocol": PROTOCOL_ID,
         "protocolVersion": PROTOCOL_VERSION,
         "sessionId": value["sessionId"],
-        "turnId": value["turnId"],
+        "tickId": value["tickId"],
         "revision": revision,
         "participantId": participant,
         **({"controlRevision": control_revision} if "controlRevision" in value else {}),
     }
 
 
-def parse_turn_result(data: Any) -> dict[str, Any]:
+def parse_tick_result(data: Any) -> dict[str, Any]:
     """Validate only the genre-neutral v1 envelope, not game observation fields."""
     if not isinstance(data, dict):
         raise ProtocolMismatchError("response is not an object")
     if data.get("protocol") != PROTOCOL_ID or data.get("protocolVersion") != PROTOCOL_VERSION:
         raise ProtocolMismatchError(f"expected {PROTOCOL_ID} {PROTOCOL_VERSION}")
-    if data.get("kind") not in ("turn", "pending"):
-        raise ProtocolMismatchError("response kind must be turn or pending")
+    if data.get("kind") not in ("tick", "pending"):
+        raise ProtocolMismatchError("response kind must be tick or pending")
     if (
         not isinstance(data.get("sessionId"), str)
         or not data["sessionId"].strip()
-        or not isinstance(data.get("turnId"), str)
-        or not data["turnId"].strip()
+        or not isinstance(data.get("tickId"), str)
+        or not data["tickId"].strip()
     ):
-        raise ProtocolMismatchError("response sessionId/turnId missing")
+        raise ProtocolMismatchError("response sessionId/tickId missing")
     revision = data.get("revision")
     if (
         not isinstance(revision, int)
         or isinstance(revision, bool)
         or revision < 0
         or revision > 9_007_199_254_740_991
-        or "turn" not in data
+        or "tick" not in data
     ):
-        raise ProtocolMismatchError("response revision/turn missing")
+        raise ProtocolMismatchError("response revision/tick missing")
     if data["kind"] == "pending":
         submitted = data.get("submittedParticipants")
         awaiting = data.get("awaitingParticipants")
@@ -199,8 +199,8 @@ def _is_participant_list(value: Any) -> bool:
 
 
 @dataclass
-class Turn:
-    turn_number: int
+class Tick:
+    tick_number: int
     narrative: str | None
     grid: str
     visual_events: list[dict[str, Any]]
@@ -225,10 +225,10 @@ class Turn:
     dialogue_emotion: str | None = None
 
     @classmethod
-    def from_json(cls, data: dict[str, Any]) -> "Turn":
+    def from_json(cls, data: dict[str, Any]) -> "Tick":
         hud = data.get("hud", {})
         return cls(
-            turn_number=data["turnNumber"],
+            tick_number=data["tickNumber"],
             narrative=data.get("narrative"),
             grid=data["grid"],
             visual_events=data.get("visualEvents", []),
@@ -294,12 +294,12 @@ class ArenaClient:
             "protocol": PROTOCOL_ID,
             "protocolVersion": PROTOCOL_VERSION,
             "sessionId": result["sessionId"],
-            "turnId": result["turnId"],
+            "tickId": result["tickId"],
             "revision": result["revision"],
             "participantId": participant_id or previous.get("participantId", "player"),
         }
-        turn = result.get("turn")
-        control_revision = turn.get("controlRevision") if isinstance(turn, dict) else None
+        tick = result.get("tick")
+        control_revision = tick.get("controlRevision") if isinstance(tick, dict) else None
         if (
             isinstance(control_revision, int)
             and not isinstance(control_revision, bool)
@@ -371,7 +371,7 @@ class ArenaClient:
         game_id: str | None = None,
         community_level_id: str | None = None,
         participants: list[str] | None = None,
-    ) -> tuple[str, Turn]:
+    ) -> tuple[str, Tick]:
         """Open a session.
 
         Per-level sessions (human/coach/autonomous_local practice) pass
@@ -394,21 +394,21 @@ class ArenaClient:
             body["seasonId"] = season_id
         if participants is not None:
             body["participants"] = participants
-        result = parse_turn_result(self._call("POST", "/v1/sessions", body))
-        if result["kind"] != "turn":
+        result = parse_tick_result(self._call("POST", "/v1/sessions", body))
+        if result["kind"] != "tick":
             raise ProtocolMismatchError("new session must start resolved")
         self._remember(result)
-        return result["sessionId"], Turn.from_json(result["turn"])
+        return result["sessionId"], Tick.from_json(result["tick"])
 
-    def get_turn_envelope(self, session_id: str) -> dict[str, Any]:
-        result = parse_turn_result(self._call("GET", f"/v1/sessions/{_quote(session_id)}/turn"))
+    def get_tick_envelope(self, session_id: str) -> dict[str, Any]:
+        result = parse_tick_result(self._call("GET", f"/v1/sessions/{_quote(session_id)}/tick"))
         if result["sessionId"] != session_id:
             raise ProtocolMismatchError("response session does not match request")
         self._remember(result)
         return result
 
-    def get_turn(self, session_id: str) -> Turn:
-        return Turn.from_json(self.get_turn_envelope(session_id)["turn"])
+    def get_tick(self, session_id: str) -> Tick:
+        return Tick.from_json(self.get_tick_envelope(session_id)["tick"])
 
     def submit_intent(
         self,
@@ -443,15 +443,15 @@ class ArenaClient:
                 raise ProtocolMismatchError(
                     "explicit submission_id requires the original cursor or a restored session binding"
                 )
-            self.get_turn_envelope(session_id)
+            self.get_tick_envelope(session_id)
             binding = self._bindings[session_id]
         selected = cursor or binding
         if not isinstance(selected, dict):
             raise ProtocolMismatchError("session cursor unavailable")
-        turn_id = selected.get("turnId")
+        tick_id = selected.get("tickId")
         revision = selected.get("revision")
         if (
-            not isinstance(turn_id, str) or not turn_id.strip()
+            not isinstance(tick_id, str) or not tick_id.strip()
             or not isinstance(revision, int) or isinstance(revision, bool)
             or revision < 0 or revision > _MAX_SAFE_INTEGER
         ):
@@ -462,18 +462,18 @@ class ArenaClient:
             "protocol": PROTOCOL_ID,
             "protocolVersion": PROTOCOL_VERSION,
             "sessionId": session_id,
-            "turnId": turn_id,
+            "tickId": tick_id,
             "revision": revision,
             "participantId": participant,
             "command": command,
         }
         # Stable across an application retry after an ambiguous network error.
-        body["submissionId"] = submission_id or f"{participant}:{turn_id}"
+        body["submissionId"] = submission_id or f"{participant}:{tick_id}"
         if control_revision is not None:
             body["extensions"] = {
                 ARENA_CONTROL_EXTENSION: {"controlRevision": control_revision}
             }
-        result = parse_turn_result(
+        result = parse_tick_result(
             self._call("POST", path, body)
         )
         if result["sessionId"] != session_id:
@@ -523,7 +523,7 @@ class ArenaClient:
         if (
             data.get("status") not in _ARENA_ROOM_STATUSES
             or not _is_finite_number(data.get("readyDeadline"))
-            or not _is_nullable_finite_number(data.get("turnDeadline"))
+            or not _is_nullable_finite_number(data.get("tickDeadline"))
             or not _is_nullable_finite_number(data.get("expiresAt"))
             or not isinstance(participants, list)
             or not all(_is_arena_participant(item) for item in participants)
@@ -532,11 +532,11 @@ class ArenaClient:
             or not _is_arena_outcome(data.get("outcome"), participant_ids)
         ):
             raise ProtocolMismatchError("Arena room fields are invalid")
-        turn = parse_turn_result(data.get("turn"))
-        if turn["sessionId"] != match_id:
-            raise ProtocolMismatchError("Arena room turn does not match request")
-        self._remember(turn, participant)
-        return {**data, "turn": turn}
+        tick = parse_tick_result(data.get("tick"))
+        if tick["sessionId"] != match_id:
+            raise ProtocolMismatchError("Arena room tick does not match request")
+        self._remember(tick, participant)
+        return {**data, "tick": tick}
 
     def get_arena_room(self, match_id: str) -> dict[str, Any]:
         """Read-only room snapshot; does not claim or heartbeat the seat."""
@@ -559,29 +559,29 @@ class ArenaClient:
         return self.set_arena_presence(match_id, True)
 
     def connect_arena_match(self, match_id: str) -> dict[str, Any]:
-        """Claim a matched seat; the second claim starts the turn timers."""
+        """Claim a matched seat; the second claim starts the tick timers."""
         return self.set_arena_presence(match_id, True)
 
     def disconnect_arena_match(self, match_id: str) -> dict[str, Any]:
         return self.set_arena_presence(match_id, False)
 
-    def get_arena_turn_envelope(self, match_id: str) -> dict[str, Any]:
-        result = parse_turn_result(
-            self._call("GET", f"/v1/arena/matches/{_quote(match_id)}/turn")
+    def get_arena_tick_envelope(self, match_id: str) -> dict[str, Any]:
+        result = parse_tick_result(
+            self._call("GET", f"/v1/arena/matches/{_quote(match_id)}/tick")
         )
         if result["sessionId"] != match_id:
             raise ProtocolMismatchError("response session does not match request")
         binding = self._bindings.get(match_id)
-        # Turn envelopes intentionally omit authenticated seat identity. Avoid
+        # Tick envelopes intentionally omit authenticated seat identity. Avoid
         # inventing the ordinary solo `player` seat when callers poll first;
         # submit_arena_intent will recover the real room binding on demand.
         if binding is not None:
             self._remember(result, binding["participantId"])
         else:
-            turn = result.get("turn")
-            control_revision = turn.get("controlRevision") if isinstance(turn, dict) else None
+            tick = result.get("tick")
+            control_revision = tick.get("controlRevision") if isinstance(tick, dict) else None
             self._observed_arena_cursors[match_id] = {
-                "turnId": result["turnId"],
+                "tickId": result["tickId"],
                 "revision": result["revision"],
                 **(
                     {"controlRevision": control_revision}
@@ -631,7 +631,7 @@ class ArenaClient:
             command,
             participant,
             submission_id
-            or f"{participant}:{binding['turnId']}:control:{expected_control_revision}",
+            or f"{participant}:{binding['tickId']}:control:{expected_control_revision}",
             expected_control_revision,
             cursor=original_cursor,
         )
@@ -647,7 +647,7 @@ class ArenaClient:
         submission_id: str | None = None,
         poll_interval: float = 0.25,
         max_poll_attempts: int = 120,
-    ) -> Turn:
+    ) -> Tick:
         body: dict[str, Any] = {"id": action_id}
         if x is not None:
             body["x"] = x
@@ -661,14 +661,14 @@ class ArenaClient:
             participant_id=participant_id,
             submission_id=submission_id,
         )
-        if result["kind"] == "turn":
-            return Turn.from_json(result["turn"])
+        if result["kind"] == "tick":
+            return Tick.from_json(result["tick"])
         pending_revision = result["revision"]
         for _ in range(max_poll_attempts):
             time.sleep(poll_interval)
-            polled = self.get_turn_envelope(session_id)
-            if polled["kind"] == "turn" and polled["revision"] > pending_revision:
-                return Turn.from_json(polled["turn"])
+            polled = self.get_tick_envelope(session_id)
+            if polled["kind"] == "tick" and polled["revision"] > pending_revision:
+                return Tick.from_json(polled["tick"])
         raise ArenaAPIError(408, f"timed out waiting after {max_poll_attempts} polls")
 
     def submit_session(self, session_id: str, harness_category: str | None = None) -> dict:
@@ -767,14 +767,14 @@ class AsyncArenaClient:
                     pass
                 raise
 
-    async def create_session(self, *args: Any, **kwargs: Any) -> tuple[str, Turn]:
+    async def create_session(self, *args: Any, **kwargs: Any) -> tuple[str, Tick]:
         return await self._run("create_session", *args, **kwargs)
 
-    async def get_turn_envelope(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return await self._run("get_turn_envelope", *args, **kwargs)
+    async def get_tick_envelope(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return await self._run("get_tick_envelope", *args, **kwargs)
 
-    async def get_turn(self, *args: Any, **kwargs: Any) -> Turn:
-        return await self._run("get_turn", *args, **kwargs)
+    async def get_tick(self, *args: Any, **kwargs: Any) -> Tick:
+        return await self._run("get_tick", *args, **kwargs)
 
     async def submit_intent(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return await self._run("submit_intent", *args, **kwargs)
@@ -806,13 +806,13 @@ class AsyncArenaClient:
     async def disconnect_arena_match(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return await self._run("disconnect_arena_match", *args, **kwargs)
 
-    async def get_arena_turn_envelope(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return await self._run("get_arena_turn_envelope", *args, **kwargs)
+    async def get_arena_tick_envelope(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return await self._run("get_arena_tick_envelope", *args, **kwargs)
 
     async def submit_arena_intent(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return await self._run("submit_arena_intent", *args, **kwargs)
 
-    async def submit_action(self, *args: Any, **kwargs: Any) -> Turn:
+    async def submit_action(self, *args: Any, **kwargs: Any) -> Tick:
         return await self._run("submit_action", *args, **kwargs)
 
     async def submit_session(self, *args: Any, **kwargs: Any) -> dict[str, Any]:

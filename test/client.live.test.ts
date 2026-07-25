@@ -29,13 +29,13 @@ describe.skipIf(!up)('ArenaClient against a live server', () => {
   const client = new ArenaClient(BASE_URL);
 
   it('creates a session and plays the shortest current L1 run', async () => {
-    const { sessionId, turn } = await client.createSession({
+    const { sessionId, tick } = await client.createSession({
       gameMode: 'challenge',
       playMethod: 'human',
       levelId: 'od-l1',
     });
-    expect(turn.grid).toContain('@');
-    let t = turn;
+    expect(tick.grid).toContain('@');
+    let t = tick;
     for (const id of L1_OPTIMAL) t = await client.submitAction(sessionId, { id });
     expect(t.status).toBe('won');
     // Published content can rebalance star thresholds independently of the

@@ -55,7 +55,7 @@ export interface FlightPassResult<TState> {
   completed: boolean;
 }
 
-/** Resolve full same-turn flight, with an optional relay hook between passes. */
+/** Resolve full same-tick flight, with an optional relay hook between passes. */
 export function resolveFlightPasses<TState>(
   state: TState,
   options: FlightPassOptions<TState>,

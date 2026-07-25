@@ -14,7 +14,7 @@ interface ChainReactionJob<TNode> {
 export interface ChainReactionContext {
   /** Zero-based reaction number across the complete cascade. */
   step: number;
-  /** Breadth-first wave within the current turn. */
+  /** Breadth-first resolution wave within the current tick. */
   wave: number;
 }
 
@@ -33,7 +33,7 @@ export type ChainReactionResult<TState, TNode> = SettlementResult<
 >;
 
 /**
- * Resolve a deterministic breadth-first chain reaction in one logical turn.
+ * Resolve a deterministic breadth-first chain reaction within one tick.
  *
  * Newly triggered nodes run in the following wave. Discovery order is retained
  * within a wave, and stable node keys guarantee at-most-once activation.

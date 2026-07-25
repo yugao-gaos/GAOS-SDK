@@ -1,8 +1,27 @@
-# High-frequency turns and deterministic lockstep
+# Fixed-rate ticks and deterministic lockstep
 
 Continuous-feeling play uses the same reducer at a fixed tick cadence. The SDK
 does not own a scheduler, wall clock, socket, signaling, interpolation, or
 late-join transport.
+
+```ts
+import {
+  createTickRate,
+  tickAtElapsedMilliseconds,
+  type TickReducer,
+} from '@yugao-gaos/turn-based-grid-sdk/engine';
+
+const rate = createTickRate(30);
+// rate.millisecondsPerTick === 33.333...
+
+const currentTick = tickAtElapsedMilliseconds(elapsedMs, rate);
+for (; simulatedTick < currentTick; simulatedTick++) {
+  state = reducer.advance(state, inputsFor(simulatedTick));
+}
+```
+
+The host owns `elapsedMs`, scheduling, catch-up limits, rendering, and
+interpolation. The reducer sees only explicit tick-numbered inputs.
 
 ## Reducer guidance
 
@@ -25,7 +44,7 @@ Disconnect, rejoin, and human/bot substitution are host events injected as
 ordinary inputs. A product may switch a disconnected seat to a behavior-tree
 driver, make it auto-wait, or call `eliminateSeat` and apply a declared policy
 to its entities. Reconnection changes the seat's driver back; ownership and
-authoritative state never move. Record the chosen transition with its turn or
+authoritative state never move. Record the chosen transition with its tick or
 tick so rollback and replay reach the same result.
 
 ## Sparse transcripts and rollback
@@ -57,23 +76,20 @@ record, and sends each client its redacted result. P2P input exchange or
 digest comparison may still be used around that authority, but no untrusted
 client receives another seat's hand, deck order, or unrevealed fog state.
 
-## Agents and frame skip
+## Agent decision cadence
 
-Agents act at decision points, not every simulation tick. `AgentEnvironment`
-accepts `frameSkip`; each `step` repeats the chosen action, or a
-product-provided `continueAction`, for up to that many reducer ticks. It stops
-early at termination, truncation, or when the continuation is no longer
-legal. Every applied tick, observation, and reward is retained in transcript
-version 1.2, so replay uses the recorded actions without multiplying the frame
-skip again.
+`AgentEnvironment.step()` advances exactly one simulation tick. Products own
+the policy for requesting a new decision less often, holding an input, or
+repeating an action. Every applied tick, observation, and reward is retained
+in transcript version 1.3.
 
 `MultiAgentEnvironment` applies a canonical simultaneous batch through
-`TurnReducer.applyIntents`. Each seat receives only `viewFor(state, seat)` and
+`TickReducer.advance`. Each seat receives only `viewFor(state, seat)` and
 its legal actions. Missing policies or deadline misses contribute a legal
 `wait`. One shared transcript records the redacted per-seat views, canonical
 intent batches, and per-seat rewards/outcomes.
 
-The hosted HTTP turn protocol is suitable for asynchronous turns. It shares
-the participation and canonical collection model, but it is not a 60 Hz
-transport. Realtime products bring WebRTC, relay, or socket transport and use
-the reducer, lockstep inputs, rollback, and digest helpers directly.
+The hosted HTTP tick protocol shares the participation and canonical
+collection model, but it is not a 60 Hz transport. Realtime products bring
+WebRTC, relay, or socket transport and use the reducer, lockstep inputs,
+rollback, and digest helpers directly.

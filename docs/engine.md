@@ -22,8 +22,8 @@ The SDK owns deterministic, product-neutral behavior:
 
 - simultaneous movement collision resolution, including footprints, movement
   chains, rotations, swaps, and priority;
-- deterministic multi-wave turn settlement through an explicit consequence
-  worklist, including convergence guards, next-turn deferral, and causal traces;
+- deterministic multi-wave tick settlement through an explicit consequence
+  worklist, including convergence guards, next-tick deferral, and causal traces;
 - breadth-first chain reactions, path-projectile advancement, bounded full-flight
   passes, and all-or-nothing push-chain planning/commit ordering;
 - latching and automatic gate transitions, including occupancy-safe closing;
@@ -37,7 +37,7 @@ The SDK owns deterministic, product-neutral behavior:
   requirement/effect transactions;
 - square, axial-hex, and graph layouts; layout-parameterized pathfinding,
   line-of-sight, and field geometry; and generic keyed movement;
-- deterministic sequential turn order, multi-seat participation/outcome
+- deterministic sequential tick order, multi-seat participation/outcome
   contracts, maximal run/motif recognition, canonical lockstep input ordering,
   rollback re-simulation, and state digests;
 - per-seat observations, independent zone identity/order visibility, board fog,
@@ -53,7 +53,7 @@ The SDK owns deterministic, product-neutral behavior:
 - transcript re-simulation, optional tick gaps, and deterministic per-level run
   seeds;
 - provider-neutral seat-aware single- and multi-agent episode lifecycles,
-  concrete action validation, frame skip, per-seat rewards, safety truncation,
+  concrete action validation, per-seat rewards, safety truncation,
   transcripts, and batch evaluation.
 
 The product owns content and policy:
@@ -68,8 +68,8 @@ The dividing rule is: the SDK implements **how a reusable mechanism behaves**;
 the product decides **which content uses it, where it is enabled, and with what
 values**.
 
-Turn settlement is described in [Deterministic turn settlement](settlement.md).
-One submitted turn may resolve through several same-turn waves before the SDK
+Tick settlement is described in [Deterministic tick settlement](settlement.md).
+One submitted tick may resolve through several same-tick waves before the SDK
 returns control to the caller.
 
 Geometry APIs accept callbacks for cell existence and blocking. The SDK owns
@@ -147,25 +147,29 @@ world/entity rules.
 
 ## Reducer adapter
 
-The solver and replay checker depend on `TurnReducer<TLevel, TState>` rather
+The solver and replay checker depend on `TickReducer<TLevel, TState>` rather
 than a Zonoid registry. A product adapter provides three pure operations:
 
 ```ts
-interface TurnReducer<TLevel, TState> {
+interface TickReducer<TLevel, TState> {
   init(level: TLevel, seed: number): TState;
-  apply(state: TState, action: SubmittedAction): TState;
-  applyIntents?(state: TState, actions: readonly SubmittedAction[]): TState;
-  view(state: TState): TurnView;
-  viewFor?(state: TState, seat: string): TurnView;
+  advance(state: TState, inputs: readonly SubmittedAction[]): TState;
+  view(state: TState): TickView;
+  viewFor?(state: TState, seat: string): TickView;
 }
 ```
 
 This keeps campaign lookup, level schemas, and character catalogs outside the
 SDK while allowing the reusable algorithms to execute the product reducer.
+A product may interpret ticks however its rules require. The SDK only advances
+ticks; it does not model product-level ticks.
+
+`ActionReducer` is the 0.x compatibility shape for integrations that still
+apply one input at a time. New integrations use `TickReducer.advance`, which
+accepts zero, one, or many canonically ordered inputs.
 
 The same reducer adapter powers `AgentEnvironment` and
-`MultiAgentEnvironment`. `applyIntents` is required only when simultaneous
-multi-seat batches are used. A product therefore needs no second gameplay
+`MultiAgentEnvironment`. A product therefore needs no second gameplay
 implementation for agents, hosted sessions, solving, or deterministic replay.
 
 ## Scoring configuration

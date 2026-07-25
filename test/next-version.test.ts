@@ -20,14 +20,12 @@ import {
   type Cell,
   type ActionDefinition,
   type GridActionDefinition,
-  type GridReducer,
   type GridRecheckResult,
   type GridSolveResult,
   type GridSolverOptions,
   type GridSubmittedAction,
   type GridTranscriptAction,
   type GridTranscriptHeader,
-  type GridTurnView,
   type KeyedMover,
   type Mover,
   type RecheckResult,
@@ -36,8 +34,8 @@ import {
   type SubmittedAction,
   type TranscriptAction,
   type TranscriptHeader,
-  type TurnReducer,
-  type TurnView,
+  type ActionReducer,
+  type TickView,
 } from '../src/engine/index.js';
 
 type Equal<Left, Right> =
@@ -58,13 +56,13 @@ describe('v0.13 neutral core', () => {
     actionsUsed: number;
   }
 
-  const reducer: TurnReducer<{ goal: number }, State> = {
+  const reducer: ActionReducer<{ goal: number }, State> = {
     init: () => ({ at: 0, actionsUsed: 0 }),
     apply: (state, action) => {
       if (action.id !== 'advance') throw new Error('illegal');
       return { at: state.at + 1, actionsUsed: state.actionsUsed + 1 };
     },
-    view: (state): TurnView => ({
+    view: (state): TickView => ({
       actions: [{ id: 'advance', params: 'none' }],
       status: state.at >= 2 ? 'won' : 'playing',
       hud: { actionsUsed: state.actionsUsed },
@@ -81,10 +79,8 @@ describe('v0.13 neutral core', () => {
   });
 
   it('keeps legacy solver names behaviorally and structurally compatible', () => {
-    interface LegacyProductView extends GridTurnView {
-      grid: { tiles: string[] };
-    }
-    const legacy: GridReducer<{ goal: number }, State, LegacyProductView> = {
+    interface LegacyProductView extends TickView<{ tiles: string[] }> {}
+    const legacy: ActionReducer<{ goal: number }, State, LegacyProductView> = {
       init: reducer.init,
       apply: reducer.apply,
       view: (state): LegacyProductView => ({
@@ -100,7 +96,7 @@ describe('v0.13 neutral core', () => {
   });
 
   it('enumerates neutral and per-board action targets', () => {
-    const view: TurnView = {
+    const view: TickView = {
       actions: [
         { id: 'wait', params: 'none' },
         { id: 'use', params: 'index' },
@@ -130,7 +126,7 @@ describe('v0.13 neutral core', () => {
   });
 
   it('replays board-addressed transcripts through old and new names', () => {
-    const boardReducer: TurnReducer<null, State> = {
+    const boardReducer: ActionReducer<null, State> = {
       init: () => ({ at: 0, actionsUsed: 0 }),
       apply: (state, action) => {
         if (action.id !== 'Action 1' || action.boardId !== 'arena') throw new Error('illegal');
@@ -162,7 +158,7 @@ describe('v0.13 neutral core', () => {
       problems: [],
       replayed: { status: 'won', stars: null, actionsUsed: 1 },
     });
-    expect(recheckGridTranscript(boardReducer as GridReducer<null, State>, header, actions))
+    expect(recheckGridTranscript(boardReducer as ActionReducer<null, State>, header, actions))
       .toEqual(recheckTranscript(boardReducer, header, actions));
   });
 });

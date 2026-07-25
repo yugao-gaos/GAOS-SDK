@@ -1,4 +1,9 @@
-import type { SubmittedAction, TurnReducer, TurnView } from './contracts.js';
+import {
+  advanceTick,
+  type Reducer,
+  type SubmittedAction,
+  type TickView,
+} from './contracts.js';
 import { fnv1a } from './random.js';
 
 export interface LockstepInput {
@@ -35,16 +40,16 @@ function compareStrings(a: string, b: string): number {
 export function applyCanonicalActions<
   TLevel,
   TState,
-  TView extends TurnView<unknown, unknown>,
+  TView extends TickView<unknown, unknown>,
 >(
-  reducer: TurnReducer<TLevel, TState, TView>,
+  reducer: Reducer<TLevel, TState, TView>,
   state: TState,
   actions: readonly SubmittedAction[],
   atomic: boolean,
 ): TState {
-  if (atomic && reducer.applyIntents) return reducer.applyIntents(state, actions);
+  if (atomic) return advanceTick(reducer, state, actions);
   let next = state;
-  for (const action of actions) next = reducer.apply(next, action);
+  for (const action of actions) next = advanceTick(reducer, next, [action]);
   return next;
 }
 
@@ -85,15 +90,16 @@ export function canonicalizeLockstepInputs(
 /**
  * Fold canonical per-tick inputs over a rollback snapshot.
  *
- * Reducers that advance scheduled effects during empty ticks provide
- * `applyEmptyTick`; otherwise omitted all-wait ticks are identity steps.
+ * Canonical reducers receive an empty input batch for all-wait ticks. Legacy
+ * reducers may provide `applyEmptyTick`; otherwise empty ticks remain identity
+ * steps for compatibility.
  */
 export function resimulate<
   TLevel,
   TState,
-  TView extends TurnView<unknown, unknown>,
+  TView extends TickView<unknown, unknown>,
 >(
-  reducer: TurnReducer<TLevel, TState, TView>,
+  reducer: Reducer<TLevel, TState, TView>,
   snapshotState: TState,
   inputs: readonly LockstepInput[],
   options: ResimulationOptions<TState> = {},
@@ -116,7 +122,8 @@ export function resimulate<
     const start = cursor;
     while (cursor < ordered.length && ordered[cursor]!.tick === tick) cursor++;
     if (start === cursor) {
-      if (options.applyEmptyTick) state = options.applyEmptyTick(state, tick);
+      if ('advance' in reducer) state = advanceTick(reducer, state, []);
+      else if (options.applyEmptyTick) state = options.applyEmptyTick(state, tick);
       continue;
     }
     const tickActions: SubmittedAction[] = [];

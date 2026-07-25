@@ -1,13 +1,13 @@
-# Turn model and reducer contract
+# Tick model and reducer contract
 
-The SDK uses a genre-neutral reducer and turn-view vocabulary. It does not
+The SDK uses a genre-neutral reducer and tick-view vocabulary. It does not
 define terrain tokens, card schemas, level files, or a complete world state.
 Products expose those concepts through the generic contracts.
 
 ::: tip Coordinates are optional
 Card-only, hidden-role, drafting, and other non-spatial games can skip the
 coordinate compatibility section and start at [Reducer boundary](#reducer-boundary).
-They still use the same turn, solver, agent, and replay contracts.
+They still use the same tick, solver, agent, and replay contracts.
 :::
 
 ## Coordinates
@@ -43,34 +43,31 @@ product might mutate the original array.
 Reusable solving, replay, and agent execution consume the same adapter:
 
 ```ts
-interface TurnReducer<TLevel, TState, TView extends TurnView> {
+interface TickReducer<TLevel, TState, TView extends TickView> {
   init(level: TLevel, seed: number): TState;
-  apply(state: TState, action: SubmittedAction): TState;
+  advance(state: TState, inputs: readonly SubmittedAction[]): TState;
   view(state: TState): TView;
   viewFor?(state: TState, seat: string): TView;
-  applyIntents?(state: TState, actions: readonly SubmittedAction[]): TState;
 }
 ```
 
 - `init` must create the same initial state for the same level and seed.
-- `apply` validates and resolves one canonical action. It should throw for an
-  illegal submission.
+- `advance` resolves exactly one tick from zero, one, or many canonical inputs.
+  It should throw for an illegal submission.
 - `view` exposes the complete or single-seat observation and legal-action
   surface needed by SDK consumers.
 - `viewFor` optionally derives the observation authorized for one seat. See
   [information partitions](information-partitions.md).
-- `applyIntents` optionally resolves one simultaneous multi-seat batch
-  atomically. Sequential and solo reducers can omit it.
 
 The reducer contract requires determinism, not persistent immutability.
 High-frequency products may mutate in place with copy-on-write rollback
-deltas. When using the solver, however, `apply` must not corrupt its input:
+deltas. When using the solver, however, `advance` must not corrupt its input:
 several sibling actions are explored from the same parent. Return an
 independent state, use persistent data structures, or snapshot before mutation.
 
 An empty-intent tick should use a near-free path and advance only scheduled
 systems whose explicit boundary is crossed. Wall-clock time is never implicit
-state input; see [high-frequency turns](/high-frequency).
+state input; see [fixed-rate ticks](/high-frequency).
 
 ## Actions
 
@@ -97,9 +94,9 @@ are canonical. A hosted protocol may permute their
 wire labels for an agent; [replay verification](replay.md) checks that mapping
 before re-simulation.
 
-## Turn observations
+## Tick observations
 
-`TurnView` provides:
+`TickView` provides:
 
 - legal action definitions;
 - status: `playing`, `won`, or `failed`;
@@ -134,10 +131,10 @@ validation, rules, content, serialization, and authoritative persistence.
 
 ## Zonoid example
 
-Zonoid implements one universal `TurnReducer` for Object Delivery, Object
+Zonoid implements one universal `TickReducer` for Object Delivery, Object
 Usage, Signal Language, The Breach, Intelligence Lies, and Jailbreak Protocol.
 The reducer initializes a product `World`, applies the canonical move/use/talk/
-inspect actions, and exposes a redacted `TurnView`; the same adapter is used by
+inspect actions, and exposes a redacted `TickView`; the same adapter is used by
 human play, agents, the solver, and replay verification.
 
 <figure class="mechanism-video">

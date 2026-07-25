@@ -11,7 +11,7 @@ import MechanismLinks from '../.vitepress/theme/components/demos/MechanismLinks.
 
 const mechanisms = [
   { title: 'Zones and card play', link: '/mechanisms/zones-and-card-play', description: 'Compose a three-action program from reusable card-like commands.' },
-  { title: 'Turn order and lockstep', link: '/mechanisms/turn-order-and-lockstep', description: 'Preview three beats, then resolve player and enemy intents simultaneously.' },
+  { title: 'Ticks and lockstep', link: '/mechanisms/ticks-and-lockstep', description: 'Preview three beats, then resolve player and enemy intents simultaneously.' },
   { title: 'Push chains', link: '/mechanisms/push-chains', description: 'Push and pull enemies through collisions, obstacles, and chained displacement.' },
   { title: 'Gates', link: '/mechanisms/gates', description: 'Open and preserve interlocked passage state through authored gate rules.' },
   { title: 'Latched triggers', link: '/mechanisms/triggers', description: 'Turn pressure-plate entry into a stable, deterministic state transition.' },

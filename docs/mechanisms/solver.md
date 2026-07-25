@@ -1,7 +1,7 @@
 # Minimum-action solver
 
 `solveLevel` performs breadth-first search over any deterministic
-`TurnReducer`. The first win it finds has minimum submitted-action depth under
+`TickReducer`. The first win it finds has minimum submitted-action depth under
 the supplied action enumeration and state-equivalence policy.
 
 ## Basic use
@@ -32,7 +32,7 @@ work.
 
 ## Action enumeration
 
-By default, `enumerateActions` expands the current turn view:
+By default, `enumerateActions` expands the current tick view:
 
 - `none`: one `{ id }` action;
 - `index`: one action for every distinct index found in items, dialogue options,

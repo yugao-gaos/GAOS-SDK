@@ -1,9 +1,10 @@
 import type {
   GridViewNamespace,
   SubmittedAction,
-  TurnReducer,
-  TurnView,
+  Reducer,
+  TickView,
 } from './contracts.js';
+import { advanceTick } from './contracts.js';
 
 export interface SolveResult {
   min: number | null;
@@ -19,9 +20,9 @@ export interface SolverOptions<TState> {
   /** Override state normalization when a runtime has other volatile fields. */
   stateKey?: (state: TState) => string;
   /** Override action enumeration for a custom observation surface. */
-  actions?: (view: TurnView<unknown, unknown>) => SubmittedAction[];
+  actions?: (view: TickView<unknown, unknown>) => SubmittedAction[];
   /** Product policy can exclude actions that cannot help search, such as restart. */
-  includeAction?: (action: SubmittedAction, view: TurnView<unknown, unknown>) => boolean;
+  includeAction?: (action: SubmittedAction, view: TickView<unknown, unknown>) => boolean;
 }
 
 const VOLATILE_KEYS = ['lastEvents', 'actionsUsed', 'narrative', 'log'];
@@ -84,10 +85,10 @@ function isGridNamespace(
 }
 
 function gridTargets(
-  view: TurnView<unknown, unknown>,
+  view: TickView<unknown, unknown>,
   actionId: string,
 ): Array<{ boardId?: string; cells: readonly [number, number][] }> {
-  const legacyHud = view.hud as TurnView['hud'] & GridViewNamespace;
+  const legacyHud = view.hud as TickView['hud'] & GridViewNamespace;
   const legacyCells = legacyHud.actionTargeting?.[actionId]?.targetableCells
     ?? legacyHud.targetableCells;
   if (legacyCells) return [{ cells: legacyCells }];
@@ -108,7 +109,7 @@ function gridTargets(
 }
 
 /** Enumerate standard no-parameter, indexed, board, and declarative-target actions. */
-export function enumerateActions(view: TurnView<unknown, unknown>): SubmittedAction[] {
+export function enumerateActions(view: TickView<unknown, unknown>): SubmittedAction[] {
   const submitted: SubmittedAction[] = [];
   for (const action of view.actions) {
     switch (action.params) {
@@ -162,9 +163,9 @@ export function enumerateActions(view: TurnView<unknown, unknown>): SubmittedAct
   return submitted;
 }
 
-/** Breadth-first shortest-path solver over any deterministic turn reducer. */
-export function solveLevel<TLevel, TState, TView extends TurnView<unknown, unknown>>(
-  reducer: TurnReducer<TLevel, TState, TView>,
+/** Breadth-first shortest-path solver over any deterministic reducer. */
+export function solveLevel<TLevel, TState, TView extends TickView<unknown, unknown>>(
+  reducer: Reducer<TLevel, TState, TView>,
   level: TLevel,
   options: SolverOptions<TState>,
 ): SolveResult {
@@ -230,7 +231,7 @@ export function solveLevel<TLevel, TState, TView extends TurnView<unknown, unkno
         if (options.includeAction && !options.includeAction(action, currentView)) continue;
         let nextState: TState;
         try {
-          nextState = reducer.apply(state, action);
+          nextState = advanceTick(reducer, state, [action]);
         } catch {
           continue;
         }

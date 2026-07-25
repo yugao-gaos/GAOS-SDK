@@ -6,9 +6,13 @@ TypeScript and Python distributions share one semantic version. While the SDK
 is below `1.0.0`, minor releases may include breaking API changes. Patch
 releases are reserved for compatible fixes.
 
-The generic `agilabs.turns` v1 wire contract has its own compatibility promise:
+The generic `agilabs.ticks` v1 wire contract has its own compatibility promise:
 breaking its envelope, cursor, retry, or simultaneous-intent behavior requires
-a new protocol version. See [Turn protocol v1](/protocol-v1).
+a new protocol version. See [Tick protocol v1](/protocol-v1).
+
+Version 0.18 establishes `agilabs.ticks` v1 as the canonical transport with
+`kind: "tick"`, `tickId`, and `tick`. Changing those fields in place would
+break deployed hosts and clients.
 
 Pin an exact release for production and review the GitHub release notes before
 upgrading:
@@ -16,7 +20,7 @@ upgrading:
 ```json
 {
   "dependencies": {
-    "@yugao-gaos/turn-based-grid-sdk": "git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.17.0"
+    "@yugao-gaos/turn-based-grid-sdk": "git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.18.0"
   }
 }
 ```
@@ -32,10 +36,10 @@ release URLs, and automation do not break.
 Those identifiers do not describe the current feature boundary. The `./engine`
 entry point is a genre-neutral game-mechanism suite; tabletop and spatial-grid
 games are supported application families, not product boundaries. Neutral
-names such as `TurnReducer`, `solveLevel`, and
-`recheckTranscript` are canonical. Deprecated `Grid*` compatibility aliases
-remain scheduled for the separate v1.0 boundary, where package naming will also
-be reconsidered.
+names such as `TickReducer`, `solveLevel`, and `recheckTranscript` are
+canonical. The remaining deprecated grid-prefixed action aliases are
+scheduled for the separate v1.0 boundary, where package naming will also be
+reconsidered.
 
 The project plans to migrate the repository and distributions to coordinated,
 neutral names rather than rename one surface at a time. Current identifiers

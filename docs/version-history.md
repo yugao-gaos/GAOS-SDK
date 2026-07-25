@@ -1,13 +1,25 @@
 # Version history
 
-GAOS evolves additively across the v0.x line. Products can adopt new mechanism
-families independently, while deprecated compatibility names remain available
-until the v1.0 boundary.
+GAOS uses the v0.x line to refine its contracts before v1.0. Products should
+review the migration notes when updating across minor versions.
 
-::: tip Latest release: v0.17.0
-Portable replay artifacts, cross-language validation, and a broader playable
-game showcase are available in the current TypeScript and Python packages.
+::: tip Latest release: v0.18.0
+The simulation, protocol, replay, and agent surfaces now share one tick model.
 :::
+
+## v0.18.0 — one coherent tick model
+
+Released July 24, 2026.
+
+- `TickReducer.advance(state, inputs)` defines one deterministic tick with
+  zero, one, or many canonical inputs.
+- Existing settlement resolution steps execute within that tick.
+- Turn order and turn-scoped durations are product concerns and no longer
+  ship as SDK mechanics.
+- The wire protocol is tick-native: `agilabs.ticks`, `tickId`, `kind: "tick"`,
+  and a `tick` observation.
+- TypeScript and Python agent `step()` calls each advance exactly one tick.
+  Products own decision cadence and action-holding policy.
 
 ## v0.17.0 — portable benchmark replays
 
@@ -18,7 +30,8 @@ Released July 24, 2026.
 - Explicit per-level seeds, pinned content/results, reducer adapter identity,
   aggregate totals, and level-indexed actions.
 - Canonical serialization, strict parsing, transport validation, whole-run
-  reducer recheck, and a direct TabletopLabs `results.replayFormat` constant.
+  reducer recheck, and a creator-platform `results.replayFormat` integration
+  constant.
 - Packaged JSON Schema, cross-language golden fixture, and zero-dependency
   Python parsing, validation, and canonical serialization.
 - Lossless adapter from the existing `TranscriptHeader`/`TranscriptAction`
@@ -75,7 +88,7 @@ Prepared July 23, 2026.
   transcripts, rollback resimulation, and state digests.
 
 [Information partitions →](/mechanisms/information-partitions) ·
-[Turn order and lockstep →](/mechanisms/turn-order-and-lockstep)
+[Ticks and lockstep →](/mechanisms/ticks-and-lockstep)
 
 ### v0.13.0 — neutral core and layouts
 

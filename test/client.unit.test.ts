@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createIntentWindow, pendingEnvelope, turnEnvelope } from '../src/protocol.js';
+import { createIntentWindow, pendingEnvelope, tickEnvelope } from '../src/protocol.js';
 import {
   ArenaClient,
   ProtocolMismatchError,
-  parseTurnResult,
-  type Turn,
+  parseTickResult,
+  type GameObservation,
 } from '../src/index.js';
 
-const TURN: Turn = {
-  turnNumber: 0,
+const OBSERVATION: GameObservation = {
+  tickNumber: 0,
   controlRevision: 0,
   narrative: null,
   grid: '@ .',
@@ -36,68 +36,68 @@ describe('ArenaClient v1 protocol adapter', () => {
       statuses: [{ kind: 'shield_field', phase: 'active', remaining: 1, capacity: 2 }],
     };
     const character = (({ hp: _hp, maxHp: _maxHp, ...entry }) => entry)(unit);
-    const result = parseTurnResult<Turn>(turnEnvelope('s1', 0, {
-      ...TURN,
-      hud: { ...TURN.hud, units: [unit], characters: [character] },
+    const result = parseTickResult<GameObservation>(tickEnvelope('s1', 0, {
+      ...OBSERVATION,
+      hud: { ...OBSERVATION.hud, units: [unit], characters: [character] },
     }));
 
-    expect(result.turn.hud.units).toEqual([unit]);
-    expect(result.turn.hud.characters).toEqual([character]);
+    expect(result.tick.hud.units).toEqual([unit]);
+    expect(result.tick.hud.characters).toEqual([character]);
   });
 
   it('preserves the typed seat-relative Arena draw discriminator', () => {
-    const result = parseTurnResult<Turn>(turnEnvelope('arena-1', 4, {
-      ...TURN,
-      turnNumber: 4,
+    const result = parseTickResult<GameObservation>(tickEnvelope('arena-1', 4, {
+      ...OBSERVATION,
+      tickNumber: 4,
       status: 'failed',
-      hud: { ...TURN.hud, arenaOutcome: 'draw' },
+      hud: { ...OBSERVATION.hud, arenaOutcome: 'draw' },
     }));
 
-    expect(result.turn.hud.arenaOutcome).toBe('draw');
+    expect(result.tick.hud.arenaOutcome).toBe('draw');
   });
 
-  it('rejects unversioned turn-shaped responses', () => {
-    expect(() => parseTurnResult(TURN)).toThrow(ProtocolMismatchError);
-    expect(() => parseTurnResult({
-      ...turnEnvelope('s1', 0, TURN),
+  it('rejects unversioned tick-shaped responses', () => {
+    expect(() => parseTickResult(OBSERVATION)).toThrow(ProtocolMismatchError);
+    expect(() => parseTickResult({
+      ...tickEnvelope('s1', 0, OBSERVATION),
       sessionId: '',
     })).toThrow(ProtocolMismatchError);
-    expect(() => parseTurnResult({
-      ...turnEnvelope('s1', 0, TURN),
-      turnId: '',
+    expect(() => parseTickResult({
+      ...tickEnvelope('s1', 0, OBSERVATION),
+      tickId: '',
     })).toThrow(ProtocolMismatchError);
-    expect(() => parseTurnResult({
-      ...turnEnvelope('s1', 0, TURN),
+    expect(() => parseTickResult({
+      ...tickEnvelope('s1', 0, OBSERVATION),
       revision: -1,
     })).toThrow(ProtocolMismatchError);
-    expect(() => parseTurnResult({
-      ...turnEnvelope('s1', 0, TURN), extensions: 7,
+    expect(() => parseTickResult({
+      ...tickEnvelope('s1', 0, OBSERVATION), extensions: 7,
     })).toThrow('extensions');
   });
 
-  it('rejects incoherent pending participant state without constraining opaque turn ids', () => {
+  it('rejects incoherent pending participant state without constraining opaque tick ids', () => {
     const pending = {
-      ...turnEnvelope('s1', 0, TURN),
+      ...tickEnvelope('s1', 0, OBSERVATION),
       kind: 'pending',
-      turnId: 'opaque-turn-token',
+      tickId: 'opaque-tick-token',
       submittedParticipants: ['north'],
       awaitingParticipants: ['south'],
       acceptedParticipantId: 'north',
     };
-    expect(parseTurnResult(pending)).toMatchObject({ turnId: 'opaque-turn-token' });
-    expect(() => parseTurnResult({ ...pending, submittedParticipants: ['north', 'north'] }))
+    expect(parseTickResult(pending)).toMatchObject({ tickId: 'opaque-tick-token' });
+    expect(() => parseTickResult({ ...pending, submittedParticipants: ['north', 'north'] }))
       .toThrow('unique');
-    expect(() => parseTurnResult({ ...pending, awaitingParticipants: ['north'] }))
+    expect(() => parseTickResult({ ...pending, awaitingParticipants: ['north'] }))
       .toThrow('disjoint');
-    expect(() => parseTurnResult({ ...pending, awaitingParticipants: [] }))
+    expect(() => parseTickResult({ ...pending, awaitingParticipants: [] }))
       .toThrow('must await');
-    expect(() => parseTurnResult({ ...pending, acceptedParticipantId: 'south' }))
+    expect(() => parseTickResult({ ...pending, acceptedParticipantId: 'south' }))
       .toThrow('must be submitted');
-    expect(() => parseTurnResult({ ...pending, acceptedParticipantId: null }))
+    expect(() => parseTickResult({ ...pending, acceptedParticipantId: null }))
       .toThrow('must be submitted');
   });
 
-  it('sends the generic command envelope and polls pending turns once', async () => {
+  it('sends the generic command envelope and polls pending ticks once', async () => {
     const window = createIntentWindow('s1', 0, ['player', 'remote']);
     window.intents.player = {
       participantId: 'player',
@@ -105,9 +105,9 @@ describe('ArenaClient v1 protocol adapter', () => {
       command: { id: 'Action 1' },
     };
     const responses = [
-      new Response(JSON.stringify(turnEnvelope('s1', 0, TURN)), { status: 201 }),
-      new Response(JSON.stringify(pendingEnvelope(window, TURN, 'player')), { status: 202 }),
-      new Response(JSON.stringify(turnEnvelope('s1', 1, { ...TURN, turnNumber: 1 }))),
+      new Response(JSON.stringify(tickEnvelope('s1', 0, OBSERVATION)), { status: 201 }),
+      new Response(JSON.stringify(pendingEnvelope(window, OBSERVATION, 'player')), { status: 202 }),
+      new Response(JSON.stringify(tickEnvelope('s1', 1, { ...OBSERVATION, tickNumber: 1 }))),
     ];
     const calls: Array<[RequestInfo | URL, RequestInit | undefined]> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -122,28 +122,28 @@ describe('ArenaClient v1 protocol adapter', () => {
       playMethod: 'human',
       levelId: 'test',
     });
-    const turn = await client.submitAction(start.sessionId, { id: 'Action 1' }, {
+    const tick = await client.submitAction(start.sessionId, { id: 'Action 1' }, {
       pollIntervalMs: 0,
       maxPollAttempts: 1,
       submissionId: 'request-1',
     });
-    expect(turn.turnNumber).toBe(1);
+    expect(tick.tickNumber).toBe(1);
 
     const [, submitCall, pollCall] = calls;
     expect(submitCall?.[0]).toBe('https://example.test/v1/sessions/s1/actions');
     const init = submitCall?.[1];
     if (!init) throw new Error('missing submit request');
     expect(JSON.parse(String(init.body))).toEqual({
-      protocol: 'agilabs.turns',
+      protocol: 'agilabs.ticks',
       protocolVersion: '1.0',
       sessionId: 's1',
-      turnId: 's1:0',
+      tickId: 's1:0',
       revision: 0,
       participantId: 'player',
       submissionId: 'request-1',
       command: { id: 'Action 1' },
     });
-    expect(pollCall?.[0]).toBe('https://example.test/v1/sessions/s1/turn');
+    expect(pollCall?.[0]).toBe('https://example.test/v1/sessions/s1/tick');
   });
 
   it('preserves stable conflict codes on API errors', async () => {
@@ -152,7 +152,7 @@ describe('ArenaClient v1 protocol adapter', () => {
       code: 'stale_turn',
     }), { status: 409 })));
     const client = new ArenaClient('https://example.test');
-    await expect(client.getTurnEnvelope('s1')).rejects.toMatchObject({
+    await expect(client.getTickEnvelope('s1')).rejects.toMatchObject({
       status: 409,
       code: 'stale_turn',
     });
@@ -167,25 +167,25 @@ describe('ArenaClient v1 protocol adapter', () => {
       fetch: request,
       timeoutMs: 1_000,
     });
-    await expect(client.getTurnEnvelope('room/with space')).rejects.toMatchObject({
+    await expect(client.getTickEnvelope('room/with space')).rejects.toMatchObject({
       status: 502,
       error: 'upstream unavailable',
       responseBody: 'upstream unavailable',
     });
     expect(request.mock.calls[0]?.[0]).toBe(
-      'https://example.test/v1/sessions/room%2Fwith%20space/turn',
+      'https://example.test/v1/sessions/room%2Fwith%20space/tick',
     );
   });
 
   it('applies a default request timeout and lets zero explicitly disable it', async () => {
     const request = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-      new Response(JSON.stringify(turnEnvelope('s1', 0, TURN))));
+      new Response(JSON.stringify(tickEnvelope('s1', 0, OBSERVATION))));
     await new ArenaClient('https://example.test', undefined, { fetch: request })
-      .getTurnEnvelope('s1');
+      .getTickEnvelope('s1');
     expect(request.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
 
     await new ArenaClient('https://example.test', undefined, { fetch: request, timeoutMs: 0 })
-      .getTurnEnvelope('s1');
+      .getTickEnvelope('s1');
     expect(request.mock.calls[1]?.[1]?.signal).toBeUndefined();
   });
 
@@ -199,7 +199,7 @@ describe('ArenaClient v1 protocol adapter', () => {
     const pending = new ArenaClient('https://example.test', undefined, {
       fetch: request,
       timeoutMs: 0,
-    }).getTurnEnvelope('s1', { signal: controller.signal });
+    }).getTickEnvelope('s1', { signal: controller.signal });
     controller.abort(new Error('caller canceled'));
     await expect(pending).rejects.toThrow('caller canceled');
 
@@ -207,13 +207,13 @@ describe('ArenaClient v1 protocol adapter', () => {
       fetch: async () => new Response('12345'),
       maxResponseBytes: 4,
     });
-    await expect(oversized.getTurnEnvelope('s1')).rejects.toThrow(/exceeds 4 bytes/);
+    await expect(oversized.getTickEnvelope('s1')).rejects.toThrow(/exceeds 4 bytes/);
 
     const oversizedError = new ArenaClient('https://example.test', undefined, {
       fetch: async () => new Response('12345', { status: 502 }),
       maxResponseBytes: 4,
     });
-    await expect(oversizedError.getTurnEnvelope('s1')).rejects.toMatchObject({
+    await expect(oversizedError.getTickEnvelope('s1')).rejects.toMatchObject({
       status: 502,
       error: 'HTTP response exceeds 4 bytes',
     });
@@ -222,11 +222,11 @@ describe('ArenaClient v1 protocol adapter', () => {
   it('strictly validates Arena room metadata before remembering its cursor', async () => {
     const valid = {
       matchId: 'm1', sessionId: 'm1', status: 'active', participantId: 'north',
-      readyDeadline: 120_000, turnDeadline: 30_000, expiresAt: null, outcome: null,
+      readyDeadline: 120_000, tickDeadline: 30_000, expiresAt: null, outcome: null,
       participants: [
         { participantId: 'north', claimed: true, connected: true, reconnectDeadline: null },
       ],
-      turn: turnEnvelope('m1', 0, TURN),
+      tick: tickEnvelope('m1', 0, OBSERVATION),
     };
     for (const invalid of [
       { ...valid, status: 'unknown' },
@@ -283,20 +283,20 @@ describe('ArenaClient v1 protocol adapter', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('https://example.test/v1/arena/maps');
   });
 
-  it('polls matchmaking, plays one simultaneous turn, manages presence, and trusts room outcomes', async () => {
+  it('polls matchmaking, plays one simultaneous tick, manages presence, and trusts room outcomes', async () => {
     const window = createIntentWindow('m1', 0, ['north', 'south']);
     window.intents.north = {
       participantId: 'north', submissionId: 'north-0', command: { id: 'Action 1' },
     };
-    const resolvedTurn = turnEnvelope('m1', 1, { ...TURN, turnNumber: 1 });
+    const resolvedTurn = tickEnvelope('m1', 1, { ...OBSERVATION, tickNumber: 1 });
     const activeRoom = {
       matchId: 'm1', sessionId: 'm1', status: 'active', participantId: 'north',
-      readyDeadline: 120_000, turnDeadline: 30_000, expiresAt: null, outcome: null,
+      readyDeadline: 120_000, tickDeadline: 30_000, expiresAt: null, outcome: null,
       participants: [
         { participantId: 'north', claimed: true, connected: true, reconnectDeadline: null },
         { participantId: 'south', claimed: true, connected: true, reconnectDeadline: null },
       ],
-      turn: turnEnvelope('m1', 0, TURN),
+      tick: tickEnvelope('m1', 0, OBSERVATION),
     };
     const disconnectedRoom = {
       ...activeRoom,
@@ -304,14 +304,14 @@ describe('ArenaClient v1 protocol adapter', () => {
         { participantId: 'north', claimed: true, connected: false, reconnectDeadline: 20_000 },
         { participantId: 'south', claimed: true, connected: true, reconnectDeadline: null },
       ],
-      turn: resolvedTurn,
+      tick: resolvedTurn,
     };
     const completedRoom = {
       ...disconnectedRoom,
       status: 'completed',
       outcome: { winner: 'north', loser: 'south', reason: 'disconnect' },
-      // Disconnect policy can finish the room while its last game turn is live.
-      turn: resolvedTurn,
+      // Disconnect policy can finish the room while its last game tick is live.
+      tick: resolvedTurn,
     };
     const responses = [
       new Response(JSON.stringify({
@@ -325,9 +325,9 @@ describe('ArenaClient v1 protocol adapter', () => {
         matchId: 'm1', participantId: 'north',
       })),
       new Response(JSON.stringify(activeRoom)),
-      new Response(JSON.stringify(pendingEnvelope(window, TURN, 'north')), { status: 202 }),
+      new Response(JSON.stringify(pendingEnvelope(window, OBSERVATION, 'north')), { status: 202 }),
       new Response(JSON.stringify(resolvedTurn)),
-      new Response(JSON.stringify({ ...activeRoom, turn: resolvedTurn })),
+      new Response(JSON.stringify({ ...activeRoom, tick: resolvedTurn })),
       new Response(JSON.stringify(disconnectedRoom)),
       new Response(JSON.stringify(completedRoom)),
     ];
@@ -348,27 +348,27 @@ describe('ArenaClient v1 protocol adapter', () => {
       submissionId: 'north-0',
     });
     expect(pending.kind).toBe('pending');
-    const resolved = await client.getArenaTurnEnvelope('m1');
-    expect(resolved).toMatchObject({ kind: 'turn', revision: 1 });
+    const resolved = await client.getArenaTickEnvelope('m1');
+    expect(resolved).toMatchObject({ kind: 'tick', revision: 1 });
     await client.heartbeatArenaMatch('m1');
     const disconnected = await client.disconnectArenaMatch('m1');
     expect(disconnected.participants[0]).toMatchObject({ connected: false, reconnectDeadline: 20_000 });
     const completed = await client.getArenaRoom('m1');
     expect(completed.outcome).toMatchObject({ winner: 'north', reason: 'disconnect' });
-    expect(completed.turn.turn.status).toBe('playing');
+    expect(completed.tick.tick.status).toBe('playing');
 
     expect(calls.map(([url]) => url)).toEqual([
       'https://example.test/v1/arena/matchmaking',
       'https://example.test/v1/arena/matchmaking/global.open/request_1',
       'https://example.test/v1/arena/matches/m1/presence',
       'https://example.test/v1/arena/matches/m1/actions',
-      'https://example.test/v1/arena/matches/m1/turn',
+      'https://example.test/v1/arena/matches/m1/tick',
       'https://example.test/v1/arena/matches/m1/presence',
       'https://example.test/v1/arena/matches/m1/presence',
       'https://example.test/v1/arena/matches/m1',
     ]);
     expect(JSON.parse(String(calls[3]![1]!.body))).toMatchObject({
-      sessionId: 'm1', participantId: 'north', turnId: 'm1:0', revision: 0,
+      sessionId: 'm1', participantId: 'north', tickId: 'm1:0', revision: 0,
       submissionId: 'north-0', command: { id: 'Action 1' },
       extensions: { 'agilabs.arena': { controlRevision: 0 } },
     });
@@ -411,25 +411,25 @@ describe('ArenaClient v1 protocol adapter', () => {
     ]);
   });
 
-  it('recovers the authenticated seat after polling a turn before the room', async () => {
-    const turn = turnEnvelope('m1', 0, TURN);
+  it('recovers the authenticated seat after polling a tick before the room', async () => {
+    const tick = tickEnvelope('m1', 0, OBSERVATION);
     const room = {
       matchId: 'm1', sessionId: 'm1', status: 'active', participantId: 'south',
-      readyDeadline: 120_000, turnDeadline: 30_000, expiresAt: null, outcome: null,
+      readyDeadline: 120_000, tickDeadline: 30_000, expiresAt: null, outcome: null,
       participants: [
         { participantId: 'north', claimed: true, connected: true, reconnectDeadline: null },
         { participantId: 'south', claimed: true, connected: true, reconnectDeadline: null },
       ],
-      turn,
+      tick,
     };
     const window = createIntentWindow('m1', 0, ['north', 'south']);
     window.intents.south = {
       participantId: 'south', submissionId: 'south-0', command: { id: 'Action 8' },
     };
     const responses = [
-      new Response(JSON.stringify(turn)),
+      new Response(JSON.stringify(tick)),
       new Response(JSON.stringify(room)),
-      new Response(JSON.stringify(pendingEnvelope(window, TURN, 'south')), { status: 202 }),
+      new Response(JSON.stringify(pendingEnvelope(window, OBSERVATION, 'south')), { status: 202 }),
     ];
     const calls: Array<[RequestInfo | URL, RequestInit | undefined]> = [];
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -438,11 +438,11 @@ describe('ArenaClient v1 protocol adapter', () => {
     }));
 
     const client = new ArenaClient('https://example.test', 'ak_player');
-    await client.getArenaTurnEnvelope('m1');
+    await client.getArenaTickEnvelope('m1');
     await client.submitArenaIntent('m1', { id: 'Action 8' }, { submissionId: 'south-0' });
 
     expect(calls.map(([url]) => url)).toEqual([
-      'https://example.test/v1/arena/matches/m1/turn',
+      'https://example.test/v1/arena/matches/m1/tick',
       'https://example.test/v1/arena/matches/m1',
       'https://example.test/v1/arena/matches/m1/actions',
     ]);
@@ -452,17 +452,17 @@ describe('ArenaClient v1 protocol adapter', () => {
   it('tracks same-world Arena control substeps and generates a fresh retry key for each', async () => {
     const activeRoom = {
       matchId: 'm1', sessionId: 'm1', status: 'active', participantId: 'north',
-      readyDeadline: 120_000, turnDeadline: 30_000, expiresAt: null, outcome: null,
+      readyDeadline: 120_000, tickDeadline: 30_000, expiresAt: null, outcome: null,
       participants: [
         { participantId: 'north', claimed: true, connected: true, reconnectDeadline: null },
         { participantId: 'south', claimed: true, connected: true, reconnectDeadline: null },
       ],
-      turn: turnEnvelope('m1', 0, TURN),
+      tick: tickEnvelope('m1', 0, OBSERVATION),
     };
     const responses = [
       new Response(JSON.stringify(activeRoom)),
-      new Response(JSON.stringify(turnEnvelope('m1', 0, { ...TURN, controlRevision: 1 }))),
-      new Response(JSON.stringify(turnEnvelope('m1', 0, { ...TURN, controlRevision: 2 }))),
+      new Response(JSON.stringify(tickEnvelope('m1', 0, { ...OBSERVATION, controlRevision: 1 }))),
+      new Response(JSON.stringify(tickEnvelope('m1', 0, { ...OBSERVATION, controlRevision: 2 }))),
     ];
     const calls: Array<[RequestInfo | URL, RequestInit | undefined]> = [];
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -476,12 +476,12 @@ describe('ArenaClient v1 protocol adapter', () => {
     await client.submitArenaIntent('m1', { id: 'Action 7', index: 0 });
 
     expect(JSON.parse(String(calls[1]![1]!.body))).toMatchObject({
-      turnId: 'm1:0', revision: 0,
+      tickId: 'm1:0', revision: 0,
       submissionId: 'north:m1:0:control:0',
       extensions: { 'agilabs.arena': { controlRevision: 0 } },
     });
     expect(JSON.parse(String(calls[2]![1]!.body))).toMatchObject({
-      turnId: 'm1:0', revision: 0,
+      tickId: 'm1:0', revision: 0,
       submissionId: 'north:m1:0:control:1',
       extensions: { 'agilabs.arena': { controlRevision: 1 } },
     });
@@ -491,17 +491,17 @@ describe('ArenaClient v1 protocol adapter', () => {
     const calls: RequestInit[] = [];
     const request = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       calls.push(init!);
-      return new Response(JSON.stringify(turnEnvelope('s1', 1, { ...TURN, turnNumber: 1 })));
+      return new Response(JSON.stringify(tickEnvelope('s1', 1, { ...OBSERVATION, tickNumber: 1 })));
     });
     const client = new ArenaClient('https://example.test', undefined, { fetch: request });
     const restored = client.restoreSessionBinding({
-      protocol: 'agilabs.turns', protocolVersion: '1.0',
-      sessionId: 's1', turnId: 's1:0', revision: 0, participantId: 'player',
+      protocol: 'agilabs.ticks', protocolVersion: '1.0',
+      sessionId: 's1', tickId: 's1:0', revision: 0, participantId: 'player',
     });
     expect(client.getSessionBinding('s1')).toEqual(restored);
     await client.submitIntent('s1', { id: 'Action 1' }, { submissionId: 'retry-revision-0' });
     expect(JSON.parse(String(calls[0]!.body))).toMatchObject({
-      turnId: 's1:0', revision: 0, submissionId: 'retry-revision-0',
+      tickId: 's1:0', revision: 0, submissionId: 'retry-revision-0',
     });
     expect(() => client.restoreSessionBinding({ ...restored, revision: -1 })).toThrow('binding');
   });
@@ -509,8 +509,8 @@ describe('ArenaClient v1 protocol adapter', () => {
   it('restored Arena bindings override an observed cursor for explicit retries', async () => {
     const calls: RequestInit[] = [];
     const responses = [
-      new Response(JSON.stringify(turnEnvelope('m1', 5, { ...TURN, controlRevision: 5 }))),
-      new Response(JSON.stringify(turnEnvelope('m1', 1, { ...TURN, controlRevision: 1 }))),
+      new Response(JSON.stringify(tickEnvelope('m1', 5, { ...OBSERVATION, controlRevision: 5 }))),
+      new Response(JSON.stringify(tickEnvelope('m1', 1, { ...OBSERVATION, controlRevision: 1 }))),
     ];
     const client = new ArenaClient('https://example.test', undefined, {
       fetch: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -518,48 +518,48 @@ describe('ArenaClient v1 protocol adapter', () => {
         return responses.shift()!;
       }),
     });
-    await client.getArenaTurnEnvelope('m1');
+    await client.getArenaTickEnvelope('m1');
     client.restoreSessionBinding({
-      protocol: 'agilabs.turns', protocolVersion: '1.0',
-      sessionId: 'm1', turnId: 'm1:0', revision: 0,
+      protocol: 'agilabs.ticks', protocolVersion: '1.0',
+      sessionId: 'm1', tickId: 'm1:0', revision: 0,
       participantId: 'north', controlRevision: 0,
     });
     await client.submitArenaIntent('m1', { id: 'Action 1' }, { submissionId: 'retry-0' });
 
     expect(JSON.parse(String(calls[1]!.body))).toMatchObject({
-      turnId: 'm1:0', revision: 0, submissionId: 'retry-0',
+      tickId: 'm1:0', revision: 0, submissionId: 'retry-0',
       extensions: { 'agilabs.arena': { controlRevision: 0 } },
     });
   });
 
   it('does not borrow a newer control revision for an explicit Arena cursor', async () => {
     const request = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify(
-      turnEnvelope('m1', 1, { ...TURN, controlRevision: 1 }),
+      tickEnvelope('m1', 1, { ...OBSERVATION, controlRevision: 1 }),
     )));
     const client = new ArenaClient('https://example.test', undefined, { fetch: request });
     client.restoreSessionBinding({
-      protocol: 'agilabs.turns', protocolVersion: '1.0',
-      sessionId: 'm1', turnId: 'm1:5', revision: 5,
+      protocol: 'agilabs.ticks', protocolVersion: '1.0',
+      sessionId: 'm1', tickId: 'm1:5', revision: 5,
       participantId: 'north', controlRevision: 5,
     });
 
     await expect(client.submitArenaIntent('m1', { id: 'Action 1' }, {
-      submissionId: 'retry-0', cursor: { turnId: 'm1:0', revision: 0 },
+      submissionId: 'retry-0', cursor: { tickId: 'm1:0', revision: 0 },
     })).rejects.toThrow(/controlRevision unavailable/);
     expect(request).not.toHaveBeenCalled();
 
     await client.submitArenaIntent('m1', { id: 'Action 1' }, {
       submissionId: 'retry-0',
-      cursor: { turnId: 'm1:0', revision: 0, controlRevision: 0 },
+      cursor: { tickId: 'm1:0', revision: 0, controlRevision: 0 },
     });
     expect(JSON.parse(String(request.mock.calls[0]![1]!.body))).toMatchObject({
-      turnId: 'm1:0', revision: 0,
+      tickId: 'm1:0', revision: 0,
       extensions: { 'agilabs.arena': { controlRevision: 0 } },
     });
   });
 
   it('does not fetch a newer cursor for an ambiguous explicit retry key', async () => {
-    const request = vi.fn(async () => new Response(JSON.stringify(turnEnvelope('s1', 1, TURN))));
+    const request = vi.fn(async () => new Response(JSON.stringify(tickEnvelope('s1', 1, OBSERVATION))));
     const client = new ArenaClient('https://example.test', undefined, { fetch: request });
     await expect(client.submitIntent('s1', { id: 'Action 1' }, {
       submissionId: 'retry-revision-0',

@@ -2,6 +2,11 @@
 
 Status: implemented · Ships in: v0.13–v0.14 · Depends on: — · Breaking: no (aliases retained until v1.0)
 
+::: warning Superseded in v0.18
+This historical RFC records the earlier turn-oriented API. The current
+contract is `TickReducer`/`TickView`; turn scheduling is product-owned.
+:::
+
 ## Motivation
 
 The engine's genuinely generic mechanisms already carry neutral names

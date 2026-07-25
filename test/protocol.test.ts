@@ -8,7 +8,7 @@ import {
   createIntentWindow,
   createParticipationIntentWindow,
   pendingEnvelope,
-  turnEnvelope,
+  tickEnvelope,
   type CommandSubmission,
 } from '../src/protocol.js';
 
@@ -20,7 +20,7 @@ const submit = (
   protocol: PROTOCOL_ID,
   protocolVersion: PROTOCOL_VERSION,
   sessionId: 's1',
-  turnId: `s1:${revision}`,
+  tickId: `s1:${revision}`,
   revision,
   participantId,
   submissionId: `${participantId}-${revision}`,
@@ -81,7 +81,7 @@ describe('v1 simultaneous intent collection', () => {
       expect.objectContaining<Partial<IntentCollectionError>>({ code: 'conflicting_intent' }),
     );
     expect(() => collectIntent(first.window, submit('bravo', { move: 2 }, 1))).toThrowError(
-      expect.objectContaining<Partial<IntentCollectionError>>({ code: 'stale_turn' }),
+      expect.objectContaining<Partial<IntentCollectionError>>({ code: 'stale_tick' }),
     );
   });
 
@@ -145,14 +145,14 @@ describe('v1 simultaneous intent collection', () => {
   });
 
   it('produces stable resolved envelope metadata without constraining observation shape', () => {
-    expect(turnEnvelope('s1', 3, { hand: ['A', 'K'], custom: { phase: 'bid' } })).toEqual({
+    expect(tickEnvelope('s1', 3, { hand: ['A', 'K'], custom: { phase: 'bid' } })).toEqual({
       protocol: PROTOCOL_ID,
       protocolVersion: PROTOCOL_VERSION,
-      kind: 'turn',
+      kind: 'tick',
       sessionId: 's1',
-      turnId: 's1:3',
+      tickId: 's1:3',
       revision: 3,
-      turn: { hand: ['A', 'K'], custom: { phase: 'bid' } },
+      tick: { hand: ['A', 'K'], custom: { phase: 'bid' } },
     });
   });
 
@@ -183,7 +183,7 @@ describe('v1 simultaneous intent collection', () => {
       isCommandLegal: (_state: { score: number }, _participantId: string, command: number) => (
         Number.isInteger(command) && command >= 0
       ),
-      resolveTurn: (state: { score: number }, intents: readonly { command: number }[]) => ({
+      resolveTick: (state: { score: number }, intents: readonly { command: number }[]) => ({
         score: state.score + intents.reduce((sum, intent) => sum + intent.command, 0),
       }),
     };

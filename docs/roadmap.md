@@ -28,7 +28,7 @@ Continue hardening the smallest contracts shared by both audiences:
 - reducers, observations, and concrete legal actions;
 - deterministic seeds and settlement;
 - single-agent and multi-agent environments;
-- the `agilabs.turns` v1 protocol boundary; and
+- the `agilabs.ticks` v1 protocol boundary; and
 - the `gaos.replay` v1 evidence format and verifier interface.
 
 ### Conformance and portability

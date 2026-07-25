@@ -248,7 +248,7 @@ describe('gaos-agent command', () => {
     writeFileSync(modulePath, `
 export function createEnvironment({ seed }) {
   let done = false;
-  const turn = () => ({
+  const step = () => ({
     observation: { actions: [{ id: 'finish', params: 'none' }], status: done ? 'won' : 'playing', hud: { actionsUsed: done ? 1 : 0 } },
     actionDefinitions: [{ id: 'finish', params: 'none' }],
     legalActions: done ? [] : [{ id: 'finish' }],
@@ -256,12 +256,12 @@ export function createEnvironment({ seed }) {
     terminated: done,
     truncated: false,
     done,
-    info: { seed: seed ?? 1, steps: done ? 1 : 0, totalReward: done ? 1 : 0, status: done ? 'won' : 'playing', stars: done ? 1 : null, actionsUsed: done ? 1 : 0, terminationReason: done ? 'won' : null },
+    info: { seed: seed ?? 1, ticks: done ? 1 : 0, totalReward: done ? 1 : 0, status: done ? 'won' : 'playing', stars: done ? 1 : null, actionsUsed: done ? 1 : 0, terminationReason: done ? 'won' : null },
   });
   return {
-    reset() { done = false; return turn(); },
-    step() { done = true; return turn(); },
-    transcript() { return { version: '1.0', level: { id: 'test' }, seed: seed ?? 1, actions: [{ n: 1, action: { id: 'finish' }, reward: 1, status: 'won', actionsUsed: 1 }], result: turn().info }; },
+    reset() { done = false; return step(); },
+    step() { done = true; return step(); },
+    transcript() { return { version: '1.0', level: { id: 'test' }, seed: seed ?? 1, actions: [{ n: 1, action: { id: 'finish' }, reward: 1, status: 'won', actionsUsed: 1 }], result: step().info }; },
   };
 }
 `);

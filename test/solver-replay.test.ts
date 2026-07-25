@@ -4,14 +4,14 @@ import {
   recheckGridTranscript,
   runLevelSeed,
   solveGridLevel,
-  type GridReducer,
-  type GridTurnView,
+  type ActionReducer,
+  type TickView,
 } from '../src/engine/index.js';
 
 interface Level { goal: number }
 interface State { at: number; actionsUsed: number }
 
-const reducer: GridReducer<Level, State> = {
+const reducer: ActionReducer<Level, State> = {
   init: () => ({ at: 0, actionsUsed: 0 }),
   apply: (state, action) => {
     if (action.id === 'Action 1') {
@@ -22,7 +22,7 @@ const reducer: GridReducer<Level, State> = {
     }
     throw new Error('illegal action');
   },
-  view: (state): GridTurnView => ({
+  view: (state): TickView => ({
     actions: [
       { id: 'Action 1', params: 'none' },
       { id: 'Action 2', params: 'index' },
@@ -52,7 +52,7 @@ describe('generic grid solver', () => {
   });
 
   it('returns a zero-length solution when the initial state is already won', () => {
-    const won: GridReducer<Level, State> = {
+    const won: ActionReducer<Level, State> = {
       ...reducer,
       init: () => ({ at: 3, actionsUsed: 0 }),
     };
@@ -68,7 +68,7 @@ describe('generic grid solver', () => {
   });
 
   it('keeps action filtering in product policy', () => {
-    const withRestart: GridReducer<Level, State> = {
+    const withRestart: ActionReducer<Level, State> = {
       ...reducer,
       view: (state) => ({
         ...reducer.view(state),

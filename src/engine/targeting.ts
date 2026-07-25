@@ -1,8 +1,8 @@
-import type { TurnView } from './contracts.js';
+import type { TickView } from './contracts.js';
 
 export interface TargetSpec<
   TCandidate,
-  TView extends TurnView<unknown, unknown> = TurnView<unknown, unknown>,
+  TView extends TickView<unknown, unknown> = TickView<unknown, unknown>,
 > {
   count: number | { min: number; max: number };
   candidates(view: TView): readonly TCandidate[];
@@ -40,7 +40,7 @@ function bounds(count: TargetSpec<unknown>['count']): { min: number; max: number
  */
 export function enumerateTargetChoices<
   TCandidate,
-  TView extends TurnView<unknown, unknown>,
+  TView extends TickView<unknown, unknown>,
 >(
   spec: TargetSpec<TCandidate, TView>,
   view: TView,

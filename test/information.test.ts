@@ -2,23 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   AgentEnvironment,
   InformationLeakError,
-  activeSeat,
-  advanceTurn,
   assertNoInformationLeak,
   canonicalizeLockstepInputs,
   createSquareLayout,
-  createTurnOrder,
   createInformationRevelation,
   deriveSeatView,
-  eliminateSeat,
   findPatterns,
-  queueExtraTurn,
-  queueSkip,
   recheckTranscript,
   revelationsForSeat,
-  reorderSeats,
   resimulate,
-  reverseTurnOrder,
   stateDigest,
   outcomeForTeams,
   teamVisibility,
@@ -26,61 +18,11 @@ import {
   type Cell,
   type InformationPartitionPolicies,
   type TokenRef,
-  type TurnReducer,
-  type TurnView,
+  type ActionReducer,
+  type TickReducer,
+  type TickView,
   type ZoneViewNamespace,
 } from '../src/engine/index.js';
-
-describe('turn order', () => {
-  it('rotates deterministically and counts directional wraps', () => {
-    const first = createTurnOrder(['a', 'b', 'c']);
-    const second = advanceTurn(first);
-    const third = advanceTurn(second);
-    const fourth = advanceTurn(third);
-    expect([activeSeat(first), activeSeat(second), activeSeat(third), activeSeat(fourth)])
-      .toEqual(['a', 'b', 'c', 'a']);
-    expect(fourth).toMatchObject({ turnNumber: 4, round: 2, direction: 1 });
-    expect(first).toEqual({
-      seats: ['a', 'b', 'c'],
-      current: 0,
-      direction: 1,
-      turnNumber: 1,
-      round: 1,
-    });
-  });
-
-  it('consumes skips, FIFO extra turns, and reverse wraps', () => {
-    const skipped = advanceTurn(queueSkip(createTurnOrder(['a', 'b', 'c']), 'b'));
-    expect(activeSeat(skipped)).toBe('c');
-    expect(skipped.skips).toBeUndefined();
-
-    const queued = queueExtraTurn(
-      queueExtraTurn(createTurnOrder(['a', 'b', 'c']), 'c'),
-      'b',
-    );
-    const extraC = advanceTurn(queued);
-    const extraB = advanceTurn(extraC);
-    expect([activeSeat(extraC), activeSeat(extraB)]).toEqual(['c', 'b']);
-    expect(activeSeat(advanceTurn(extraB))).toBe('c');
-
-    const reversed = advanceTurn(reverseTurnOrder(createTurnOrder(['a', 'b', 'c'])));
-    expect(activeSeat(reversed)).toBe('c');
-    expect(reversed).toMatchObject({ direction: -1, round: 2 });
-  });
-
-  it('advances active-seat elimination and preserves active seats on reorder', () => {
-    const onB = advanceTurn(createTurnOrder(['a', 'b', 'c']));
-    const eliminated = eliminateSeat(onB, 'b');
-    expect(activeSeat(eliminated)).toBe('c');
-    expect(eliminated.turnNumber).toBe(3);
-
-    const reordered = reorderSeats(eliminated, ['c', 'a']);
-    expect(activeSeat(reordered)).toBe('c');
-    expect(reordered.seats).toEqual(['c', 'a']);
-    expect(() => reorderSeats(reordered, ['c', 'new']))
-      .toThrow('permutation of the current seats');
-  });
-});
 
 interface PatternToken extends TokenRef<Cell> {
   kind: string;
@@ -133,7 +75,7 @@ interface PieceView {
   team: string;
 }
 
-type PartitionView = TurnView<
+type PartitionView = TickView<
   Readonly<Record<string, BoardObservation<Cell, PieceView>>>,
   Readonly<Record<string, ZoneViewNamespace<CardView>>>
 >;
@@ -313,11 +255,11 @@ describe('seat-aware agent observations', () => {
     appliedSeat?: string;
   }
 
-  interface View extends TurnView {
+  interface View extends TickView {
     secret: string;
   }
 
-  const reducer: TurnReducer<null, State, View> = {
+  const reducer: ActionReducer<null, State, View> = {
     init: () => ({ done: false }),
     apply: (_state, action) => ({ done: true, appliedSeat: action.seat }),
     view: (state) => ({
@@ -357,7 +299,7 @@ describe('seat-aware agent observations', () => {
     });
     const transcript = environment.transcript();
     expect(transcript).toMatchObject({
-      version: '1.2',
+      version: '1.3',
       seat: 'b',
       initialObservation: { secret: '[hidden]' },
       actions: [{
@@ -377,7 +319,7 @@ describe('tick replay and lockstep', () => {
     trace: string[];
   }
 
-  const reducer: TurnReducer<null, State> = {
+  const reducer: ActionReducer<null, State> = {
     init: () => ({ count: 0, trace: [] }),
     apply: (state, action) => ({
       count: state.count + 1,
@@ -437,6 +379,15 @@ describe('tick replay and lockstep', () => {
   });
 
   it('canonicalizes input order and resimulates empty ticks', () => {
+    const atomicReducer: TickReducer<null, State> = {
+      ...reducer,
+      advance: (state, actions) => actions.length === 0
+        ? { ...state, trace: [...state.trace, 'empty'] }
+        : actions.reduce((current, action) => ({
+          count: current.count + 1,
+          trace: [...current.trace, `${action.seat}:${action.id}`],
+        }), state),
+    };
     const inputs = [
       { tick: 1, seat: 'b', actions: [{ id: 'b' }] },
       { tick: 3, seat: 'a', actions: [{ id: 'late' }] },
@@ -444,28 +395,24 @@ describe('tick replay and lockstep', () => {
     ];
     expect(canonicalizeLockstepInputs(inputs).map(({ tick, seat }) => [tick, seat]))
       .toEqual([[1, 'a'], [1, 'b'], [3, 'a']]);
-    const state = resimulate(reducer, { count: 0, trace: [] }, inputs, {
+    const state = resimulate(atomicReducer, { count: 0, trace: [] }, inputs, {
       throughTick: 3,
-      applyEmptyTick: (current, tick) => ({
-        count: current.count,
-        trace: [...current.trace, `empty:${tick}`],
-      }),
     });
     expect(state.trace).toEqual([
-      'empty:0',
+      'empty',
       'a:a',
       'b:b',
-      'empty:2',
+      'empty',
       'a:late',
     ]);
     expect(stateDigest(state, { serialize: (value) => JSON.stringify(value.trace) }))
       .toBe(stateDigest(state, { serialize: (value) => JSON.stringify(value.trace) }));
-    expect(() => resimulate(reducer, state, inputs, { fromTick: 2 }))
+    expect(() => resimulate(atomicReducer, state, inputs, { fromTick: 2 }))
       .toThrow('must not precede fromTick');
   });
 
   it('resimulates one tick as one canonical atomic intent batch when supported', () => {
-    const batchReducer: TurnReducer<null, State> = {
+    const batchReducer: ActionReducer<null, State> = {
       ...reducer,
       applyIntents: (state, actions) => ({
         count: state.count + actions.length,

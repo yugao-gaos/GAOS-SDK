@@ -27,7 +27,7 @@ describe('directed transport', () => {
     }]);
   });
 
-  it('runs a complete transport line in multiple same-turn passes', () => {
+  it('runs a complete transport line in multiple same-tick passes', () => {
     const state = { x: 0 };
     const result = resolveTransportRun(state, {
       maxPasses: 4,

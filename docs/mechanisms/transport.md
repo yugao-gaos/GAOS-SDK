@@ -1,7 +1,7 @@
 # Directed transport and interlocks
 
 The transport module covers four related operations: creating movement intents
-from directed cells, repeating same-turn movement passes, propagating sources
+from directed cells, repeating same-tick movement passes, propagating sources
 across connected components, and stabilizing movement with linked state.
 
 ## Directed movement proposals
@@ -45,7 +45,7 @@ const run = resolveTransportRun(world, {
 `passes` counts passes that moved at least one occupant; the final zero-move
 probe is not counted. `moves` is the sum returned by all moving passes.
 `completed` is false when the last permitted pass still moved something. The
-non-negative pass bound is a safety limit, not conveyor speed or turn balance.
+non-negative pass bound is a safety limit, not conveyor speed or tick balance.
 
 ## Linked components
 

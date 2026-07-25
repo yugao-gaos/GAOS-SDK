@@ -27,9 +27,9 @@ export interface SettlementContext<TState, TJob extends SettlementJob> {
   readonly state: TState;
   readonly step: number;
   readonly wave: number;
-  /** Schedule a consequence for the next wave of this turn. */
+  /** Schedule a consequence for the next resolution wave of this tick. */
   enqueue(job: TJob): boolean;
-  /** Return work to the caller without executing it during this turn. */
+  /** Return work to the caller without executing it during this tick. */
   defer(job: TJob): void;
 }
 
@@ -48,11 +48,11 @@ export interface SettlementResult<TState, TJob extends SettlementJob> {
   steps: number;
   waves: number;
   trace: Array<SettlementTraceEntry<TJob>>;
-  /** Jobs deliberately left for a later turn. */
+  /** Jobs deliberately left for a later tick. */
   deferred: TJob[];
 }
 
-/** Raised when same-turn work does not reach quiescence within its guard. */
+/** Raised when same-tick resolution does not reach quiescence within its guard. */
 export class SettlementLimitError<TJob extends SettlementJob = SettlementJob> extends Error {
   readonly maxSteps: number;
   readonly nextJob: TJob;
@@ -89,7 +89,7 @@ const compareQueued = <TJob extends SettlementJob>(
 );
 
 /**
- * Resolve product-defined consequences in deterministic same-turn waves.
+ * Resolve product-defined consequences in deterministic resolution waves.
  *
  * Every job enqueued by a resolver runs no earlier than the following wave.
  * The caller owns state mutation and rule semantics; this function owns work

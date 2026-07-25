@@ -1,18 +1,19 @@
 # Agentic play
 
-The SDK is AI-native because agents can discover and operate a deterministic
+The SDK is agent-playable because agents can discover and operate a deterministic
 environment without a renderer, a particular model provider, or product-owned
 control code.
 
 ## Environment contract
 
-`AgentEnvironment` wraps any injected `TurnReducer`. One turn contains:
+`AgentEnvironment` wraps any injected `TickReducer`. Each `step()` advances
+exactly one tick and returns:
 
 - the complete product observation, or the configured seat's redacted view;
 - action definitions and fully parameterized concrete legal actions;
 - the last reward and cumulative episode metrics;
 - separate `terminated` and `truncated` flags;
-- the seed, steps, score, budget usage, and termination reason.
+- the seed, tick count, score, budget usage, and termination reason.
 
 ```ts
 import { AgentEnvironment } from '@yugao-gaos/turn-based-grid-sdk/engine';
@@ -22,14 +23,13 @@ const env = new AgentEnvironment({
   level,
   seed: 42,
   seat: 'north',
-  maxSteps: 1_000,
-  frameSkip: 4,
+  maxTicks: 1_000,
 });
 
-let turn = env.reset();
-while (!turn.done) {
-  const action = await chooseAction(turn.observation, turn.legalActions);
-  turn = env.step(action);
+let tick = env.reset();
+while (!tick.done) {
+  const action = await chooseAction(tick.observation, tick.legalActions);
+  tick = env.step(action);
 }
 
 const transcript = env.transcript();
@@ -43,25 +43,23 @@ uses the full view to enumerate a seat's legal actions.
 Levels and observations are snapshotted with `structuredClone` so later caller
 mutations cannot rewrite a transcript. Products with non-cloneable values can
 supply `snapshotLevel` and `snapshotObservation` in the environment options.
-Transcript version 1.2 includes the seat, configured frame skip, the redacted
-initial observation, and the redacted observation following every applied
-tick. By default the chosen action repeats between decision points. Supply
-`continueAction` for a product-defined continuation action; repetition stops
-early when that action becomes illegal or the episode ends. Replay consumes
-the recorded per-tick actions once and does not apply frame skip a second time.
+Transcript version 1.3 includes the seat, the redacted initial observation,
+and the redacted observation following every applied tick. A product that
+wants a lower agent decision cadence holds or repeats actions in its own
+policy loop; the SDK does not define that product behavior.
 
 Products may inject reward shaping and custom action enumeration. The default
 reward is terminal stars, or `1` for a win without stars. For a decided
 multi-seat outcome it uses that seat's score when present, otherwise `1` for
 rank one and `0` for another rank. Reducer failure or a decided outcome is a
-normal termination; reaching `maxSteps` is a safety truncation.
+normal termination; reaching `maxTicks` is a safety truncation.
 
 ## Multi-agent episodes
 
 `MultiAgentEnvironment` runs independent seat policies against one reducer.
 Sequential participation applies the active seat's non-wait action and gives
 other seats the configured legal `wait`. Simultaneous participation collects
-one intent per seat and calls `reducer.applyIntents` exactly once with canonical
+one intent per seat and calls `reducer.advance` exactly once with canonical
 lexical seat ordering.
 
 Each policy receives only its seat's `viewFor` observation and concrete legal
@@ -75,13 +73,13 @@ hidden state.
 
 `runAgentEpisode` accepts synchronous or asynchronous policies.
 `evaluateAgentEpisodes` runs a deterministic case list and reports wins,
-failures, truncations, mean reward, and mean steps.
+failures, truncations, mean reward, and mean ticks.
 
 ```ts
 const result = await evaluateAgentEpisodes(
   cases,
   ({ level, seed }) => new AgentEnvironment({ reducer, level, seed }),
-  (turn) => myAgent(turn.observation, turn.legalActions),
+  (tick) => myAgent(tick.observation, tick.legalActions),
 );
 ```
 
@@ -132,7 +130,7 @@ Built-in keyed providers are Anthropic, OpenAI, xAI, and OpenRouter. The
 OpenAI-compatible driver also accepts a custom base URL and headers. Provider
 registries can add or replace definitions without changing the episode loop.
 Provider calls use `fetch`, so tests can inject an offline implementation.
-Completed conversation history is bounded (eight turns by default), and HTTP
+Completed conversation history is bounded (eight exchanges by default), and HTTP
 429/5xx responses receive two abortable exponential-backoff retries. Both
 limits and the delay implementation are configurable. Model requests and API
 key checks have a 30-second deadline by default; `timeoutMs: 0` disables it.
@@ -255,8 +253,9 @@ export function createEnvironment({ seed }) {
 
 ## Python
 
-`ArenaEnv` is Gym-style and now exposes `action_definitions` plus
-`concrete_actions`. It accepts a concrete action object directly:
+`ArenaEnv` exposes a Gymnasium-compatible environment API without requiring
+Gymnasium at runtime. It includes `action_definitions` and
+`concrete_actions`, and accepts a concrete action object directly:
 
 ```python
 from agilabs_arena import ArenaEnv, run_agent_episode
@@ -269,7 +268,10 @@ result = run_agent_episode(
 ```
 
 `run_agent_episode` and `evaluate_agent_episodes` accept any duck-typed
-Gym-style environment, not only `ArenaEnv`.
+environment with Gymnasium-compatible `reset()` and `step()` methods, not only
+`ArenaEnv`. Python does not include the local TypeScript mechanism engine,
+reducer runtime, model drivers, or CLI launchers; see the
+[language capability matrix](/quickstart#choose-your-language).
 
 ## Evaluation actions versus semantic actions
 

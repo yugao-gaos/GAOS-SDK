@@ -1,12 +1,12 @@
-# Deterministic turn settlement
+# Deterministic tick settlement
 
-A submitted turn may contain many resolution steps. The SDK calls those steps
-**waves**: wave 0 contains the submitted or derived intents, and consequences
-produced by one wave are eligible to run in a later wave of the same turn.
-Settlement ends when the same-turn worklist is empty.
+A tick may contain many resolution steps. The existing settlement worklist
+groups those steps into deterministic waves: consequences produced during one
+wave become eligible in a later wave of the same tick. Settlement ends when
+the worklist is empty.
 
 This is a cascade, not a loop that blindly reruns the complete game reducer.
-Each product rule decides whether a consequence belongs to the current turn or
+Each product rule decides whether a consequence belongs to the current tick or
 must be deferred to the next one.
 
 ```text
@@ -21,7 +21,7 @@ wave 0 -> wave 1 -> wave 2 -> ... -> quiescence
             |          +-- collision -> landing -> arrival
             +------------- movement -> switch -> environment update
        |
-       +-- explicitly deferred work ----------------> next turn
+       +-- explicitly deferred work ----------------> next tick
 ```
 
 ## Job contract
@@ -89,9 +89,9 @@ state together with `steps`, `waves`, `trace`, and `deferred` jobs.
 `runSettlementCascade` owns product-neutral execution behavior:
 
 - deterministic ordering within every wave;
-- same-turn consequence scheduling;
-- pending-work coalescing and once-per-turn identities;
-- explicit next-turn deferral;
+- same-tick consequence scheduling;
+- pending-work coalescing and once-per-tick identities;
+- explicit next-tick deferral;
 - a maximum-step convergence guard; and
 - a causal trace linking each resolved job to the step that scheduled it.
 
@@ -101,7 +101,7 @@ The product owns rule policy and world meaning:
 - how a job reads or mutates product state;
 - the job priority and stable identity;
 - whether duplicate work repeats, coalesces while pending, or runs once;
-- which consequences are same-turn and which are next-turn; and
+- which consequences are same-tick and which are next-tick; and
 - snapshot qualification and commit rules for simultaneous effects.
 
 The kernel does not infer dependencies from state mutations. A rule explicitly
@@ -133,7 +133,7 @@ The duplicate policies differ at scheduling time:
 `context.enqueue(job)` returns whether the job was accepted, allowing product
 traces or counters to distinguish a new consequence from a suppressed duplicate.
 
-Work that must not resolve in the current turn uses `defer`. Deferred jobs are
+Work that must not resolve in the current tick uses `defer`. Deferred jobs are
 returned to the caller and are never executed by that settlement call.
 
 ## Required product invariants
@@ -141,14 +141,14 @@ returned to the caller and are never executed by that settlement call.
 A product integration should characterize these boundaries before replacing an
 existing loop:
 
-1. Which consequences can create more same-turn work?
+1. Which consequences can create more same-tick work?
 2. Which state is frozen for simultaneous qualification?
 3. Which mutations are committed only after qualification?
 4. Which jobs may run more than once, and what proves convergence?
-5. Which landings or updates deliberately wait for the next turn?
+5. Which landings or updates deliberately wait for the next tick?
 6. What deterministic key orders otherwise independent work?
 
-The maximum-step limit is a safety guard, not a game rule. A normal turn should
+The maximum-step limit is a safety guard, not a game rule. A normal tick should
 reach quiescence before the limit; exceeding it reports a cycle or a missing
 convergence condition.
 
@@ -167,31 +167,31 @@ explanations without exposing animation timing.
 
 Deferred jobs are returned in defer-call order and never enter duplicate-policy
 tracking for future settlement calls. The product decides how to serialize,
-revalidate, and seed them on the next turn.
+revalidate, and seed them on the next tick.
 
 ## Composition guidance
 
 - Qualify simultaneous actions from one snapshot before seeding jobs.
 - Commit atomic movement before enqueuing [arrival rules](/mechanisms/arrivals).
 - Use `coalesce` for dirty resources that may change again after resolution.
-- Use `once` for identities such as a one-shot reaction or per-turn trigger.
+- Use `once` for identities such as a one-shot reaction or per-tick trigger.
 - Use `repeat` only when every occurrence is meaningful and convergence is
   independently bounded.
-- Prefer `defer` when a rule is intentionally next-turn behavior, rather than
-  encoding turn delay as an artificial same-turn wave.
+- Prefer `defer` when a rule is intentionally next-tick behavior, rather than
+  encoding tick delay as an artificial same-tick wave.
 
 ## Zonoid example
 
-Zonoid uses settlement as the universal reducer’s same-turn worklist. A
+Zonoid uses settlement as the universal reducer’s same-tick worklist. A
 committed move can enqueue arrivals, a switch can update a gate, a belt can
 create another movement pass, and a laser or pickup can enqueue damage or
 resource work. The platform supplies those jobs and policies; the SDK keeps
 ordering, deduplication, and the authored safety bound deterministic.
 
 <figure class="mechanism-video">
-  <video controls muted playsinline preload="metadata" poster="/mechanisms/settlement-poster.jpg" aria-label="Zonoid complex deterministic turn-settlement showcase recording">
+  <video controls muted playsinline preload="metadata" poster="/mechanisms/settlement-poster.jpg" aria-label="Zonoid complex deterministic tick-settlement showcase recording">
     <source src="/mechanisms/settlement.mp4" type="video/mp4">
     Your browser does not support embedded video.
   </video>
-  <figcaption>One final turn settles allied NPC movement, a Relic projectile, three linked blasts, player damage, rival defeat, the gate and door update, and victory before the worklist reaches quiescence.</figcaption>
+  <figcaption>One final tick settles allied NPC movement, a Relic projectile, three linked blasts, player damage, rival defeat, the gate and door update, and victory before the worklist reaches quiescence.</figcaption>
 </figure>

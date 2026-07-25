@@ -41,7 +41,7 @@ if (next.changed) {
 
 ## Settlement integration
 
-Gate activation often participates in a same-turn cycle: movement presses a
+Gate activation often participates in a same-tick cycle: movement presses a
 switch, linked state updates, a gate opens, transport advances, then the switch
 changes again. Run transitions as explicit jobs or inside a bounded
 [transport interlock](transport.md), not through an unbounded global update loop.

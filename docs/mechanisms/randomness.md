@@ -10,7 +10,7 @@ seed is normalized to an unsigned 32-bit value. Calls advance private stream
 state, so call order is part of the result:
 
 ```ts
-const random = mulberry32(turnSeed);
+const random = mulberry32(tickSeed);
 const first = random();
 const second = random();
 ```
@@ -25,7 +25,7 @@ shift every later result.
 the seed, and takes the first Mulberry32 draw:
 
 ```ts
-const hitRoll = roll(turnSeed, `attack:${attackerId}:${targetId}`);
+const hitRoll = roll(tickSeed, `attack:${attackerId}:${targetId}`);
 ```
 
 The same seed and key always return the same value, independent of calls for

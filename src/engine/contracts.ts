@@ -70,7 +70,13 @@ export type Outcome =
     reason?: string;
   };
 
-export interface TurnView<
+/**
+ * Observation produced after one deterministic simulation tick.
+ *
+ * A product may map one player turn to one tick. A real-time product may
+ * advance the same contract at a fixed cadence such as 30 ticks/s.
+ */
+export interface TickView<
   TGrid = GridTargetingView,
   TZones = ZoneViews,
 > {
@@ -102,19 +108,73 @@ export interface TurnView<
   targetChoices?: Readonly<Record<string, TargetChoiceView>>;
 }
 
-/** Deterministic game adapter consumed by reusable engine algorithms. */
-export interface TurnReducer<
+interface ReducerBase<
   TLevel,
   TState,
-  TView extends TurnView<unknown, unknown> = TurnView,
+  TView extends TickView<unknown, unknown> = TickView,
 > {
   init(level: TLevel, seed: number): TState;
-  apply(state: TState, action: SubmittedAction): TState;
-  /** Optional atomic batch resolver for simultaneous participation. */
-  applyIntents?(state: TState, actions: readonly SubmittedAction[]): TState;
   view(state: TState): TView;
   /** Optional per-seat observation. Absent means perfect information. */
   viewFor?(state: TState, seat: string): TView;
+}
+
+/**
+ * Canonical deterministic game adapter.
+ *
+ * Every call advances exactly one simulation tick. `inputs` may be empty,
+ * contain one sequential input, or contain a canonically ordered simultaneous
+ * batch. Autonomous systems therefore advance without invented wait actions.
+ */
+export interface TickReducer<
+  TLevel,
+  TState,
+  TView extends TickView<unknown, unknown> = TickView,
+> extends ReducerBase<TLevel, TState, TView> {
+  advance(state: TState, inputs: readonly SubmittedAction[]): TState;
+}
+
+/** Compatibility shape for action-at-a-time reducers from SDK 0.17 and older. */
+export interface ActionReducer<
+  TLevel,
+  TState,
+  TView extends TickView<unknown, unknown> = TickView,
+> extends ReducerBase<TLevel, TState, TView> {
+  apply(state: TState, action: SubmittedAction): TState;
+  /** Optional atomic batch resolver for simultaneous participation. */
+  applyIntents?(state: TState, actions: readonly SubmittedAction[]): TState;
+}
+
+/** Reducer accepted by SDK algorithms during the 0.x compatibility period. */
+export type Reducer<
+  TLevel,
+  TState,
+  TView extends TickView<unknown, unknown> = TickView,
+> =
+  | TickReducer<TLevel, TState, TView>
+  | ActionReducer<TLevel, TState, TView>;
+
+/** Advance one tick through the canonical or compatibility reducer shape. */
+export function advanceTick<
+  TLevel,
+  TState,
+  TView extends TickView<unknown, unknown>,
+>(
+  reducer: Reducer<TLevel, TState, TView>,
+  state: TState,
+  inputs: readonly SubmittedAction[],
+): TState {
+  if ('advance' in reducer) return reducer.advance(state, inputs);
+  if (inputs.length === 1) return reducer.apply(state, inputs[0]!);
+  if (inputs.length > 1 && reducer.applyIntents) {
+    return reducer.applyIntents(state, inputs);
+  }
+  if (inputs.length === 0) {
+    throw new TypeError(
+      'input-free ticks require TickReducer.advance; migrate this compatibility reducer',
+    );
+  }
+  throw new TypeError('multi-input ticks require TickReducer.advance or reducer.applyIntents');
 }
 
 /** @deprecated Renamed to `ActionDefinition`; this alias will be removed in v1.0. */
@@ -122,20 +182,3 @@ export type GridActionDefinition = ActionDefinition;
 
 /** @deprecated Renamed to `SubmittedAction`; this alias will be removed in v1.0. */
 export type GridSubmittedAction = SubmittedAction;
-
-/**
- * Legacy v0.12 observation shape with targeting fields inside `hud`.
- *
- * @deprecated Renamed to `TurnView`; move spatial targeting to `grid`. This
- * alias and its flat HUD compatibility fields will be removed in v1.0.
- */
-export interface GridTurnView extends TurnView<unknown, unknown> {
-  hud: TurnView['hud'] & GridViewNamespace;
-}
-
-/** @deprecated Renamed to `TurnReducer`; this alias will be removed in v1.0. */
-export type GridReducer<
-  TLevel,
-  TState,
-  TView extends GridTurnView = GridTurnView,
-> = TurnReducer<TLevel, TState, TView>;

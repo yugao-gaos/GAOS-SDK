@@ -69,7 +69,7 @@ commitPushChain(steps, {
 This prevents overwrites while preserving causal near-to-far feedback. Arrival
 callbacks should normally enqueue work rather than immediately start a nested
 resolution loop; see [arrival rules](arrivals.md) and
-[turn settlement](/settlement).
+[tick settlement](/settlement).
 
 ## Product responsibilities
 

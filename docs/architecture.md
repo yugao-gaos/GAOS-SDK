@@ -13,12 +13,12 @@ integrating game or benchmark.
 
 | Entry point | Purpose | Runtime assumptions |
 | --- | --- | --- |
-| package root | GAOS-hosted Arena client and Arena observation types | `fetch` |
-| `./protocol` | Generic turn envelopes, cursors, idempotency, simultaneous intents, game registry | JSON-serializable values |
+| package root | hosted Arena adapter and Arena observation types | `fetch` |
+| `./protocol` | Tick-oriented adapters over the published v1 tick envelopes, cursors, idempotency, simultaneous intents, game registry | JSON-serializable values |
 | `./engine` | Game mechanisms, layouts, settlement, solver, replay, scoring, agent environment and tools | Injected world/reducer policy |
 | `./agent` | Provider-neutral driver contract and keyed HTTP model drivers | `fetch` and a provider key |
 | `./agent-cli` | CLI discovery, launch recipes, MCP configuration, subprocess lifecycle | Node.js |
-| Python distribution | Hosted client, Gym-style environment, agent evaluation helpers | Python 3.10+, standard library only at runtime |
+| Python distribution | hosted client, Gymnasium-compatible environment API, evaluation helpers and portable replay utilities | Python 3.10+, standard library only at runtime |
 
 Choose the narrowest entry point your integration needs. A deterministic game
 engine should not need the hosted Arena adapter; an MCP server should not need
@@ -27,18 +27,26 @@ to depend on a model provider.
 [Browse the capability map](/capabilities) for supported game shapes, or use
 the mechanism matrix below to locate the relevant engine module.
 
+The TypeScript and Python distributions are complementary, not equivalent.
+TypeScript owns the local mechanism engine, reducers, solvers, agent
+environments, replay re-simulation, model drivers, and CLI integrations.
+Python owns the hosted client, a Gymnasium-compatible API without a Gymnasium
+runtime dependency, duck-typed evaluation helpers, and portable replay
+parsing, validation, and serialization. See the
+[language capability matrix](/quickstart#choose-your-language).
+
 ## Mechanism map
 
 | Concern | SDK mechanism | Product supplies |
 | --- | --- | --- |
 | Locations and layouts | stable container addressing; square, hex, and graph topology | boards, adjacency, terrain and container ids |
-| Turn order and lockstep | seat rotation, participation/outcome shapes, canonical input ordering and digests | phases, response policy, snapshots and serialization |
+| Tick order and lockstep | seat rotation, participation/outcome shapes, canonical input ordering and digests | phases, response policy, snapshots and serialization |
 | Information partitions | per-seat reducer views, zone/fog redaction, team sets and leak checks | secret state, visibility rules, memory and spectator delivery |
 | Zones and card play | immutable collection transfers, deals, keyword layers, response priority, targets, durations, phases and validation | card identity, rules, costs, legal responses and effects |
 | Portals | bounded heterogeneous transit, groups, capacity arbitration and atomic commit order | activation, placement, transformations, occupancy and arrival effects |
 | Patterns | maximal run and motif recognition over arbitrary layouts | token meaning, overlap policy, cascades and scoring |
 | Movement | simultaneous destinations, footprints, collisions, rotations, swaps, priority | terrain and static-blocker policy |
-| Turn consequences | ordered worklist, waves, coalescing, once-only work, deferral, convergence guard, causal trace | job meaning, mutations, stable keys and priorities |
+| Tick consequences | ordered worklist, waves, coalescing, once-only work, deferral, convergence guard, causal trace | job meaning, mutations, stable keys and priorities |
 | Propagation | breadth-first once-per-identity chain reactions | neighbors and effects |
 | Projectiles and pushes | path advancement, flight passes, atomic push planning and commit order | collision, damage, landing and visuals |
 | Gates and triggers | latch/automatic transitions, authored-order one-shot triggering | sources, conditions, effects and persistence |
@@ -47,7 +55,7 @@ the mechanism matrix below to locate the relevant engine module.
 | Decisions | generic behavior-tree traversal and shortest-path search | conditions, leaf actions and traversability |
 | Outcomes | star calculation and budget-failure precedence | thresholds and budgets |
 | Verification | seeded randomness, solving, portable JSONL envelopes, multi-level transcript re-simulation | reducer registry, levels and action schema |
-| Agent episodes | seat-redacted single- or multi-agent turns, frame skip, rewards and versioned transcripts | policies, wait action, reward semantics and hosted execution |
+| Agent episodes | seat-redacted single- or multi-agent ticks, rewards and versioned transcripts | policy decision cadence, wait action, reward semantics and hosted execution |
 
 Read the [mechanism reference](/mechanisms/) for detailed contracts, ordering,
 examples, edge cases, and product responsibilities.
@@ -57,7 +65,7 @@ examples, edge cases, and product responsibilities.
 ```text
                   product content and policy
                             |
-                     TurnReducer adapter
+                     TickReducer adapter
                             |
           +-----------------+-----------------+
           |                 |                 |
@@ -77,7 +85,7 @@ and ordinary gameplay from drifting into separate rule implementations.
 
 - deterministic algorithms and ordering;
 - reusable mechanism state transitions;
-- generic turn and agent lifecycle contracts;
+- generic tick and agent lifecycle contracts;
 - replay, solver, scoring behavior, tools and integration adapters; and
 - provider and CLI extension points.
 
@@ -95,7 +103,7 @@ that cell is a wall, a shield, a character, or a visual-only effect. The SDK
 may settle a trigger in authored order. The product decides what the condition
 means and which mutation follows.
 
-## Why this is AI-native
+## Why this is agent-playable
 
 Agent support is part of the engine contract, not a UI automation layer:
 
@@ -103,8 +111,9 @@ Agent support is part of the engine contract, not a UI automation layer:
 2. The environment exposes complete, concrete legal actions.
 3. Seat-scoped agents receive only their redacted observation and legal actions.
 4. Illegal model output is rejected before reaching the reducer.
-5. Every decision produces a versioned `gaos.replay` artifact suitable for
-   cross-platform replay.
+5. Every decision can be recorded in a versioned environment transcript.
+   Products can package compatible runs as `gaos.replay` artifacts with pinned
+   game and adapter metadata for cross-platform exchange.
 6. The same cases can be evaluated across local policies, keyed models, or
    MCP-capable CLIs.
 

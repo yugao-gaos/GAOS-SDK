@@ -1,7 +1,5 @@
 export type Duration =
-  | { kind: 'until-turn-end' }
   | { kind: 'until-phase-end'; phaseId?: string }
-  | { kind: 'turns'; remaining: number }
   | { kind: 'rounds'; remaining: number }
   | { kind: 'counters'; remaining: number };
 
@@ -15,7 +13,6 @@ export interface TimedStatus<TValue = unknown> {
 
 export type DurationBoundary =
   | { kind: 'phase-end'; phaseId: string }
-  | { kind: 'turn-end' }
   | { kind: 'round-end' };
 
 export interface DurationAdvanceResult<TValue> {
@@ -32,9 +29,7 @@ function validateStatus<TValue>(status: TimedStatus<TValue>): void {
   }
   const duration = status.duration;
   if (!duration || ![
-    'until-turn-end',
     'until-phase-end',
-    'turns',
     'rounds',
     'counters',
   ].includes(duration.kind)) {
@@ -67,7 +62,7 @@ function compareStatuses<TValue>(
 }
 
 /**
- * Advance scheduled durations at one explicit phase/turn/round boundary.
+ * Advance scheduled durations at one explicit product boundary.
  * Simultaneous expiries are returned in authored order.
  */
 export function advanceDurations<TValue>(
@@ -75,7 +70,7 @@ export function advanceDurations<TValue>(
   boundary: DurationBoundary,
 ): DurationAdvanceResult<TValue> {
   if (!Array.isArray(statuses)) throw new TypeError('timed statuses must be an array');
-  if (!boundary || !['phase-end', 'turn-end', 'round-end'].includes(boundary.kind)) {
+  if (!boundary || !['phase-end', 'round-end'].includes(boundary.kind)) {
     throw new TypeError('duration boundary is invalid');
   }
   if (boundary.kind === 'phase-end'
@@ -89,14 +84,9 @@ export function advanceDurations<TValue>(
     const status = copyStatus<TValue>(source);
     const duration = status.duration;
     let shouldExpire = false;
-    if (duration.kind === 'until-turn-end' && boundary.kind === 'turn-end') {
-      shouldExpire = true;
-    } else if (duration.kind === 'until-phase-end' && boundary.kind === 'phase-end'
+    if (duration.kind === 'until-phase-end' && boundary.kind === 'phase-end'
       && (duration.phaseId === undefined || duration.phaseId === boundary.phaseId)) {
       shouldExpire = true;
-    } else if (duration.kind === 'turns' && boundary.kind === 'turn-end') {
-      duration.remaining--;
-      shouldExpire = duration.remaining === 0;
     } else if (duration.kind === 'rounds' && boundary.kind === 'round-end') {
       duration.remaining--;
       shouldExpire = duration.remaining === 0;

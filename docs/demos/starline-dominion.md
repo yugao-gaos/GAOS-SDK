@@ -14,7 +14,7 @@ const mechanisms = [
   { title: 'Transport and interlocks', link: '/mechanisms/transport', description: 'Move fleets along declared connections with deterministic travel duration.' },
   { title: 'Arrival rules', link: '/mechanisms/arrivals', description: 'Settle reinforcement, combat, capture, and neutralization when fleets arrive.' },
   { title: 'Resource transactions', link: '/mechanisms/resources', description: 'Produce and spend fleet strength on owned planets at fixed ticks.' },
-  { title: 'High-frequency turns', link: '/high-frequency', description: 'Run production, fleets, and both commanders through one fixed-tick simulation.' },
+  { title: 'Fixed-rate ticks', link: '/high-frequency', description: 'Run production, fleets, and both commanders through one fixed-tick simulation.' },
 ]
 </script>
 

@@ -3,6 +3,11 @@
 Status: implemented guidance and accommodations · Informative appendix to the
 batch except for the marked contract additions.
 
+::: warning Superseded in v0.18
+High-frequency execution now uses ticks directly. Agent frame skipping and
+turn scheduling are product policy, not SDK capabilities.
+:::
+
 ## A.1 Genre coverage after the batch
 
 | Genre | Verdict | Notes |

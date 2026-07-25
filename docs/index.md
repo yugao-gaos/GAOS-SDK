@@ -15,28 +15,12 @@ hero:
       text: What's new in v0.17
       link: /version-history
 
-features:
-  - title: For researchers
-    details: Start interactive benchmarks with structured observations, concrete legal actions, deterministic execution, agent environments, and replay verification already connected.
-  - title: For game developers
-    details: Build with reusable mechanisms and keep the same game core ready for human clients, AI opponents, autonomous play, solvers, and verified competition.
-  - title: One shared workflow
-    details: The SDK owns reusable infrastructure. Each product retains its content, capability claims, scoring meaning, held-out design, hosting, and presentation.
 ---
-
-**An open-source SDK that bridges game development and agent evaluation.**
 
 ## Build the game and the agent surface together
 
-Building an interactive benchmark normally requires a game runtime, structured
-observations, legal-action discovery, agent execution, scoring, and replay
-infrastructure. Adding agent play to an existing game later requires much of
-the same work.
-
-GAOS provides one starting point for both worlds. Researchers can focus on what
-their benchmark measures. Game developers can build human-facing games without
-closing the door on AI opponents, autonomous agents, verified leaderboards, or
-research use later.
+GAOS gives researchers and game developers one deterministic core for human
+play, agent play, and replayable evidence.
 
 <div class="ownership-grid">
   <div class="ownership-card">
@@ -67,27 +51,11 @@ Game or benchmark design
 
 [Read the mission and benchmark thesis →](/mission)
 
+[Choose TypeScript or Python →](/quickstart#choose-your-language)
+
 [Join the GAOS Discord community →](https://discord.gg/vdvUgcqPU)
 
-## One reducer, every way to play
-
-The same injected deterministic reducer can power human-facing local play,
-hosted sessions, solvers, replay checks, model agents, CLI agents, and
-evaluation runs. There is no second, approximate rules implementation just for
-automation.
-
-```text
-Product reducer + authored content
-              |
-              v
-   GAOS deterministic engine
-       /       |        \
-  renderer   solver   AgentEnvironment
-                         |
-                 tools / drivers / CLIs
-```
-
-## One agent turn
+## One agent tick
 
 | State | Legal actions | Agent chooses | Deterministic result |
 |---|---|---|---|
@@ -124,7 +92,7 @@ metrics.
   <a class="mechanism-card" href="./high-frequency">
     <span class="mechanism-kicker">Fast deterministic play</span>
     <h3>Lockstep and rollback</h3>
-    <p>Canonical tick inputs, sparse transcripts, resimulation, state digests, frame skip, and authoritative hidden-information deployment.</p>
+    <p>Canonical tick inputs, sparse transcripts, resimulation, state digests, and authoritative hidden-information deployment.</p>
   </a>
   <a class="mechanism-card" href="./agentic-play">
     <span class="mechanism-kicker">Model vs. model</span>

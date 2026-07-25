@@ -46,14 +46,14 @@ within that persistence scope.
 ## Product responsibilities
 
 Conditions, effects, trigger reset policy, scopes, spawning, dialogue, rewards,
-and visual events remain product-owned. When effects cause more same-turn work,
-enqueue it through [turn settlement](/settlement) instead of recursively
+and visual events remain product-owned. When effects cause more same-tick work,
+enqueue it through [tick settlement](/settlement) instead of recursively
 calling the entire trigger pass.
 
 ## Zonoid example
 
 Zonoid levels can author one-shot board events such as “switch pressed,” “plug
-powered,” “agent reached this cell,” “evidence collected,” or “turn reached.”
+powered,” “agent reached this cell,” “evidence collected,” or “tick reached.”
 The platform evaluates those conditions and applies feature-cell rewrites such
 as opening a wall or unlocking an exit; the SDK latches the event before its
 effects, so replay and nested settlement cannot fire it twice.

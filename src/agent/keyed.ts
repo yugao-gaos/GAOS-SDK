@@ -27,7 +27,7 @@ export interface KeyedAgentDriverOptions {
   maxTokens?: number;
   headers?: Readonly<Record<string, string>>;
   systemPrompt?: string;
-  /** Number of completed user/assistant turns retained. Defaults to 8. */
+  /** Number of completed user/assistant exchanges retained. Defaults to 8. */
   maxHistoryTurns?: number;
   /** Maximum UTF-8 bytes for system prompt, retained history, and current context. Defaults to 256 KiB. */
   maxContextBytes?: number;
@@ -104,7 +104,7 @@ export class KeyedProviderRegistry {
 }
 
 const DEFAULT_SYSTEM_PROMPT = [
-  'You are controlling a turn-based grid environment.',
+  'You are controlling a deterministic tick-based game environment.',
   'Choose exactly one entry from legalActions or systemActions.',
   'Return only JSON with this shape:',
   '{"reasoning":"brief explanation","action":{"id":"action id","x":0,"y":0,"index":0,"boardId":"board","seat":"seat","targets":[{"container":"board","coord":[1,2]}]},"message":"optional"}',

@@ -21,7 +21,7 @@ const mover = (id: string, from: Cell, to: Cell, priority = 1): Mover => ({
 const at = (result: Map<string, Cell>, id: string): Cell => result.get(id)!;
 
 describe('simultaneous movement', () => {
-  it('allows rotations and movement into cells vacated in the same turn', () => {
+  it('allows rotations and movement into cells vacated in the same tick', () => {
     const result = resolveMoves([
       mover('a', [1, 1], [2, 1]),
       mover('b', [2, 1], [2, 2]),

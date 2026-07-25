@@ -6,7 +6,7 @@ import {
   runAgentDriverEpisode,
 } from '../agent/index.js';
 import type { AgentEnvironment } from '../engine/agent-environment.js';
-import type { TurnView } from '../engine/contracts.js';
+import type { TickView } from '../engine/contracts.js';
 import { createDefaultCliAgentRegistry } from './specs.js';
 import { inspectCliAgent } from './status.js';
 import { spawnCliAgent } from './spawn.js';
@@ -23,7 +23,7 @@ interface ParsedArguments {
   options: Map<string, string>;
 }
 
-const HELP = `gaos-agent — run keyed or installed CLI agents against turn-based environments
+const HELP = `gaos-agent — run keyed or installed CLI agents against tick-based game environments
 
 Commands:
   drivers
@@ -170,8 +170,8 @@ async function spawnAgent(args: ParsedArguments, io: AgentCliIO): Promise<number
 
 type EnvironmentFactory = (options: {
   seed?: number;
-}) => AgentEnvironment<unknown, unknown, TurnView<unknown, unknown>>
-  | Promise<AgentEnvironment<unknown, unknown, TurnView<unknown, unknown>>>;
+}) => AgentEnvironment<unknown, unknown, TickView<unknown, unknown>>
+  | Promise<AgentEnvironment<unknown, unknown, TickView<unknown, unknown>>>;
 
 async function runKeyed(args: ParsedArguments, io: AgentCliIO): Promise<number> {
   assertOptions(args.options, ['module', 'model', 'seed', 'prompt']);
@@ -190,7 +190,7 @@ async function runKeyed(args: ParsedArguments, io: AgentCliIO): Promise<number> 
   if (!environment || typeof environment.reset !== 'function' || typeof environment.step !== 'function') {
     throw new TypeError('createEnvironment did not return an AgentEnvironment-compatible object');
   }
-  const driver = createKeyedAgentDriver<TurnView<unknown, unknown>>(provider.id, {
+  const driver = createKeyedAgentDriver<TickView<unknown, unknown>>(provider.id, {
     apiKey,
     model: args.options.get('model'),
   });
@@ -199,7 +199,7 @@ async function runKeyed(args: ParsedArguments, io: AgentCliIO): Promise<number> 
     onDecision: (decision) => io.stderr(`${JSON.stringify(decision.action)}\n`),
   });
   io.stdout(`${JSON.stringify(result.transcript, null, 2)}\n`);
-  return result.finalTurn.info.terminationReason === 'won' ? 0 : 1;
+  return result.finalStep.info.terminationReason === 'won' ? 0 : 1;
 }
 
 /** Programmatic entry point used by the `gaos-agent` executable. */

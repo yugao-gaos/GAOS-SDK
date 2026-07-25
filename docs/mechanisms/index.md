@@ -6,7 +6,7 @@ mechanism family: the state it expects, the ordering it guarantees, the policy
 the product must inject, and the edge cases an integration should test.
 
 No board is required. Card-only and hidden-role games can use zones,
-information partitions, turn order, response windows, agents, and replay
+information partitions, tick order, response windows, agents, and replay
 without importing geometry. Spatial games can choose square, axial-hex, or
 graph layouts, and hybrid games can connect boards and zones through portals.
 
@@ -33,7 +33,7 @@ submitted action
           ├─ projectiles, rays, and chain reactions
           └─ linked-state interlocks
                  │
-                 └─ stable turn view, score, transcript
+                 └─ stable tick view, score, transcript
 ```
 
 The SDK does not prescribe that exact pipeline. A product composes only the
@@ -44,16 +44,16 @@ the [settlement kernel](/settlement).
 
 | Family | What the SDK guarantees |
 |---|---|
-| [Turn model](grid-model.md) | Neutral action shapes, observations, and the reducer boundary |
+| [Tick model](grid-model.md) | Neutral action shapes, observations, and the reducer boundary |
 | [Locations and layouts](locations-and-layouts.md) | Cross-container addressing, square/hex/graph layouts, and keyed movement |
-| [Turn order and lockstep](turn-order-and-lockstep.md) | Sequential seat rotation, participation, outcomes, canonical tick inputs, and state digests |
+| [Ticks and lockstep](ticks-and-lockstep.md) | Participation, outcomes, canonical tick inputs, and state digests |
 | [Information partitions](information-partitions.md) | Per-seat views, independent identity/order visibility, board fog, teams, and leak tests |
 | [Zones and card play](zones-and-card-play.md) | Atomic collection transfers, dealing, keywords, priority, targets, durations, phases, and deck validation |
 | [Portals](portals.md) | Bounded atomic transit across heterogeneous boards and zones |
 | [Pattern matching](patterns.md) | Deterministic maximal runs and product-defined lattice motifs |
 | [Simultaneous movement](movement.md) | Collision, priority, footprints, chains, rotations, and swaps |
 | [Geometry and FOV](geometry.md) | Layout paths, nearest reachable cells, lines, sight, and fields |
-| [Turn settlement](/settlement) | Multi-wave consequence scheduling, duplicate policy, traces, and limits |
+| [Tick settlement](/settlement) | Multi-wave consequence scheduling, duplicate policy, traces, and limits |
 | [Chain reactions](chain-reactions.md) | Breadth-first, once-per-identity propagation |
 | [Projectiles and flight](projectiles.md) | Snapshot-safe microsteps and bounded full-flight passes |
 | [Push chains](push-chains.md) | Mutation-free planning and safe commit order |
@@ -69,7 +69,7 @@ the [settlement kernel](/settlement).
 | [Scoring and budgets](scoring.md) | Threshold scoring, failure precedence, and threshold suggestions |
 | [Solver](solver.md) | Breadth-first minimum-action search over an injected reducer |
 | [Portable replay and verification](replay.md) | Cross-platform JSONL evidence, transcript permutation checks, and multi-level deterministic re-simulation |
-| [High-frequency turns](/high-frequency) | Tick fast paths, sparse inputs, rollback, digests, frame skip, and multi-agent orchestration |
+| [Fixed-rate ticks](/high-frequency) | Tick fast paths, sparse inputs, rollback, digests, and multi-agent orchestration |
 
 ## Product integration showcases
 
@@ -83,7 +83,7 @@ player-facing interactions while retaining the normal game UI.
     <source src="/mechanisms/simultaneous-movement.mp4" type="video/mp4">
     Your browser does not support embedded video.
   </video>
-  <figcaption>Multiple rival NPCs and the player resolve their movement together from the same turn snapshot.</figcaption>
+  <figcaption>Multiple rival NPCs and the player resolve their movement together from the same tick snapshot.</figcaption>
 </figure>
 
 ### [NPC conversation](/mechanisms/npc-conversation.mp4)

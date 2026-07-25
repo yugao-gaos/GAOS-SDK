@@ -1,7 +1,7 @@
 # Projectiles and full-flight movement
 
 The projectile helpers separate one-cell collision decisions from repeated
-same-turn flight. They do not define damage, terrain tokens, paths, relay
+same-tick flight. They do not define damage, terrain tokens, paths, relay
 behavior, or visual events.
 
 ## One projectile pass
@@ -36,7 +36,7 @@ The return value is `true` when at least one snapshotted projectile was
 processed, even if every one landed or was consumed. It is `false` only for an
 empty input snapshot.
 
-## Full same-turn flight
+## Full same-tick flight
 
 `resolveFlightPasses` repeats product-owned microsteps while `active(state)` is
 true:
@@ -68,8 +68,8 @@ A common composition is:
 4. allow relays or switches to update;
 5. run the next pass only if flight remains active.
 
-Use [turn settlement](/settlement) when these consequences can create more
-same-turn work. Keep presentation events separate from collision policy so a
+Use [tick settlement](/settlement) when these consequences can create more
+same-tick work. Keep presentation events separate from collision policy so a
 replay reaches the same state without running animation code.
 
 ## Edge cases to test

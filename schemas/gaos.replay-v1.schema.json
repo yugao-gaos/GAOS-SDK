@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/v0.17.0/schemas/gaos.replay-v1.schema.json",
+  "$id": "https://raw.githubusercontent.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/v0.18.0/schemas/gaos.replay-v1.schema.json",
   "title": "GAOS portable replay v1",
   "description": "Schema for a decoded gaos.replay v1 artifact. The JSONL transport stores the header first, followed by each action.",
   "type": "object",

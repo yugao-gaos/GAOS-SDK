@@ -14,8 +14,8 @@ import {
   seededPermutation,
   type BoardObservation,
   type Cell,
-  type TurnReducer,
-  type TurnView,
+  type ActionReducer,
+  type TickView,
 } from '../src/engine/index.js';
 
 describe('RFC-002 requirement coverage', () => {
@@ -122,7 +122,7 @@ describe('RFC-002 requirement coverage', () => {
     );
     expect(settlement.state.fired).toEqual(['0:a:switch', '1:b:gate']);
 
-    const reducer: TurnReducer<null, { done: boolean }> = {
+    const reducer: ActionReducer<null, { done: boolean }> = {
       init: () => ({ done: false }),
       apply: (_current, action) => {
         if (action.boardId !== 'b') throw new Error('wrong board');
@@ -157,7 +157,7 @@ describe('RFC-003 requirement coverage', () => {
     at: Cell;
   }
 
-  type FogView = TurnView<
+  type FogView = TickView<
     Readonly<Record<string, BoardObservation<Cell, Entity>>>,
     Readonly<Record<string, { count: number; entries?: readonly { id: string }[]; ordered?: boolean }>>
   >;
@@ -222,7 +222,7 @@ describe('RFC-003 requirement coverage', () => {
       deck: string[];
       used: number;
     }
-    interface View extends TurnView {
+    interface View extends TickView {
       zones: {
         deck: {
           count: number;
@@ -231,7 +231,7 @@ describe('RFC-003 requirement coverage', () => {
         };
       };
     }
-    const reducer: TurnReducer<readonly string[], State, View> = {
+    const reducer: ActionReducer<readonly string[], State, View> = {
       init: (level, seed) => ({
         deck: seededPermutation(level.length, seed).map((index) => level[index]!),
         used: 0,
@@ -287,7 +287,7 @@ describe('RFC-003 requirement coverage', () => {
   });
 
   it('round-trips declarative target arrays through replay', () => {
-    const reducer: TurnReducer<null, { done: boolean }> = {
+    const reducer: ActionReducer<null, { done: boolean }> = {
       init: () => ({ done: false }),
       apply: (_state, action) => {
         if (action.targets?.[0]?.container !== 'hand'
