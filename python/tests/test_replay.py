@@ -7,6 +7,7 @@ from jsonschema import Draft202012Validator
 from agilabs_arena import (
     GAOS_REPLAY_DERIVED_SEEDS,
     GAOS_REPLAY_FORMAT_ID,
+    GAOS_REPLAY_LEGACY_FORMAT_VERSION,
     GAOS_REPLAY_FORMAT_VERSION,
     ReplayFormatError,
     canonical_json,
@@ -35,7 +36,7 @@ def test_golden_fixture_round_trips_with_typescript_canonical_bytes():
     artifact = parse_replay_jsonl(jsonl)
 
     assert artifact["header"]["format"] == GAOS_REPLAY_FORMAT_ID
-    assert artifact["header"]["formatVersion"] == GAOS_REPLAY_FORMAT_VERSION
+    assert artifact["header"]["formatVersion"] == GAOS_REPLAY_LEGACY_FORMAT_VERSION
     assert artifact["header"]["seedPolicy"] == GAOS_REPLAY_DERIVED_SEEDS
     assert artifact["header"]["levels"][0]["seed"] == run_level_seed(42, 0)
     assert serialize_replay_jsonl(artifact) == jsonl
@@ -47,6 +48,31 @@ def test_golden_fixture_conforms_to_published_json_schema():
     Draft202012Validator(schema).validate(
         parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
     )
+
+
+def test_v11_grouped_resolution_round_trips_and_projects_actions():
+    legacy = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
+    header = {**legacy["header"], "formatVersion": GAOS_REPLAY_FORMAT_VERSION}
+    action = legacy["actions"][0]
+    replay_input = {
+        key: value
+        for key, value in action.items()
+        if key not in ("kind", "n", "levelIndex", "tick")
+    }
+    resolution = {
+        "kind": "resolution",
+        "n": 0,
+        "levelIndex": 0,
+        "tick": 0,
+        "inputs": [replay_input],
+        "cause": "complete",
+    }
+    jsonl = canonical_json(header) + "\n" + canonical_json(resolution) + "\n"
+    artifact = parse_replay_jsonl(jsonl)
+
+    assert artifact["records"] == [resolution]
+    assert artifact["actions"][0]["canonicalId"] == action["canonicalId"]
+    assert serialize_replay_jsonl(artifact) == jsonl
 
 
 @pytest.mark.parametrize(

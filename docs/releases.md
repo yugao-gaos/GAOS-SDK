@@ -3,6 +3,23 @@
 For the public chronological changelog, see the
 [complete version history](/version-history).
 
+## v0.19.0
+
+Prepared July 25, 2026.
+
+This release adds the optional authoritative session and integrity layer:
+
+- `./session` prepared transitions enforce persist-before-publish ordering;
+- reducer drafts have explicit fork, discard, and retirement ownership;
+- accepted partial-window intents and receipts survive crash rehydration;
+- replay v1.1 preserves grouped reducer calls plus deadline, extension, and
+  commitment-mismatch audit records while retaining v1.0 parsing;
+- `dmath-1` supplies frozen deterministic trigonometry and rounding; and
+- `gaos.commit.sha256.v1` supplies context-bound commit–reveal verification
+  with complete cross-language byte vectors.
+
+See [sessions and integrity](/session-and-integrity).
+
 ## v0.18.0
 
 Released July 24, 2026.

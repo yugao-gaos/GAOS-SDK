@@ -1,9 +1,22 @@
 import {
   assertJsonValue,
   canonicalJson,
+  type JsonValue,
   type JsonObject,
 } from '../protocol.js';
-import type { Reducer, TickView } from './contracts.js';
+import {
+  advanceTick,
+  type Reducer,
+  type SubmittedAction,
+  type TickView,
+} from './contracts.js';
+import {
+  COMMITMENT_SCHEME,
+  createCommitmentHash,
+  type CommitmentEnvelope,
+  type RevealEnvelope,
+} from './commitment.js';
+import { createDmath, type Dmath } from './dmath.js';
 import { locationKey } from './locations.js';
 import {
   recheckTranscript,
@@ -17,8 +30,13 @@ import {
 
 /** Stable identifier carried by every SDK-owned portable replay. */
 export const GAOS_REPLAY_FORMAT_ID = 'gaos.replay' as const;
-/** Schema version for the header and action JSONL records. */
-export const GAOS_REPLAY_FORMAT_VERSION = '1.0' as const;
+/** Current schema version for grouped resolutions and audit records. */
+export const GAOS_REPLAY_FORMAT_VERSION = '1.1' as const;
+/** Read-only compatibility version accepted by the parser and verifier. */
+export const GAOS_REPLAY_LEGACY_FORMAT_VERSION = '1.0' as const;
+export type ReplayFormatVersion =
+  | typeof GAOS_REPLAY_LEGACY_FORMAT_VERSION
+  | typeof GAOS_REPLAY_FORMAT_VERSION;
 /** Media type used by downloads, object storage, and module manifests. */
 export const GAOS_REPLAY_MIME = 'application/vnd.gaos.replay+jsonl' as const;
 /** Conventional filename extension, without a leading dot. */
@@ -82,7 +100,7 @@ export interface ReplayTotals {
 export interface ReplayHeader<TLevel> {
   kind: 'header';
   format: typeof GAOS_REPLAY_FORMAT_ID;
-  formatVersion: typeof GAOS_REPLAY_FORMAT_VERSION;
+  formatVersion: ReplayFormatVersion;
   sessionId: string;
   game: ReplayGameRef;
   /** Run seed. Per-level seeds remain explicit in `levels`. */
@@ -101,11 +119,83 @@ export interface ReplayHeader<TLevel> {
 export interface ReplayAction extends TranscriptAction {
   kind: 'action';
   levelIndex: number;
+  commit?: CommitmentEnvelope;
+  reveal?: RevealEnvelope;
+  /** Present only after a reveal has passed commitment verification. */
+  verifiedPayload?: JsonValue;
 }
+
+export type ReplayResolutionInput = Omit<
+  ReplayAction,
+  'kind' | 'n' | 'levelIndex' | 'tick'
+>;
+
+/** One reducer call. Inputs are consumed atomically in their recorded order. */
+export interface ReplayResolution {
+  kind: 'resolution';
+  n: number;
+  levelIndex: number;
+  tick: number;
+  inputs: ReplayResolutionInput[];
+  cause: 'complete' | 'deadline' | 'tick';
+  /** Exact canonical timeout/pass action when the host supplied one. */
+  systemInput?: ReplayResolutionInput;
+}
+
+export interface ReplayDeadline {
+  kind: 'deadline';
+  n: number;
+  levelIndex: number;
+  tick: number;
+  reason: string;
+}
+
+export interface ReplayExtension {
+  kind: 'extension';
+  n: number;
+  levelIndex: number;
+  lane: string;
+  record: JsonObject;
+}
+
+export interface ReplayCheckpoint {
+  kind: 'checkpoint';
+  n: number;
+  levelIndex: number;
+  tick: number;
+  /** Diagnostic FNV-1a digest, not an authentication primitive. */
+  digest: number;
+}
+
+export interface ReplayCommitMismatchAudit {
+  kind: 'commit-mismatch';
+  n: number;
+  levelIndex: number;
+  tick: number;
+  participantId: string;
+  submissionId: string;
+  commitmentId: number;
+  scheme: typeof COMMITMENT_SCHEME;
+  attemptedReveal?: {
+    salt: string;
+    payload: JsonValue;
+  };
+}
+
+export type ReplayRecord =
+  | ReplayAction
+  | ReplayResolution
+  | ReplayDeadline
+  | ReplayExtension
+  | ReplayCheckpoint
+  | ReplayCommitMismatchAudit;
 
 export interface ReplayArtifact<TLevel> {
   header: ReplayHeader<TLevel>;
+  /** Compatibility projection for action-oriented v1.0 consumers. */
   actions: ReplayAction[];
+  /** Ordered v1.1 record stream. Absent on parsed v1.0/action-only artifacts. */
+  records?: ReplayRecord[];
 }
 
 export interface ReplayLevelInput<TLevel> {
@@ -123,6 +213,9 @@ export interface ReplayLevelInput<TLevel> {
 
 export interface ReplayActionInput extends TranscriptAction {
   levelIndex: number;
+  commit?: CommitmentEnvelope;
+  reveal?: RevealEnvelope;
+  verifiedPayload?: JsonValue;
 }
 
 export interface CreateReplayArtifactInput<TLevel> {
@@ -132,7 +225,9 @@ export interface CreateReplayArtifactInput<TLevel> {
   seedPolicy?: ReplaySeedPolicy;
   perm: number[];
   levels: Array<ReplayLevelInput<TLevel>>;
-  actions: ReplayActionInput[];
+  actions?: ReplayActionInput[];
+  /** Supplying records opts into the v1.1 grouped/audit transport. */
+  records?: ReplayRecord[];
   totals?: ReplayTotals;
   visibility?: TranscriptVisibility;
   extensions?: JsonObject;
@@ -148,6 +243,8 @@ export interface TranscriptReplayOptions {
 export interface ReplayReducerContext<TLevel> {
   game: ReplayGameRef;
   level: ReplayLevelRecord<TLevel>;
+  /** Constructed from the authoritative replay algorithm declaration. */
+  dmath?: Dmath;
 }
 
 export type ReplayReducerResolver<
@@ -255,7 +352,10 @@ export function createReplayArtifact<TLevel>(
   };
   const artifact: ReplayArtifact<TLevel> = {
     header,
-    actions: input.actions.map((action) => ({ ...action, kind: 'action' })),
+    actions: (input.actions ?? []).map((action) => ({ ...action, kind: 'action' })),
+    ...(input.records === undefined
+      ? {}
+      : { records: input.records.map((record) => structuredClone(record)) }),
   };
   const problems = validateReplayArtifact(artifact);
   if (problems.length > 0) throw new ReplayFormatError(problems);
@@ -305,8 +405,12 @@ export function validateReplayArtifact(value: unknown): string[] {
   if (header['format'] !== GAOS_REPLAY_FORMAT_ID) {
     problems.push(`header.format must be ${GAOS_REPLAY_FORMAT_ID}`);
   }
-  if (header['formatVersion'] !== GAOS_REPLAY_FORMAT_VERSION) {
-    problems.push(`header.formatVersion must be ${GAOS_REPLAY_FORMAT_VERSION}`);
+  if (header['formatVersion'] !== GAOS_REPLAY_FORMAT_VERSION
+    && header['formatVersion'] !== GAOS_REPLAY_LEGACY_FORMAT_VERSION) {
+    problems.push(
+      `header.formatVersion must be ${GAOS_REPLAY_LEGACY_FORMAT_VERSION}`
+      + ` or ${GAOS_REPLAY_FORMAT_VERSION}`,
+    );
   }
   if (typeof header['sessionId'] !== 'string' || header['sessionId'].length === 0) {
     problems.push('header.sessionId must be a non-empty string');
@@ -504,6 +608,249 @@ export function validateReplayArtifact(value: unknown): string[] {
           }
         }
       }
+      if (action['commit'] !== undefined && action['reveal'] !== undefined) {
+        problems.push(`action ${String(action['n'])} commit and reveal are mutually exclusive`);
+      }
+      if (action['verifiedPayload'] !== undefined && action['reveal'] === undefined) {
+        problems.push(`action ${String(action['n'])} verifiedPayload requires reveal`);
+      }
+      if (header['formatVersion'] === GAOS_REPLAY_LEGACY_FORMAT_VERSION
+        && (action['commit'] !== undefined
+          || action['reveal'] !== undefined
+          || action['verifiedPayload'] !== undefined)) {
+        problems.push(`action ${String(action['n'])} commitment fields require formatVersion 1.1`);
+      }
+      if (action['commit'] !== undefined) {
+        const commit = action['commit'];
+        if (!isRecord(commit)) {
+          problems.push(`action ${String(action['n'])} commit must be an object`);
+        } else {
+          if (!validU32(commit['commitmentId'])) {
+            problems.push(`action ${String(action['n'])} commitmentId must be an unsigned 32-bit integer`);
+          }
+          if (commit['scheme'] !== COMMITMENT_SCHEME) {
+            problems.push(`action ${String(action['n'])} commit scheme must be ${COMMITMENT_SCHEME}`);
+          }
+          if (typeof commit['hash'] !== 'string' || !/^[0-9a-f]{64}$/.test(commit['hash'])) {
+            problems.push(`action ${String(action['n'])} commit hash must be 64 lowercase hex characters`);
+          }
+        }
+      }
+      if (action['reveal'] !== undefined) {
+        const reveal = action['reveal'];
+        if (!isRecord(reveal)) {
+          problems.push(`action ${String(action['n'])} reveal must be an object`);
+        } else {
+          if (!validU32(reveal['commitmentId'])) {
+            problems.push(`action ${String(action['n'])} reveal commitmentId must be an unsigned 32-bit integer`);
+          }
+          if (typeof reveal['salt'] !== 'string'
+            || !/^(?:[0-9a-f]{2}){16,64}$/.test(reveal['salt'])) {
+            problems.push(`action ${String(action['n'])} reveal salt must be 16..64 lowercase-hex bytes`);
+          }
+          if (!Object.hasOwn(reveal, 'payload')) {
+            problems.push(`action ${String(action['n'])} reveal must include payload`);
+          }
+        }
+      }
+    }
+  }
+
+  const records = value['records'];
+  if (records !== undefined) {
+    if (header['formatVersion'] !== GAOS_REPLAY_FORMAT_VERSION) {
+      problems.push(`records require header.formatVersion ${GAOS_REPLAY_FORMAT_VERSION}`);
+    }
+    if (!Array.isArray(records)) {
+      problems.push('records must be an array');
+    } else {
+      let previousLevelIndex = -1;
+      const recordTicks = new Map<number, number>();
+      const permutation = validatePermutation(header['perm']) ? header['perm'] as number[] : [];
+      const validateResolutionInput = (
+        candidate: unknown,
+        label: string,
+      ): void => {
+        if (!isRecord(candidate)) {
+          problems.push(`${label} must be an object`);
+          return;
+        }
+        const indexes: Record<'wireId' | 'canonicalId', number | undefined> = {
+          wireId: undefined,
+          canonicalId: undefined,
+        };
+        for (const field of ['wireId', 'canonicalId'] as const) {
+          const id = candidate[field];
+          const match = typeof id === 'string' ? /^Action ([1-9]\d*)$/.exec(id) : null;
+          const number = match ? Number(match[1]) : Number.NaN;
+          if (!Number.isSafeInteger(number) || number < 1 || number > permutation.length) {
+            problems.push(`${label} ${field} must be within Action 1..${permutation.length}`);
+          } else {
+            indexes[field] = number - 1;
+          }
+        }
+        if (indexes.wireId !== undefined
+          && indexes.canonicalId !== undefined
+          && permutation[indexes.wireId] !== indexes.canonicalId) {
+          problems.push(`${label} action ids contradict the replay permutation`);
+        }
+        for (const field of ['x', 'y', 'index'] as const) {
+          if (candidate[field] !== undefined && !Number.isSafeInteger(candidate[field])) {
+            problems.push(`${label} ${field} must be a safe integer`);
+          }
+        }
+        for (const field of ['boardId', 'zoneId', 'seat'] as const) {
+          if (candidate[field] !== undefined
+            && (typeof candidate[field] !== 'string' || candidate[field].length === 0)) {
+            problems.push(`${label} ${field} must be a non-empty string`);
+          }
+        }
+        if (candidate['commit'] !== undefined && candidate['reveal'] !== undefined) {
+          problems.push(`${label} commit and reveal are mutually exclusive`);
+        }
+        if (candidate['verifiedPayload'] !== undefined && candidate['reveal'] === undefined) {
+          problems.push(`${label} verifiedPayload requires reveal`);
+        }
+        const commit = candidate['commit'];
+        if (commit !== undefined && (!isRecord(commit)
+          || !validU32(commit['commitmentId'])
+          || commit['scheme'] !== COMMITMENT_SCHEME
+          || typeof commit['hash'] !== 'string'
+          || !/^[0-9a-f]{64}$/.test(commit['hash']))) {
+          problems.push(`${label} has an invalid commitment envelope`);
+        }
+        const reveal = candidate['reveal'];
+        if (reveal !== undefined && (!isRecord(reveal)
+          || !validU32(reveal['commitmentId'])
+          || typeof reveal['salt'] !== 'string'
+          || !/^(?:[0-9a-f]{2}){16,64}$/.test(reveal['salt'])
+          || !Object.hasOwn(reveal, 'payload'))) {
+          problems.push(`${label} has an invalid reveal envelope`);
+        }
+      };
+      for (const [index, record] of records.entries()) {
+        if (!isRecord(record)) {
+          problems.push(`record at index ${index} must be an object`);
+          continue;
+        }
+        if (record['n'] !== index) {
+          problems.push(`record at index ${index} must declare sequence number ${index}`);
+        }
+        if (!validNonNegativeInteger(record['levelIndex'])
+          || !Array.isArray(levels)
+          || record['levelIndex'] >= levels.length) {
+          problems.push(`record ${index} has invalid levelIndex ${String(record['levelIndex'])}`);
+        } else if (record['levelIndex'] < previousLevelIndex) {
+          problems.push(`record ${index} returns to an earlier level`);
+        } else {
+          previousLevelIndex = record['levelIndex'];
+        }
+        const kind = record['kind'];
+        if (![
+          'action',
+          'resolution',
+          'deadline',
+          'extension',
+          'checkpoint',
+          'commit-mismatch',
+        ].includes(
+          typeof kind === 'string' ? kind : '',
+        )) {
+          problems.push(`record ${index} has unknown kind ${String(kind)}`);
+          continue;
+        }
+        if (kind === 'action') {
+          validateResolutionInput(record, `record ${index} action`);
+        } else if (kind === 'resolution') {
+          if (!validNonNegativeInteger(record['tick'])) {
+            problems.push(`resolution ${index} tick must be a non-negative safe integer`);
+          }
+          if (!Array.isArray(record['inputs'])) {
+            problems.push(`resolution ${index} inputs must be an array`);
+          } else {
+            record['inputs'].forEach((input, inputIndex) => {
+              validateResolutionInput(input, `resolution ${index} input ${inputIndex}`);
+            });
+          }
+          if (!['complete', 'deadline', 'tick'].includes(String(record['cause']))) {
+            problems.push(`resolution ${index} cause must be complete, deadline, or tick`);
+          }
+          if (record['cause'] === 'deadline') {
+            if (record['systemInput'] === undefined) {
+              problems.push(`resolution ${index} deadline cause requires systemInput`);
+            } else {
+              validateResolutionInput(record['systemInput'], `resolution ${index} systemInput`);
+              if (Array.isArray(record['inputs'])) {
+                try {
+                  const canonicalSystemInput = canonicalJson(record['systemInput']);
+                  if (!record['inputs'].some(
+                    (input) => canonicalJson(input) === canonicalSystemInput,
+                  )) {
+                    problems.push(`resolution ${index} systemInput must appear in inputs`);
+                  }
+                } catch {
+                  problems.push(`resolution ${index} systemInput must contain plain JSON`);
+                }
+              }
+            }
+          } else if (record['systemInput'] !== undefined) {
+            problems.push(`resolution ${index} systemInput requires deadline cause`);
+          }
+          if (validNonNegativeInteger(record['levelIndex'])
+            && validNonNegativeInteger(record['tick'])) {
+            const lastTick = recordTicks.get(record['levelIndex']) ?? 0;
+            if (record['tick'] < lastTick) {
+              problems.push(`resolution ${index} tick precedes its level's prior record`);
+            } else {
+              recordTicks.set(record['levelIndex'], record['tick']);
+            }
+          }
+        } else if (kind === 'deadline') {
+          if (!validNonNegativeInteger(record['tick'])) {
+            problems.push(`deadline ${index} tick must be a non-negative safe integer`);
+          }
+          if (typeof record['reason'] !== 'string' || record['reason'].length === 0) {
+            problems.push(`deadline ${index} reason must be a non-empty string`);
+          }
+        } else if (kind === 'extension') {
+          if (typeof record['lane'] !== 'string' || record['lane'].length === 0) {
+            problems.push(`extension ${index} lane must be a non-empty string`);
+          }
+          if (!isRecord(record['record'])) {
+            problems.push(`extension ${index} record must be an object`);
+          }
+        } else if (kind === 'checkpoint') {
+          if (!validNonNegativeInteger(record['tick'])) {
+            problems.push(`checkpoint ${index} tick must be a non-negative safe integer`);
+          }
+          if (!validU32(record['digest'])) {
+            problems.push(`checkpoint ${index} digest must be an unsigned 32-bit integer`);
+          }
+        } else if (kind === 'commit-mismatch') {
+          if (!validNonNegativeInteger(record['tick'])) {
+            problems.push(`commit-mismatch ${index} tick must be a non-negative safe integer`);
+          }
+          if (!validU32(record['commitmentId'])) {
+            problems.push(`commit-mismatch ${index} commitmentId must be an unsigned 32-bit integer`);
+          }
+          if (record['scheme'] !== COMMITMENT_SCHEME) {
+            problems.push(`commit-mismatch ${index} scheme must be ${COMMITMENT_SCHEME}`);
+          }
+          if (typeof record['participantId'] !== 'string'
+            || record['participantId'].length === 0
+            || typeof record['submissionId'] !== 'string'
+            || record['submissionId'].length === 0) {
+            problems.push(`commit-mismatch ${index} participantId and submissionId are required`);
+          }
+          const attempt = record['attemptedReveal'];
+          if (attempt !== undefined && (!isRecord(attempt)
+            || typeof attempt['salt'] !== 'string'
+            || !/^(?:[0-9a-f]{2}){16,64}$/.test(attempt['salt'])
+            || !Object.hasOwn(attempt, 'payload'))) {
+            problems.push(`commit-mismatch ${index} attemptedReveal is invalid`);
+          }
+        }
+      }
     }
   }
 
@@ -519,7 +866,8 @@ export function validateReplayArtifact(value: unknown): string[] {
 export function serializeReplayJsonl<TLevel>(artifact: ReplayArtifact<TLevel>): string {
   const problems = validateReplayArtifact(artifact);
   if (problems.length > 0) throw new ReplayFormatError(problems);
-  return [artifact.header, ...artifact.actions].map(canonicalJson).join('\n') + '\n';
+  const stream = artifact.records ?? artifact.actions;
+  return [artifact.header, ...stream].map(canonicalJson).join('\n') + '\n';
 }
 
 /** Parse and validate one SDK-owned replay JSONL artifact. */
@@ -541,13 +889,271 @@ export function parseReplayJsonl<TLevel = unknown>(jsonl: string): ReplayArtifac
       ]);
     }
   });
+  const header = parsed[0];
+  const stream = parsed.slice(1);
+  const hasV11Records = isRecord(header)
+    && header['formatVersion'] === GAOS_REPLAY_FORMAT_VERSION
+    && stream.some((record) => isRecord(record) && record['kind'] !== 'action');
+  const projectedActions: ReplayAction[] = [];
+  for (const record of stream) {
+    if (isRecord(record) && record['kind'] === 'action') {
+      projectedActions.push(record as unknown as ReplayAction);
+    } else if (isRecord(record)
+      && record['kind'] === 'resolution'
+      && Array.isArray(record['inputs'])) {
+      for (const input of record['inputs']) {
+        if (!isRecord(input)) continue;
+        projectedActions.push({
+          ...input,
+          kind: 'action',
+          n: projectedActions.length,
+          levelIndex: record['levelIndex'] as number,
+          tick: record['tick'] as number,
+        } as unknown as ReplayAction);
+      }
+    }
+  }
   const artifact = {
-    header: parsed[0],
-    actions: parsed.slice(1),
+    header,
+    actions: hasV11Records
+      ? projectedActions.map((action, index) => ({ ...action, n: index }))
+      : stream,
+    ...(hasV11Records ? { records: stream } : {}),
   };
   const problems = validateReplayArtifact(artifact);
   if (problems.length > 0) throw new ReplayFormatError(problems);
   return artifact as ReplayArtifact<TLevel>;
+}
+
+function replaySubmittedAction(input: ReplayResolutionInput): SubmittedAction {
+  return {
+    id: input.canonicalId,
+    ...(input.x === undefined ? {} : { x: input.x }),
+    ...(input.y === undefined ? {} : { y: input.y }),
+    ...(input.index === undefined ? {} : { index: input.index }),
+    ...(input.boardId === undefined ? {} : { boardId: input.boardId }),
+    ...(input.zoneId === undefined ? {} : { zoneId: input.zoneId }),
+    ...(input.seat === undefined ? {} : { seat: input.seat }),
+    ...(input.targets === undefined ? {} : { targets: input.targets }),
+    ...(input.commit === undefined ? {} : { commit: input.commit }),
+    ...(input.reveal === undefined ? {} : { reveal: input.reveal }),
+    ...(input.verifiedPayload === undefined ? {} : { verifiedPayload: input.verifiedPayload }),
+  };
+}
+
+interface RecordedCommitment {
+  envelope: CommitmentEnvelope;
+  sessionId: string;
+  seat: string;
+  windowRef: number;
+  revealed: boolean;
+}
+
+function recheckGroupedLevel<
+  TLevel,
+  TState,
+  TView extends TickView<unknown, unknown>,
+>(
+  artifact: ReplayArtifact<TLevel>,
+  level: ReplayLevelRecord<TLevel>,
+  reducer: Reducer<TLevel, TState, TView>,
+): RecheckResult {
+  const problems: string[] = [];
+  const commitments = new Map<string, RecordedCommitment>();
+  const nextCommitmentId = new Map<string, number>();
+  let state = reducer.init(level.level, level.seed);
+  const records = (artifact.records ?? []).filter(
+    (record) => record.levelIndex === level.index,
+  );
+  for (const record of records) {
+    const resolution: ReplayResolution | undefined = record.kind === 'resolution'
+      ? record
+      : record.kind === 'action'
+        ? {
+          kind: 'resolution',
+          n: record.n,
+          levelIndex: record.levelIndex,
+          tick: record.tick ?? 0,
+          cause: 'complete',
+          inputs: [{
+            wireId: record.wireId,
+            canonicalId: record.canonicalId,
+            ...(record.x === undefined ? {} : { x: record.x }),
+            ...(record.y === undefined ? {} : { y: record.y }),
+            ...(record.index === undefined ? {} : { index: record.index }),
+            ...(record.boardId === undefined ? {} : { boardId: record.boardId }),
+            ...(record.zoneId === undefined ? {} : { zoneId: record.zoneId }),
+            ...(record.seat === undefined ? {} : { seat: record.seat }),
+            ...(record.targets === undefined ? {} : { targets: record.targets }),
+            ...(record.commit === undefined ? {} : { commit: record.commit }),
+            ...(record.reveal === undefined ? {} : { reveal: record.reveal }),
+            ...(record.verifiedPayload === undefined
+              ? {}
+              : { verifiedPayload: record.verifiedPayload }),
+          }],
+        }
+        : undefined;
+    if (resolution) {
+      if (reducer.view(state).status !== 'playing') {
+        problems.push(`resolution ${resolution.n} appears after terminal state`);
+        break;
+      }
+      const inputs: SubmittedAction[] = [];
+      for (const replayInput of resolution.inputs) {
+        if (replayInput.commit && replayInput.reveal) {
+          problems.push(`resolution ${resolution.n} input has both commit and reveal`);
+          continue;
+        }
+        const seat = replayInput.seat;
+        if (replayInput.commit) {
+          if (!seat) {
+            problems.push(`resolution ${resolution.n} commitment requires seat`);
+            continue;
+          }
+          const expectedId = nextCommitmentId.get(seat) ?? 0;
+          if (replayInput.commit.commitmentId !== expectedId) {
+            problems.push(
+              `resolution ${resolution.n} seat ${seat} commitmentId `
+              + `${replayInput.commit.commitmentId} must be ${expectedId}`,
+            );
+            continue;
+          }
+          const key = `${seat}\u0000${replayInput.commit.commitmentId}`;
+          commitments.set(key, {
+            envelope: replayInput.commit,
+            sessionId: artifact.header.sessionId,
+            seat,
+            windowRef: resolution.tick,
+            revealed: false,
+          });
+          nextCommitmentId.set(seat, expectedId + 1);
+        }
+        let verifiedPayload: JsonValue | undefined;
+        if (replayInput.reveal) {
+          if (!seat) {
+            problems.push(`resolution ${resolution.n} reveal requires seat`);
+            continue;
+          }
+          const key = `${seat}\u0000${replayInput.reveal.commitmentId}`;
+          const commitment = commitments.get(key);
+          if (!commitment) {
+            problems.push(
+              `resolution ${resolution.n} reveal references unknown commitment `
+              + `${seat}/${replayInput.reveal.commitmentId}`,
+            );
+            continue;
+          }
+          if (commitment.revealed) {
+            problems.push(
+              `resolution ${resolution.n} commitment ${seat}/${replayInput.reveal.commitmentId}`
+              + ' was already revealed',
+            );
+            continue;
+          }
+          let actualHash = '';
+          try {
+            actualHash = createCommitmentHash(
+              {
+                sessionId: commitment.sessionId,
+                seat: commitment.seat,
+                commitmentId: commitment.envelope.commitmentId,
+                windowRef: commitment.windowRef,
+              },
+              replayInput.reveal.salt,
+              replayInput.reveal.payload,
+            );
+          } catch (error) {
+            problems.push(
+              `resolution ${resolution.n} reveal is malformed: `
+              + `${error instanceof Error ? error.message : String(error)}`,
+            );
+            continue;
+          }
+          if (actualHash !== commitment.envelope.hash) {
+            problems.push(
+              `commit_mismatch: seat ${seat}, commitmentId ${replayInput.reveal.commitmentId}`,
+            );
+            continue;
+          }
+          commitment.revealed = true;
+          verifiedPayload = replayInput.reveal.payload;
+        }
+        inputs.push(replaySubmittedAction({
+          ...replayInput,
+          ...(verifiedPayload === undefined ? {} : { verifiedPayload }),
+        }));
+      }
+      try {
+        state = advanceTick(reducer, state, inputs);
+      } catch (error) {
+        problems.push(
+          `resolution ${resolution.n} rejected on replay: `
+          + `${error instanceof Error ? error.message : String(error)}`,
+        );
+        break;
+      }
+    } else if (record.kind === 'commit-mismatch') {
+      const key = `${record.participantId}\u0000${record.commitmentId}`;
+      const commitment = commitments.get(key);
+      if (!commitment) {
+        problems.push(
+          `commit-mismatch record ${record.n} references unknown commitment `
+          + `${record.participantId}/${record.commitmentId}`,
+        );
+      } else if (!record.attemptedReveal) {
+        // A redacted artifact may preserve the finding without the secret.
+        // It remains structurally valid but cannot claim cryptographic recheck.
+      } else {
+        try {
+          const actualHash = createCommitmentHash(
+            {
+              sessionId: commitment.sessionId,
+              seat: commitment.seat,
+              commitmentId: commitment.envelope.commitmentId,
+              windowRef: commitment.windowRef,
+            },
+            record.attemptedReveal.salt,
+            record.attemptedReveal.payload,
+          );
+          if (actualHash === commitment.envelope.hash) {
+            problems.push(
+              `commit-mismatch record ${record.n} is inconsistent: attempted reveal matches`,
+            );
+          } else {
+            problems.push(
+              `commit_mismatch: seat ${record.participantId}, commitmentId ${record.commitmentId}`,
+            );
+          }
+        } catch (error) {
+          problems.push(
+            `commit-mismatch record ${record.n} cannot be rechecked: `
+            + `${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+    }
+  }
+  const view = reducer.view(state);
+  if (view.status !== level.result.status) {
+    problems.push(`status: recorded ${level.result.status}, replayed ${view.status}`);
+  }
+  if ((view.stars ?? null) !== level.result.stars) {
+    problems.push(`stars: recorded ${level.result.stars}, replayed ${view.stars ?? null}`);
+  }
+  if (view.hud.actionsUsed !== level.result.actionsUsed) {
+    problems.push(
+      `actionsUsed: recorded ${level.result.actionsUsed}, replayed ${view.hud.actionsUsed}`,
+    );
+  }
+  return {
+    ok: problems.length === 0,
+    problems,
+    replayed: {
+      status: view.status,
+      stars: view.stars ?? null,
+      actionsUsed: view.hud.actionsUsed,
+    },
+  };
 }
 
 /**
@@ -577,8 +1183,34 @@ export function recheckReplayArtifact<
   const checks: ReplayLevelRecheck[] = [];
   let totalStars = 0;
   let totalActionsUsed = 0;
+  let replayDmath: Dmath | undefined;
+  const dmathDeclaration = artifact.header.extensions?.['dmath'];
+  if (dmathDeclaration !== undefined) {
+    try {
+      if (!isRecord(dmathDeclaration)
+        || dmathDeclaration['algorithm'] !== 'dmath-1') {
+        throw new TypeError('extensions.dmath.algorithm must be dmath-1');
+      }
+      replayDmath = createDmath({ algorithm: dmathDeclaration['algorithm'] });
+    } catch (error) {
+      problems.push(
+        `cannot construct replay dmath algorithm: `
+        + `${error instanceof Error ? error.message : String(error)}`,
+      );
+      return {
+        ok: false,
+        problems,
+        levels: [],
+        replayed: { statuses: [], totalStars: 0, totalActionsUsed: 0 },
+      };
+    }
+  }
   for (const level of artifact.header.levels) {
-    const context = { game: artifact.header.game, level };
+    const context: ReplayReducerContext<TLevel> = {
+      game: artifact.header.game,
+      level,
+      ...(replayDmath === undefined ? {} : { dmath: replayDmath }),
+    };
     const reducer = resolveReducer(context);
     if (!reducer) {
       problems.push(
@@ -593,23 +1225,25 @@ export function recheckReplayArtifact<
         ...action,
         n: index,
       }));
-    const result = recheckTranscript(
-      reducer,
-      {
-        sessionId: artifact.header.sessionId,
-        level: level.level,
-        seed: level.seed,
-        perm: artifact.header.perm,
-        status: level.result.status,
-        stars: level.result.stars,
-        actionsUsed: level.result.actionsUsed,
-        ...(artifact.header.visibility === undefined
-          ? {}
-          : { visibility: artifact.header.visibility }),
-      },
-      actions,
-      options.optionsForLevel?.(context),
-    );
+    const result = artifact.records
+      ? recheckGroupedLevel(artifact, level, reducer)
+      : recheckTranscript(
+        reducer,
+        {
+          sessionId: artifact.header.sessionId,
+          level: level.level,
+          seed: level.seed,
+          perm: artifact.header.perm,
+          status: level.result.status,
+          stars: level.result.stars,
+          actionsUsed: level.result.actionsUsed,
+          ...(artifact.header.visibility === undefined
+            ? {}
+            : { visibility: artifact.header.visibility }),
+        },
+        actions,
+        options.optionsForLevel?.(context),
+      );
     checks.push({ index: level.index, id: level.id, seed: level.seed, result });
     problems.push(...result.problems.map(
       (problem) => `level ${level.index} (${level.id}): ${problem}`,

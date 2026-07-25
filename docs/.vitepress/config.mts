@@ -131,6 +131,7 @@ export default defineConfig({
           { text: 'Scoring and AI action limits', link: '/mechanisms/scoring' },
           { text: 'Solver', link: '/mechanisms/solver' },
           { text: 'Portable replay and verification', link: '/mechanisms/replay' },
+          { text: 'Sessions and integrity', link: '/session-and-integrity' },
           { text: 'Fixed-rate ticks', link: '/high-frequency' },
         ],
       },

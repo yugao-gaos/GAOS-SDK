@@ -25,6 +25,7 @@ from .replay import (
     GAOS_REPLAY_DERIVED_SEEDS,
     GAOS_REPLAY_EXTENSION,
     GAOS_REPLAY_FORMAT_ID,
+    GAOS_REPLAY_LEGACY_FORMAT_VERSION,
     GAOS_REPLAY_FORMAT_VERSION,
     GAOS_REPLAY_MANIFEST_FORMAT,
     GAOS_REPLAY_MIME,
@@ -57,6 +58,7 @@ __all__ = [
     "parse_tick_result",
     "parse_session_binding",
     "GAOS_REPLAY_FORMAT_ID",
+    "GAOS_REPLAY_LEGACY_FORMAT_VERSION",
     "GAOS_REPLAY_FORMAT_VERSION",
     "GAOS_REPLAY_MIME",
     "GAOS_REPLAY_EXTENSION",
@@ -69,4 +71,4 @@ __all__ = [
     "parse_replay_jsonl",
     "serialize_replay_jsonl",
 ]
-__version__ = "0.18.0"
+__version__ = "0.19.0"

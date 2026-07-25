@@ -1,6 +1,6 @@
 # GAOS SDK — next-version batch: from grid engine to composable game SDK
 
-Status: implemented through v0.16 · Target: v0.13 → v1.0 arc · Baseline: v0.12.0 export surface
+Status: implemented through v0.19 · Target: v0.13 → v1.0 arc · Baseline: v0.12.0 export surface
 
 ::: info Historical design record
 This RFC batch records the design path that led to the current SDK. For
@@ -28,7 +28,7 @@ Two standing design rules govern every RFC in this batch:
    as fog-of-war; targeting unifies cells and cards; durations buff grid units;
    deck validation validates squads.
 
-## The five RFCs
+## RFC sequence
 
 | RFC | Title | Ships in | Depends on |
 |---|---|---|---|
@@ -37,6 +37,9 @@ Two standing design rules govern every RFC in this batch:
 | [003](rfc-003-information-partitions.md) | Information partitions: per-seat views, hidden zones, fog-of-war | v0.14 | 001, 002 |
 | [004](rfc-004-zones-and-card-play.md) | Zones and card play: the zone primitive, deal/draft, keywords, priority, durations | v0.15 | 002, 003 |
 | [005](rfc-005-portals.md) | Portals: entity transit across heterogeneous containers | v0.16 | 002, 004 |
+| [006](rfc-006-session-kernel.md) | Authoritative session kernel with prepared persistence transitions | v0.19 | protocol, replay v1.1 |
+| [007](rfc-007-deterministic-math.md) | Deterministic math classification and immutable `dmath` contexts | v0.19 | engine |
+| [008](rfc-008-commitment-envelope.md) | Context-bound commit–reveal envelopes and replay audit evidence | v0.19 | 006, replay v1.1 |
 
 Sequencing rationale: RFC-001/002 are contract-level and mostly mechanical —
 they unblock naming and addressing for everything else. RFC-003 is the one

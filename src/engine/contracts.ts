@@ -1,5 +1,10 @@
 import type { Cell } from './movement.js';
 import type { LocationRef } from './locations.js';
+import type { JsonValue } from '../protocol.js';
+import type {
+  CommitmentEnvelope,
+  RevealEnvelope,
+} from './commitment.js';
 
 export interface ActionDefinition {
   id: string;
@@ -22,6 +27,12 @@ export interface SubmittedAction {
   seat?: string;
   /** Cross-container target selection produced by a declarative target spec. */
   targets?: readonly LocationRef[];
+  /** Optional opaque commit envelope, verified by the session layer. */
+  commit?: CommitmentEnvelope;
+  /** Optional reveal envelope, verified before its payload reaches gameplay. */
+  reveal?: RevealEnvelope;
+  /** Verified reveal payload made available to a game adapter. */
+  verifiedPayload?: JsonValue;
 }
 
 export interface GridViewNamespace {
