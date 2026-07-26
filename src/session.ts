@@ -180,8 +180,8 @@ export interface SessionKernelOptions<
   dmath?: Dmath;
   limits?: SessionLimits;
   stateIsolation?: SessionStateIsolation<TState>;
-  /** Snapshot-only v1 by default; v2 emits bounded patches with snapshot fallback. */
-  observationCodec?: 'v1' | ObservationCodecV2Options;
+  /** Optional bounds for the mandatory v2 patch codec. */
+  observationCodec?: ObservationCodecV2Options;
   /** Product projection applied only after the seat's partitioned view exists. */
   interest?: InterestPolicy<TView>;
 }
@@ -338,7 +338,7 @@ export interface ObservationDelta<TView = TickView<unknown, unknown>> {
   transitionRevision: number;
   viewRevision: number;
   tick: number;
-  codec: 'v1' | 'v2';
+  codec: 'v2';
   /** How this envelope was produced. Absent is read as `resolution`. */
   origin?: 'resolution' | 'snapshot' | 'interest';
   /**
@@ -668,7 +668,7 @@ function viewDigest(view: unknown): number {
   return fnv1a(canonicalSessionView(view));
 }
 
-/** Reconstruct and digest-check one v1/v2 observation envelope. */
+/** Reconstruct and digest-check one v2 observation envelope. */
 export function applyObservationDelta<TView>(
   previous: TView | undefined,
   delta: ObservationDelta<TView>,
@@ -680,7 +680,6 @@ export function applyObservationDelta<TView>(
     if (previous === undefined) throw new TypeError('unchanged delta requires a prior view');
     next = structuredClone(previous);
   } else {
-    if (delta.codec !== 'v2') throw new TypeError('patch body requires codec v2');
     if (previous === undefined) throw new TypeError('patch delta requires a prior view');
     next = applyJsonPatch(
       previous as unknown as JsonValue,
@@ -769,7 +768,7 @@ class SessionKernelImpl<
   private readonly limits: Required<SessionLimits>;
   private readonly header: SessionHeader<TLevel>;
   private readonly tickTimeoutPolicy: ReplayTickTimeoutPolicy | undefined;
-  private readonly observationCodec: Required<ObservationCodecV2Options> | 'v1';
+  private readonly observationCodec: Required<ObservationCodecV2Options>;
   /** O(1) permanent idempotency index, rebuilt from durable accepted events. */
   private readonly historicalSubmissionKeys = new Set<string>();
   private readonly historicalInterestCommands = new Map<string, string>();
@@ -865,21 +864,17 @@ class SessionKernelImpl<
         throw new RangeError(`${key} has an invalid bound`);
       }
     }
-    if (options.observationCodec === undefined || options.observationCodec === 'v1') {
-      this.observationCodec = 'v1';
-    } else {
-      if (!isObjectRecord(options.observationCodec)
-        || options.observationCodec.version !== 'v2') {
-        throw new TypeError('observationCodec must be v1 or a v2 options object');
-      }
-      const maxOperations = options.observationCodec.maxOperations ?? 2_048;
-      const maxBytes = options.observationCodec.maxBytes ?? 65_536;
-      if (!Number.isSafeInteger(maxOperations) || maxOperations <= 0
-        || !Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
-        throw new RangeError('v2 observation codec bounds must be positive safe integers');
-      }
-      this.observationCodec = { version: 'v2', maxOperations, maxBytes };
+    const observationCodec = options.observationCodec ?? { version: 'v2' };
+    if (!isObjectRecord(observationCodec) || observationCodec.version !== 'v2') {
+      throw new TypeError('observationCodec must be a v2 options object');
     }
+    const maxOperations = observationCodec.maxOperations ?? 2_048;
+    const maxBytes = observationCodec.maxBytes ?? 65_536;
+    if (!Number.isSafeInteger(maxOperations) || maxOperations <= 0
+      || !Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+      throw new RangeError('v2 observation codec bounds must be positive safe integers');
+    }
+    this.observationCodec = { version: 'v2', maxOperations, maxBytes };
     this.isolation = options.stateIsolation ?? {
       fork: (state: TState): TState => structuredClone(state),
     };
@@ -981,14 +976,11 @@ class SessionKernelImpl<
   ): Pick<ObservationDelta<TView>, 'codec' | 'body'> {
     if (unchanged) {
       return {
-        codec: this.observationCodec === 'v1' ? 'v1' : 'v2',
+        codec: 'v2',
         body: { kind: 'unchanged' },
       };
     }
     const snapshot = structuredClone(next);
-    if (this.observationCodec === 'v1') {
-      return { codec: 'v1', body: { kind: 'snapshot', view: snapshot } };
-    }
     try {
       const operations = createValidatedJsonPatch(
         previous as unknown as JsonValue,
@@ -1657,7 +1649,7 @@ class SessionKernelImpl<
         transitionRevision,
         viewRevision: draft.viewRevisions.get(seat)!,
         tick: draft.tick,
-        codec: this.observationCodec === 'v1' ? 'v1' : 'v2',
+        codec: 'v2',
         origin: 'resolution',
         acknowledgements: [],
         rejections: [{
@@ -2119,7 +2111,7 @@ class SessionKernelImpl<
         transitionRevision: draft.transitionRevision + 1,
         viewRevision: draft.viewRevisions.get(submission.participantId)!,
         tick: draft.tick,
-        codec: this.observationCodec === 'v1' ? 'v1' : 'v2',
+        codec: 'v2',
         origin: 'interest',
         acknowledgements: [],
         rejections: [],
@@ -2278,7 +2270,7 @@ class SessionKernelImpl<
       transitionRevision: this.live.transitionRevision,
       viewRevision: this.viewRevision(seat),
       tick: this.live.tick,
-      codec: this.observationCodec === 'v1' ? 'v1' : 'v2',
+      codec: 'v2',
       origin: 'snapshot',
       acknowledgements: [],
       rejections: this.rejectionNoticesSince(seat, afterTransitionRevision),

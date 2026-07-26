@@ -2,8 +2,9 @@
 
 Status: **Parts A and B plus the resolved D/E implementation scope are
 implemented for v0.20 development (2026-07-26); E1 and E4 are now resolved
-additively** · Target: v0.20 · Breaking: no (additive; requires the baseline
-field reservations) ·
+additively** · Target: v0.20 · Breaking: **yes for observation delivery**
+(codec v2 replaces snapshot-only v1 before the first product release; replay
+v1.0/v1.1 compatibility remains) ·
 Depends on: RFC-006, RFC-008, and **baseline T2 closed**
 
 **This is the v0.20 document.** Parts A–C are the designed scope: signatures
@@ -1339,6 +1340,15 @@ E2's structural argument bites precisely in the case interest cannot help, so
 the patch codec is load-bearing for tick-paced products in a way §B5 did not
 credit. Build both in v0.20; if only one, the codec.
 
+**Final codec disposition (2026-07-26): v2 is mandatory.** Arena and
+TabletopLabs are both pre-release integrations and can migrate together, so
+carrying a snapshot-only v1 emission mode would freeze negotiation and testing
+cost without protecting a released consumer. `ObservationDelta.codec` is
+`'v2'`; bodies remain `patch | snapshot | unchanged`, with snapshot fallback
+required for unsafe, over-bound, or non-beneficial patches. The optional
+`observationCodec` setting configures v2 bounds only. This intentionally
+reopens the observation-delivery freeze; both product repins are the tag gate.
+
 *Follow-up available: the consumer offers live traces once its authoritative
 host is deployed. Take them — the synthetic table is the caveat both sides
 flagged.*
@@ -1604,8 +1614,9 @@ cause — the kernel holds the answer and makes the host re-derive it.*
 | E2 + E5 representation cost | both | measured | v0.20, patch codec + docs |
 | E6 host ergonomics ×4 | Arena | papercuts | v0.20, small |
 
-Implementation note (2026-07-26): D1–D3/D5, E2's bounded patch codec, E3,
-E5's storage guidance, and E6 are implemented on the v0.20 development line.
+Implementation note (2026-07-26): D1–D3/D5, E2's mandatory bounded v2 patch
+codec, E3, E5's storage guidance, and E6 are implemented on the v0.20
+development line.
 The reproducible `npm run observations:benchmark` synthetic check changes one
 entity in 50/200/500-entity views and currently measures about
 31×/124×/315× fewer canonical bytes at 0.8/2.2/5.6 ms encoding after warm-up.

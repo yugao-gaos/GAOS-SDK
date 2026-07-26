@@ -23,6 +23,7 @@ import {
   PreparedTransitionError,
   SessionAdvanceError,
   SessionConflictError,
+  applyObservationDelta,
   createSessionKernel,
   finalizeReplay,
   finalizeRunReplay,
@@ -1295,7 +1296,11 @@ describe('./session kernel', () => {
     expect(advance.deltas.every((delta) => delta.acknowledgements.length === 2))
       .toBe(true);
     for (const delta of advance.deltas as readonly ObservationDelta<HiddenView>[]) {
-      if (delta.body.kind === 'snapshot') reproduced.set(delta.seat, delta.body.view);
+      expect(delta.codec).toBe('v2');
+      reproduced.set(
+        delta.seat,
+        applyObservationDelta(reproduced.get(delta.seat), delta),
+      );
     }
     expect(JSON.stringify(advance.deltas.filter(({ seat }) => seat === 'alpha')))
       .not.toContain('beta-secret');

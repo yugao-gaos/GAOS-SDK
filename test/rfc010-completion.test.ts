@@ -188,6 +188,7 @@ describe('RFC-010 completed migration-informed scope', () => {
     });
     kernel.commit(ingest);
     const advance = kernel.prepareAdvance();
+    expect(advance.deltas.every(({ codec }) => codec === 'v2')).toBe(true);
     expect(advance.events.find((event) => event.kind === 'resolution'))
       .toMatchObject({ result: { status: 'won', stars: 2, actionsUsed: 1 } });
     kernel.commit(advance);
@@ -202,6 +203,14 @@ describe('RFC-010 completed migration-informed scope', () => {
     });
   });
 
+  it('rejects the removed observation codec v1 configuration', async () => {
+    const { options } = await signedOptions();
+    expect(() => createSessionKernel({
+      ...options,
+      observationCodec: 'v1' as never,
+    })).toThrow(/observationCodec must be a v2 options object/);
+  });
+
   it('preserves the v0.19 opaque timeout reservation for unsigned sessions', async () => {
     const { options } = await signedOptions();
     const legacy = createSessionKernel({
@@ -209,7 +218,6 @@ describe('RFC-010 completed migration-informed scope', () => {
       interest: undefined,
       seatKeys: undefined,
       signaturePolicy: undefined,
-      observationCodec: 'v1',
       timeoutPolicy: { policy: 'product.timeout.v0', graceMs: 2_000 },
     });
     expect(legacy.sessionHeader().timeoutPolicy).toEqual({

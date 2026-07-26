@@ -37,10 +37,11 @@ consumer repin and signed-artifact adoption checks.
 - Tier-2-signed `(seat, scopeId)` interest declarations narrow partitioned
   views without widening visibility, survive replay, and emit independently
   reconstructible delivery streams.
-- Observation codec v2 uses bounded safe JSON patches with snapshot fallback;
-  repair origins, opaque product action payloads, pre-ingest legality, typed
-  view failures, play-all-level runs, and host recovery helpers incorporate
-  the two product migrations' concrete findings.
+- Observation codec v2 is the only v0.20 delivery codec. It uses bounded safe
+  JSON patches with snapshot fallback; clients migrate from snapshot-only v1
+  through `applyObservationDelta`. Repair origins, opaque product action
+  payloads, pre-ingest legality, typed view failures, play-all-level runs, and
+  host recovery helpers incorporate the two product migrations' findings.
 - `SessionView` separates generic lifecycle observations from the
   action/grid-shaped `TickView`; non-HUD reducers report deterministic replay
   counters through `replayMetrics`, while existing reducers remain unchanged.

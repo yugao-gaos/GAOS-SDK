@@ -14,6 +14,22 @@ is announced (RFC-009 §4.3). The tag gate includes fresh Arena and
 TabletopLabs repin checks plus production of a locally verified signed
 artifact; repository tests alone do not satisfy RFC-010 §C4 adoption.
 
+### Migration from v0.19
+
+Observation delivery intentionally moves to codec v2 with no v1 emission
+mode. Remove `observationCodec: 'v1'`; the option now only customizes v2 bounds.
+`ObservationDelta.codec` is always `'v2'`, and bodies may be `patch`,
+`snapshot`, or `unchanged`. Clients should pass envelopes through
+`applyObservationDelta` rather than switching on snapshot-only assumptions.
+Snapshot fallback remains mandatory when a patch is unsafe, over bounds, or
+not smaller.
+
+Durable `SessionEvent.kind` also adds `interest` and `seat-signature`; exhaustive
+switches need arms for enabled RFC-010 lanes. A patch is an observation body,
+not a durable session-event kind. This is an intentional pre-1.0 source/wire
+break accepted because Arena and TabletopLabs are still early integrations and
+will validate the release candidate before the tag.
+
 - `gaos.replay` v1.2 assigns cryptographic meaning to the reserved integrity
   slots: canonical Ed25519 submission envelopes, roster-bound per-seat
   SHA-256 chains, per-seat periodic signing tiers, and durable
@@ -43,8 +59,8 @@ artifact; repository tests alone do not satisfy RFC-010 §C4 adoption.
 - client-declared interest is ordered per `(seat, scopeId)`, structurally
   constrained inside the partitioned view, tier-2 signed, replayed, and
   delivered with omission metadata;
-- observation codec v2 emits safe bounded JSON patches with mandatory snapshot
-  fallback and digest-checked reconstruction;
+- observation codec v2 is mandatory and emits safe bounded JSON patches with
+  mandatory snapshot fallback and digest-checked reconstruction;
 - reducer legality runs before durable ingest, invalid views are typed/fail
   fast, action `payload` round-trips through replay, repair envelopes declare
   their origin, and play-all-level run composition is explicit;

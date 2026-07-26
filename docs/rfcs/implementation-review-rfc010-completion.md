@@ -7,9 +7,10 @@
 > `replayMetrics`; Arena confirmed E4 chooser/dialogue navigation is UI-only
 > and confirmation produces a normal SDK action. The original review is kept
 > below as review history, but its unconditional “drop-in” and “ship now”
-> wording is superseded: exhaustive TypeScript consumers can still observe
-> widened unions, and RFC-010 §C4 still requires both product repins and signed
-> artifact adoption before tagging.
+> wording is superseded. A later pre-release decision makes observation codec
+> v2 mandatory, so observation delivery is now intentionally breaking; see
+> Round 3. RFC-010 §C4 still requires both product repins and signed artifact
+> adoption before tagging.
 
 Reviewed at `52fa4a1` against RFC-010 Parts A–E. Health: `tsc --noEmit` clean,
 vitest **277 passed / 3 skipped**, pytest **72 passed / 4 skipped**.
@@ -243,3 +244,26 @@ left at its `'v1'` default.
 **Ship, after R2-1.** It is a paragraph in the release notes, and it is the one
 thing standing between a re-pinning consumer and a red build. Everything else
 this review raised is resolved and verified.
+
+---
+
+# Round 3 — mandatory observation codec v2
+
+The product owners accepted an intentional pre-1.0 observation-wire break:
+Arena and TabletopLabs are both early enough to migrate together, so v0.20
+does not carry the snapshot-only v1 emission path.
+
+This supersedes Round 2's recommendation to describe an unchanged v1 default:
+
+- `ObservationDelta.codec` is now exactly `'v2'`;
+- `body` remains `patch | snapshot | unchanged`, so bounded snapshot fallback
+  is still mandatory;
+- `observationCodec` is optional bounds configuration for v2, not negotiation;
+- clients reconstruct through `applyObservationDelta`; and
+- the release notes explicitly tell exhaustive consumers that `interest` and
+  `seat-signature` are new durable event kinds. `patch` is an observation body
+  kind, correcting Round 2's accidental classification of it as a
+  `SessionEvent.kind`.
+
+**Disposition:** accepted for the v0.20 release candidate. Both product repins
+must exercise patch application and snapshot fallback before tagging.
