@@ -159,3 +159,87 @@ implementation and documentation findings are closed. Before tagging, Arena
 and TabletopLabs must re-pin the release candidate, run their real integration
 suites, adopt client-side signing, and produce locally verified trusted
 artifacts as required by RFC-010 §C4.
+
+---
+
+# Round 2 — review of `76776ab`
+
+Health: `tsc --noEmit` clean, vitest **279 passed / 3 skipped**, pytest
+**72 passed / 4 skipped**. `test/session.test.ts` was **not modified** and still
+passes, which is direct evidence the v0.19 reducer contract still compiles and
+runs unchanged.
+
+## My "drop-in" claim was too strong, and the implementer was right to qualify it
+
+The follow-up amended this review's unconditional *"no code change on their
+side"* wording. **That correction is right and I accept it.** Verified: since
+`v0.19.0` the `SessionEvent` `kind` union gained **`interest`, `patch`, and
+`seat-signature`**, and `ObservationDelta.codec` widened `'v1'` → `'v1' | 'v2'`.
+
+A widened union in a *return* type is runtime-compatible but **not
+source-compatible**: any TypeScript consumer with an exhaustive `switch` and a
+`never`-typed default fails to compile on upgrade. I conflated runtime
+compatibility with source compatibility. The accurate statement is: **the
+default runtime path is unchanged; the type surface is not strictly
+source-compatible.**
+
+## Resolved, verified
+
+- **Finding 2 — D5 test gap. Properly closed.** The test now asserts header
+  totals (`{ totalStars: 0, totalActionsUsed: 2 }`), rechecks the artifact with
+  `recheckReplayArtifact`, asserts `checked.ok === true`, and asserts the
+  independently replayed aggregate *including* `statuses: ['failed','failed']`.
+  That verifies the claim D5's rationale rests on — a failed level contributes
+  zero stars while its `actionsUsed` still counts — rather than only that the
+  projection builds. The ladder default is retained.
+- **Finding 4 — roster lifecycle.** Now a stated host obligation
+  (`docs/trust-and-verification.md:69–70`): the roster is immutable for the life
+  of a v1 session; rotation or reassignment starts a new session with a new
+  roster and new chain genesis. Matches §A3's proposal exactly.
+- **Finding 5 — idempotency index growth.** Documented for operators sizing
+  long-running sessions (`docs/session-and-integrity.md:218`).
+
+## New finding
+
+### R2-1 — MEDIUM · The union-widening hazard is diagnosed internally and invisible to consumers
+
+The follow-up correctly identified the exhaustive-switch hazard **in this
+review file** — an internal document. It is **not** in the consumer-facing
+release notes. Verified: `docs/releases.md` gained the `SessionView` split, the
+E4 disposition, and the tag-gate obligations, but nothing about new
+`SessionEvent` kinds or the widened `codec`; grep across `docs/` finds no
+consumer-facing mention of either.
+
+This is the **only thing in v0.20 that can break a consumer's build**, both
+consumers are TypeScript, and both are about to re-pin. Diagnosing it and then
+not telling the people who will hit it is the gap.
+
+**Fix:** a short migration note in the v0.20 release notes — new `kind` values
+`interest` / `patch` / `seat-signature`, `codec` now `'v1' | 'v2'`, exhaustive
+switches need a new arm, runtime behaviour unchanged when `observationCodec` is
+left at its `'v1'` default.
+
+## Notes, not findings
+
+- **E1 was implemented despite an explicit hold, and that is defensible.** This
+  review recommended holding `TickView` for a second consumer's voice, on the
+  grounds that one consumer satisfying a contract vacuously is a smell rather
+  than proof of a shape problem. The implementation went ahead on one voice —
+  but what it did is the *minimal* response: extract `SessionView`, make
+  `TickView extends SessionView`, widen the generic bound while keeping
+  `TickView` as the default, and add an optional `replayMetrics?`. It **removes
+  the forced vacuity without designing a new contract**, so it commits to
+  nothing that a second voice could invalidate. Accepted.
+- **E4 closed the right way, and without touching the kernel.** Arena answered
+  the diagnostic question this review asked them to answer first: chooser and
+  dialogue navigation are **UI-only**, and confirmation enters the kernel as an
+  ordinary SDK action. That is direction (2) of §E4 — *if it affects the
+  simulation, determinism already requires it in the transcript, so it was
+  never seat-local* — and it means the RFC-006 `viewRevision(seat) === cursor()`
+  invariant never had to be reopened. Asking the question saved the design.
+
+## Verdict
+
+**Ship, after R2-1.** It is a paragraph in the release notes, and it is the one
+thing standing between a re-pinning consumer and a red build. Everything else
+this review raised is resolved and verified.
