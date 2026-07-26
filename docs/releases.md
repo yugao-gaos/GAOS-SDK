@@ -7,9 +7,10 @@ For the public chronological changelog, see the
 
 Prepared July 25, 2026 as v0.19.0; **folded into v0.20 on July 26, 2026 and
 never tagged.** The content below shipped and was verified; only the version
-number changed. Both first-party consumers migrate against the commit pin
-`5ddd404` rather than a tag — see RFC-009 §4, which also carries the freeze
-rules that still apply to that pin.
+number changed. Both first-party consumers migrate against a **commit pin**
+rather than a tag: the contract froze at `5ddd404`, and you should pin the
+current `main` head (same code, correct docs). See RFC-009 §4, which carries
+both the pin rule and the freeze rules that still apply to it.
 
 This layer is the optional authoritative session and integrity layer:
 

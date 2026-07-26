@@ -1,6 +1,6 @@
 # RFC-009 — Release sequencing: what v0.19 must contain so the migrations can happen
 
-Status: **implemented, untagged — baseline pin `5ddd404` (2026-07-26)** · Target: the baseline (folded into v0.20) and v0.20 · Breaking: no
+Status: **implemented, untagged — contract frozen at `5ddd404`; pin `main` head (2026-07-26)** · Target: the baseline (folded into v0.20) and v0.20 · Breaking: no
 
 > **v0.19 is not a release.** Its content shipped and was verified; the
 > version number was folded into v0.20 on 2026-07-26. Read every "v0.19"
@@ -185,8 +185,23 @@ number disappears.
 
 One thing this must not break. v0.20 is defined as *what the migrations
 teach*, so v0.20 cannot also be the thing the migrations start from. The
-baseline therefore becomes a **commit pin — `5ddd404`** — and every rule
-below that said "the tag" now attaches to that SHA. **The freeze discipline
+baseline therefore becomes a **commit pin**, and every rule below that said
+"the tag" now attaches to that SHA.
+
+**Which commit to pin.** The **contract** froze at `5ddd404` — that is the
+last commit touching `src/`, `python/`, or the schema. Everything after it
+through the fold is documentation and the version string. **Pin the current
+`main` head, not `5ddd404` literally**: identical code, correct docs, and a
+`package.json` that does not claim a version which will never publish. The
+claim is mechanically checkable, and a migrating agent should check it rather
+than trust this paragraph:
+
+```bash
+git diff --name-only 5ddd404..<your-pin> -- src python schema   # must be empty
+```
+
+If that command prints anything, the freeze has been violated and the pin is
+not a baseline. **The freeze discipline
 is the part that was load-bearing, not the tag**: if the contract moves under
 two mid-flight migrations, both rewrite. Keep the freeze, drop the tag.
 
@@ -194,8 +209,9 @@ two mid-flight migrations, both rewrite. Keep the freeze, drop the tag.
 never be published.
 
 1. **Pin the baseline** once §2 items land (run composition, ack contract,
-   host obligations doc, N1–N5) — commit `5ddd404`, recorded in both
-   consumers' lockfile/submodule.
+   host obligations doc, N1–N5) — the current `main` head (contract frozen at
+   `5ddd404`; see the revision note above for why the head and not that SHA),
+   recorded in both consumers' lockfile/submodule.
 2. **Both migrations start on the pin**, independently, by their own agents.
 3. **Feedback classification** during migration:
    - *bug or missing detail in a shipped contract* → **additive commit on the
