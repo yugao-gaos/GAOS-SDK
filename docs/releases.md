@@ -57,8 +57,8 @@ Migration note: `finalizeRunReplay` requires each source level transcript to
 record its already-derived level seed with `seedPolicy: 'explicit'`.
 Transcripts using `gaos.run-level-seed.v1` directly are rejected.
 Hosts migrating kernel construction must also choose a `hostTime` policy.
-Existing timestamp-free persisted events remain rehydratable with
-`hostTime: 'none'`.
+Existing timestamp-free persisted events remain rehydratable under any
+`hostTime` policy.
 
 See [sessions and integrity](/session-and-integrity).
 

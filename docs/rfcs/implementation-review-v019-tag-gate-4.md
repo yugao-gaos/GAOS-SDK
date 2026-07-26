@@ -231,3 +231,76 @@ wall clock".
    correction.
 4. Both release-note items.
 5. Tag `v0.19.0`; start the migrations.
+
+---
+
+# Re-gate (verified at `3064f1f`)
+
+`tsc --noEmit` clean · vitest 262 passed / 3 skipped · pytest 67 passed / 4
+skipped. Canonical form provably untouched: `src/protocol.ts`, the JSON
+Schema, and both fixture sets are **identical** `e22ec4b..HEAD`; the only
+changed sources are `src/session.ts`, one re-export line in
+`src/engine/index.ts`, and the six-line D1 hunk in `replay.py`. Empirically
+23/23 byte-identical TS vs real CPython (integers incl. the `1e20`/`1e21`
+trap, surrogates in values and keys, code-point ordering across the
+surrogate boundary `{"￿":1,"𐀀":3,"😀":2}`), golden fixture and all four
+commitment vectors matching in both languages.
+
+## Closed
+
+**D1** — tri-layer agreement on a real `prepareTimeout` artifact: absent
+rejected by TS, Schema and Python with the *identical* message; explicit
+`null` accepted by all three; empty/non-string rejected. Differential
+campaign over 25,200 mutants and 7 corpora: **100.000000 % verdict
+agreement, zero divergence classes** (was 99.9909 %). Remaining differences
+are message text only (10.4 %), never accept/reject.
+
+**F7** (a)–(g) — required at type and runtime with no silent default;
+`'none'` omits the field and makes transcripts byte-reproducible across runs;
+provider values validated; **D5 closed** (`() => null`/`undefined` now throw
+instead of falling back to the wall clock); **no `Date.now()` left in
+executable code**; `live === rehydrated` under both policies; docs carry all
+three clauses including *"Never sort by `hostTime`… durable ordering is
+`tick`, `cursor`, then `transitionRevision`."*
+
+**D2, D3**, and the `ReplaySeatIntegrityReservation` re-export. Full
+regression battery green across 50 checks, including F1 abort idempotency
+after a *failed* commit, P0-1 atomicity on both paths, watermark rejection
+recovery with no payload leak, four-way checkpoint digest equality, both
+reducer styles, run replay with `seedPolicy` enforcement, crash-rehydrate at
+every boundary, and the T1 honest-vs-forged matrix.
+
+**Release notes: 3 of 4 present, and the fourth is correctly obsolete.** F7
+made `SessionEventBase.hostTime` *optional* and rehydration accepts
+timestamp-free events, so "pre-v0.19 transcripts are unrehydratable" no
+longer exists — verified empirically. The fix removed the migration hazard
+rather than documenting it.
+
+## Remaining — three one-line guards, all the same class
+
+Unvalidated input on public entry points; the pass hardened `prepareIngest`,
+`prepareTimeout` and `prepareExtension` but left three siblings.
+
+1. **N1 · `rehydrateKernel(options, undefined)` silently returns a fresh
+   kernel** (`src/session.ts:614`). D4 was fixed for `null` only, and
+   `undefined` is the *more* common store-miss value —
+   `Map.get(miss)`, `await load(id)`. A host resuming a session it failed to
+   load silently starts a new one at revision 0. Guard in `rehydrateKernel`
+   itself (`:1707`), leaving the constructor's optional path for
+   `createSessionKernel`. **Severity: medium-high — silent data loss.**
+2. **N2 · `finalizeRunReplay` validates the array but not its elements**
+   (`:1958-1963`): `[null]` → `Cannot read properties of null (reading
+   'header')`, `['x']` → an error naming the *wrong* property.
+3. **N3 · Kernel constructors unguarded against a bad `options`**
+   (`:517`): `createSessionKernel(null)` → `Cannot read properties of null
+   (reading 'seed')`; `[]`/`'x'` → a misleading `RangeError: seed must be an
+   unsigned 32-bit integer`. This is the **first call every migrating team
+   makes**.
+
+Trivial: `docs/releases.md:60-62` says timestamp-free events rehydrate "with
+`hostTime: 'none'`" — they rehydrate under *any* policy (`hostTime` is not in
+the header). Drop the qualifier.
+
+**Verdict: hold for the three guards, then tag.** Both actual blockers are
+closed and the format is frozen-clean; what remains is one class of
+one-liners on the entry points the migrations touch first.

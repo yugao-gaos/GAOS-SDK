@@ -308,6 +308,10 @@ describe('./session kernel', () => {
 
   it('rejects malformed public API shapes before they can enter durable state', () => {
     const kernel = createSessionKernel(options());
+    for (const invalidOptions of [null, [], 'x']) {
+      expect(() => createSessionKernel(invalidOptions as never))
+        .toThrow(/session kernel options must be an object/);
+    }
     expect(() => kernel.prepareTimeout(null as never, { id: 'Action 1' }))
       .toThrow(/timeout must be an object/);
     expect(() => kernel.prepareTimeout(
@@ -318,10 +322,20 @@ describe('./session kernel', () => {
       .toThrow(/JSON object/);
     expect(() => rehydrateKernel(options(), null as never))
       .toThrow(/transcript must be an object/);
+    expect(() => rehydrateKernel(options(), undefined as never))
+      .toThrow(/transcript must be an object/);
+    expect(() => rehydrateKernel(null as never, kernel.liveTranscript()))
+      .toThrow(/session kernel options must be an object/);
     expect(() => finalizeReplay(null as never, { perm: [0] }))
       .toThrow(/transcript must be an object/);
     expect(() => finalizeRunReplay(null as never, { seed: 1, perm: [0] }))
       .toThrow(/transcripts must be an array/);
+    for (const invalidTranscript of [null, 'x', []]) {
+      expect(() => finalizeRunReplay(
+        [invalidTranscript] as never,
+        { seed: 1, perm: [0] },
+      )).toThrow(/run transcript 0 must be an object/);
+    }
   });
 
   it('verifies commit–reveal before reducer execution and through replay', () => {
