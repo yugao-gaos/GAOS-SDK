@@ -1,23 +1,20 @@
 import { performance } from 'node:perf_hooks';
 import { deflateSync } from 'node:zlib';
 import { canonicalJson } from '../dist/protocol.js';
-import { createValidatedJsonPatch } from '../dist/observation-codec.js';
+import { createBoundedValidatedJsonPatch } from '../dist/observation-codec.js';
 
 /*
- * Answers two questions the byte-only benchmark could not:
+ * Measures the two v2 delivery policies, not two wire versions:
  *
- *   1. CPU — is v2 net cheaper or net more expensive than v1? v1's per-seat
- *      per-tick cost is canonicalising the whole view. v2's is diffing plus
- *      canonicalising the patch. Timing the patch alone measures what v2
- *      spends without measuring what it saves, which cannot settle the
- *      question RFC-009 §3.3 actually asked.
- *   2. Compression — how much does transport compression (permessage-deflate)
- *      reclaim on its own? If it reclaims most of the gap, a custom binary
- *      codec is not worth building.
+ *   1. `patchStrategy: "never"` canonicalises and snapshots the whole view.
+ *   2. `patchStrategy: "adaptive"` probes a bounded patch. After a probe loses,
+ *      the kernel skips the next PATCH_BACKOFF_TICKS probes, so high-churn
+ *      workloads converge near snapshot CPU while sparse workloads retain the
+ *      bandwidth win.
  *
- * Also sweeps activity. The previous version changed exactly one entity, which
- * is the best case, and made the patch a constant 122 B at every table size —
- * so its headline "reduction" grew with the table for the wrong reason.
+ * The compression columns show what permessage-deflate can reclaim in either
+ * case. The activity sweep avoids treating one changed entity as representative
+ * of every tick.
  */
 
 const TICK_HZ = 20;
@@ -27,6 +24,9 @@ const ACTIVITY = [1, 5, 20, 'all'];
 const ITERATIONS = 30;
 const WARMUP = 10;
 const MIN_REDUCTION = 4;
+const MAX_OPERATIONS = 2_048;
+const MAX_BYTES = 65_536;
+const PATCH_BACKOFF_TICKS = 8;
 
 function makeView(entities) {
   return {
@@ -65,6 +65,7 @@ function timeIt(fn) {
 }
 
 const deflated = (text) => deflateSync(Buffer.from(text, 'utf8')).length;
+const byteLength = (text) => Buffer.byteLength(text, 'utf8');
 const perRoomMiBs = (bytes) => (bytes * TICK_HZ * SEATS) / (1024 * 1024);
 const round = (value, places = 3) => Number(value.toFixed(places));
 
@@ -73,56 +74,86 @@ for (const entities of SIZES) {
   const before = makeView(entities);
   for (const changed of ACTIVITY) {
     const after = mutate(before, entities, changed);
-
-    // v1: serialise the whole view, every seat, every tick.
     const snapshotJson = canonicalJson(after);
-    const v1Ms = timeIt(() => canonicalJson(after));
+    const snapshotBytes = byteLength(snapshotJson);
+    const maximumPatchBytes = Math.min(
+      MAX_BYTES,
+      Math.floor(snapshotBytes / MIN_REDUCTION),
+    );
+    const patch = createBoundedValidatedJsonPatch(
+      before,
+      after,
+      MAX_OPERATIONS,
+      maximumPatchBytes,
+    );
+    const fellBack = patch === null;
+    const wireJson = fellBack ? snapshotJson : patch.canonical;
+    const wireBytes = byteLength(wireJson);
+    const wireDeflated = deflated(wireJson);
 
-    // v2: diff against the previous view, then serialise the patch.
-    const patchJson = canonicalJson(createValidatedJsonPatch(before, after));
-    const v2Ms = timeIt(() => canonicalJson(createValidatedJsonPatch(before, after)));
-
-    // Match the kernel rule: a patch ships only if it wins by MIN_REDUCTION.
-    const fellBack = patchJson.length * MIN_REDUCTION > snapshotJson.length;
-    const wireBytes = fellBack ? snapshotJson.length : patchJson.length;
-    const wireDeflated = fellBack ? deflated(snapshotJson) : deflated(patchJson);
+    // Both paths include the canonical view required for equality and digest.
+    const snapshotMs = timeIt(() => {
+      canonicalJson(after);
+      structuredClone(after);
+    });
+    const probeMs = timeIt(() => {
+      const canonical = canonicalJson(after);
+      const candidate = createBoundedValidatedJsonPatch(
+        before,
+        after,
+        MAX_OPERATIONS,
+        Math.min(MAX_BYTES, Math.floor(byteLength(canonical) / MIN_REDUCTION)),
+      );
+      if (candidate === null) {
+        structuredClone(after);
+      }
+    });
+    const adaptiveSteadyMs = fellBack
+      ? (probeMs + snapshotMs * PATCH_BACKOFF_TICKS) / (PATCH_BACKOFF_TICKS + 1)
+      : probeMs;
 
     rows.push({
       entities,
       changed,
       fellBack,
       bytes: {
-        v1: snapshotJson.length,
-        v2: wireBytes,
-        reduction: round(snapshotJson.length / wireBytes, 1),
+        snapshot: snapshotBytes,
+        adaptive: wireBytes,
+        reduction: round(snapshotBytes / wireBytes, 1),
       },
       deflated: {
-        v1: deflated(snapshotJson),
-        v2: wireDeflated,
+        snapshot: deflated(snapshotJson),
+        adaptive: wireDeflated,
         reduction: round(deflated(snapshotJson) / wireDeflated, 1),
       },
       cpuMsPerSeatPerTick: {
-        v1: round(v1Ms),
-        v2: round(v2Ms),
-        // > 1 means v2 costs more CPU per seat per tick than v1.
-        ratio: round(v2Ms / v1Ms, 2),
+        snapshot: round(snapshotMs),
+        adaptiveProbe: round(probeMs),
+        adaptiveSteady: round(adaptiveSteadyMs),
+        probeRatio: round(probeMs / snapshotMs, 2),
+        steadyRatio: round(adaptiveSteadyMs / snapshotMs, 2),
       },
       roomMiBs: {
-        v1: round(perRoomMiBs(snapshotJson.length)),
-        v2: round(perRoomMiBs(wireBytes)),
-        v2Deflated: round(perRoomMiBs(wireDeflated)),
+        snapshot: round(perRoomMiBs(snapshotBytes)),
+        adaptive: round(perRoomMiBs(wireBytes)),
+        adaptiveDeflated: round(perRoomMiBs(wireDeflated)),
       },
-      // Share of one 20 Hz tick (50 ms) spent encoding for every seat.
       tickBudgetPct: {
-        v1: round((v1Ms * SEATS) / (1000 / TICK_HZ) * 100, 1),
-        v2: round((v2Ms * SEATS) / (1000 / TICK_HZ) * 100, 1),
+        snapshot: round((snapshotMs * SEATS) / (1000 / TICK_HZ) * 100, 1),
+        adaptiveProbe: round((probeMs * SEATS) / (1000 / TICK_HZ) * 100, 1),
+        adaptiveSteady: round((adaptiveSteadyMs * SEATS) / (1000 / TICK_HZ) * 100, 1),
       },
     });
   }
 }
 
 console.log(JSON.stringify({
-  implementation: 'gaos observation codec v2',
-  conditions: { tickHz: TICK_HZ, seats: SEATS, iterations: ITERATIONS },
+  implementation: 'gaos observation codec v2 delivery strategies',
+  conditions: {
+    tickHz: TICK_HZ,
+    seats: SEATS,
+    iterations: ITERATIONS,
+    patchBackoffTicks: PATCH_BACKOFF_TICKS,
+  },
   rows,
 }, null, 1));

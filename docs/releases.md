@@ -16,25 +16,22 @@ artifact; repository tests alone do not satisfy RFC-010 §C4 adoption.
 
 ### Migration from v0.19
 
-Observation delivery defaults to codec v2. `ObservationDelta.codec` is
-`'v1' | 'v2'` and bodies may be `patch`, `snapshot`, or `unchanged`, so clients
-should pass envelopes through `applyObservationDelta` rather than switching on
-snapshot-only assumptions.
+Observation delivery uses one mandatory v2 envelope. `ObservationDelta.codec`
+is `'v2'`; bodies may be `patch`, `snapshot`, or `unchanged`, so clients should
+pass envelopes through `applyObservationDelta`.
 
-**`observationCodec: 'v1'` is retained and is not deprecated.** Measured at
-20 Hz, v1 costs **1.6×–5.9× less CPU** than v2 (see
-`npm run observations:benchmark`), and `permessage-deflate` reclaims roughly
-**10×** of its bytes for free — a 200-entity snapshot compresses 15,170 → 1,539
-bytes. Large tick-paced tables are frequently better served by v1 behind
-transport compression than by patching. **Enable transport compression before
-reaching for a codec**; it is the cheaper win on both axes.
+Patch computation is a delivery policy, not a wire-version choice. The default
+`patchStrategy: 'adaptive'` requires a patch to win by `minReduction` (default
+**4×**) and backs off for `patchBackoffTicks` changed observations (default
+**8**) after an unsafe, over-bound, or uneconomic probe. This prevents
+high-churn tables from paying the full diff cost every tick. Products that
+prefer predictable snapshot CPU can set `patchStrategy: 'never'`; envelopes
+remain v2 and still use `snapshot` or `unchanged` bodies.
 
-Snapshot fallback remains mandatory when a patch is unsafe or over bounds, and
-now also when it fails to win by `minReduction` (default **4×**). A patch that
-is merely *smaller* does not repay its CPU: at 500 entities with every entity
-moving, a patch 7 % smaller than the snapshot cost 13.8 ms against 2.66 ms.
-Note that v2 still pays the diff before falling back, so a table that changes
-wholesale every tick should select `'v1'` rather than rely on the fallback.
+The patch walker now abandons operation and canonical-byte bounds during the
+walk, reuses the already cached canonical view for its size decision, and does
+not clone a snapshot on a successful patch. Transport compression remains
+recommended for snapshot-heavy traffic.
 
 Durable `SessionEvent.kind` also adds `interest` and `seat-signature`; exhaustive
 switches need arms for enabled RFC-010 lanes. A patch is an observation body,

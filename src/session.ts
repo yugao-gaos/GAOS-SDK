@@ -70,8 +70,8 @@ import {
 } from './engine/index.js';
 import {
   applyJsonPatch,
+  createBoundedValidatedJsonPatch,
   createJsonPatch,
-  createValidatedJsonPatch,
   isJsonProjection,
   type JsonPatchOperation,
 } from './observation-codec.js';
@@ -97,6 +97,17 @@ export interface SessionStateIsolation<TState> {
 
 export interface ObservationCodecV2Options {
   version: 'v2';
+  /**
+   * `adaptive` probes patches and temporarily backs off after a snapshot wins.
+   * `never` emits v2 snapshot/unchanged bodies without walking a diff.
+   * Default `adaptive`.
+   */
+  patchStrategy?: 'adaptive' | 'never';
+  /**
+   * Changed observations to emit as snapshots after an adaptive probe loses.
+   * Default 8. Set to 0 to probe every changed observation.
+   */
+  patchBackoffTicks?: number;
   maxOperations?: number;
   maxBytes?: number;
   /**
@@ -190,16 +201,11 @@ export interface SessionKernelOptions<
   dmath?: Dmath;
   limits?: SessionLimits;
   stateIsolation?: SessionStateIsolation<TState>;
-  /** Optional bounds for the mandatory v2 patch codec. */
   /**
-   * Observation delivery. Defaults to v2 (patches with snapshot fallback).
-   *
-   * `'v1'` emits a snapshot every tick. It is **not** deprecated: measured at
-   * 20 Hz it costs 1.7×–5.9× *less* CPU than v2, and transport compression
-   * reclaims ~10× of its bytes for free, so a large tick-paced table is often
-   * better served by v1 behind `permessage-deflate` than by patching.
+   * Mandatory v2 observation delivery. Adaptive bounded patches are the
+   * default; use `patchStrategy: 'never'` for v2 snapshots without diff CPU.
    */
-  observationCodec?: 'v1' | ObservationCodecV2Options;
+  observationCodec?: ObservationCodecV2Options;
   /** Product projection applied only after the seat's partitioned view exists. */
   interest?: InterestPolicy<TView>;
 }
@@ -356,7 +362,7 @@ export interface ObservationDelta<TView = TickView<unknown, unknown>> {
   transitionRevision: number;
   viewRevision: number;
   tick: number;
-  codec: 'v1' | 'v2';
+  codec: 'v2';
   /** How this envelope was produced. Absent is read as `resolution`. */
   origin?: 'resolution' | 'snapshot' | 'interest';
   /**
@@ -488,6 +494,8 @@ interface InterestScopeState<TView> {
   declaration: JsonValue;
   view: TView;
   canonical: string;
+  /** Delivery-only adaptive patch state; it has no simulation semantics. */
+  patchBackoffRemaining: number;
 }
 
 interface KernelState<TState, TCommand extends JsonValue, TView> {
@@ -610,6 +618,7 @@ const DEFAULT_LIMITS = Object.freeze({
   receiptRetention: 64,
   maxExtensionBytes: 65_536,
 });
+const utf8Encoder = new TextEncoder();
 
 function cloneMapValues<T>(source: Map<string, T>): Map<string, T> {
   return new Map([...source].map(([key, value]) => [key, structuredClone(value)]));
@@ -786,7 +795,7 @@ class SessionKernelImpl<
   private readonly limits: Required<SessionLimits>;
   private readonly header: SessionHeader<TLevel>;
   private readonly tickTimeoutPolicy: ReplayTickTimeoutPolicy | undefined;
-  private readonly observationCodec: Required<ObservationCodecV2Options> | 'v1';
+  private readonly observationCodec: Required<ObservationCodecV2Options>;
   /** O(1) permanent idempotency index, rebuilt from durable accepted events. */
   private readonly historicalSubmissionKeys = new Set<string>();
   private readonly historicalInterestCommands = new Map<string, string>();
@@ -883,24 +892,35 @@ class SessionKernelImpl<
       }
     }
     const observationCodec = options.observationCodec ?? { version: 'v2' };
-    if (observationCodec === 'v1') {
-      this.observationCodec = 'v1';
-    } else {
-      if (!isObjectRecord(observationCodec) || observationCodec.version !== 'v2') {
-        throw new TypeError("observationCodec must be 'v1' or a v2 options object");
-      }
-      const maxOperations = observationCodec.maxOperations ?? 2_048;
-      const maxBytes = observationCodec.maxBytes ?? 65_536;
-      const minReduction = observationCodec.minReduction ?? 4;
-      if (!Number.isSafeInteger(maxOperations) || maxOperations <= 0
-        || !Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
-        throw new RangeError('v2 observation codec bounds must be positive safe integers');
-      }
-      if (!Number.isFinite(minReduction) || minReduction < 1) {
-        throw new RangeError('minReduction must be a finite number >= 1');
-      }
-      this.observationCodec = { version: 'v2', maxOperations, maxBytes, minReduction };
+    if (!isObjectRecord(observationCodec) || observationCodec.version !== 'v2') {
+      throw new TypeError('observationCodec must be a v2 options object');
     }
+    const patchStrategy = observationCodec.patchStrategy ?? 'adaptive';
+    const patchBackoffTicks = observationCodec.patchBackoffTicks ?? 8;
+    const maxOperations = observationCodec.maxOperations ?? 2_048;
+    const maxBytes = observationCodec.maxBytes ?? 65_536;
+    const minReduction = observationCodec.minReduction ?? 4;
+    if (patchStrategy !== 'adaptive' && patchStrategy !== 'never') {
+      throw new TypeError("patchStrategy must be 'adaptive' or 'never'");
+    }
+    if (!Number.isSafeInteger(patchBackoffTicks) || patchBackoffTicks < 0) {
+      throw new RangeError('patchBackoffTicks must be a non-negative safe integer');
+    }
+    if (!Number.isSafeInteger(maxOperations) || maxOperations <= 0
+      || !Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+      throw new RangeError('v2 observation codec bounds must be positive safe integers');
+    }
+    if (!Number.isFinite(minReduction) || minReduction < 1) {
+      throw new RangeError('minReduction must be a finite number >= 1');
+    }
+    this.observationCodec = {
+      version: 'v2',
+      patchStrategy,
+      patchBackoffTicks,
+      maxOperations,
+      maxBytes,
+      minReduction,
+    };
     this.isolation = options.stateIsolation ?? {
       fork: (state: TState): TState => structuredClone(state),
     };
@@ -953,6 +973,7 @@ class SessionKernelImpl<
         declaration: null,
         view: structuredClone(seatView),
         canonical,
+        patchBackoffRemaining: 0,
       });
     }
     this.live = {
@@ -998,41 +1019,62 @@ class SessionKernelImpl<
   private encodedObservation(
     previous: TView,
     next: TView,
+    nextCanonical: string,
     unchanged: boolean,
-  ): Pick<ObservationDelta<TView>, 'codec' | 'body'> {
-    const codec = this.observationCodec === 'v1' ? 'v1' : 'v2';
+    patchBackoffRemaining: number,
+  ): Pick<ObservationDelta<TView>, 'codec' | 'body'> & {
+    patchBackoffRemaining: number;
+  } {
     if (unchanged) {
-      return { codec, body: { kind: 'unchanged' } };
+      return {
+        codec: 'v2',
+        body: { kind: 'unchanged' },
+        patchBackoffRemaining,
+      };
     }
-    const snapshot = structuredClone(next);
-    if (this.observationCodec === 'v1') {
-      return { codec: 'v1', body: { kind: 'snapshot', view: snapshot } };
+    if (this.observationCodec.patchStrategy === 'never') {
+      return {
+        codec: 'v2',
+        body: { kind: 'snapshot', view: structuredClone(next) },
+        patchBackoffRemaining: 0,
+      };
     }
+    if (patchBackoffRemaining > 0) {
+      return {
+        codec: 'v2',
+        body: { kind: 'snapshot', view: structuredClone(next) },
+        patchBackoffRemaining: patchBackoffRemaining - 1,
+      };
+    }
+    const snapshotBytes = utf8Encoder.encode(nextCanonical).length;
+    const maximumPatchBytes = Math.min(
+      this.observationCodec.maxBytes,
+      Math.floor(snapshotBytes / this.observationCodec.minReduction),
+    );
     try {
-      // The limit is passed *into* the walk so an oversized diff is abandoned
-      // rather than built and discarded; see observation-codec.ts.
-      const operations = createValidatedJsonPatch(
-        previous as unknown as JsonValue,
-        next as unknown as JsonValue,
-        this.observationCodec.maxOperations,
-      );
-      if (operations !== null) {
-        const patchBytes = new TextEncoder().encode(canonicalJson(
-          operations as unknown as JsonValue,
-        )).length;
-        const snapshotBytes = new TextEncoder().encode(canonicalSessionView(next)).length;
-        // Require a wide win, not merely a smaller one: patching costs real CPU
-        // and a marginal byte saving does not repay it.
-        if (patchBytes <= this.observationCodec.maxBytes
-          && patchBytes * this.observationCodec.minReduction <= snapshotBytes) {
-          return { codec: 'v2', body: { kind: 'patch', operations } };
-        }
+      const patch = maximumPatchBytes < 2
+        ? null
+        : createBoundedValidatedJsonPatch(
+            previous as unknown as JsonValue,
+            next as unknown as JsonValue,
+            this.observationCodec.maxOperations,
+            maximumPatchBytes,
+          );
+      if (patch !== null) {
+        return {
+          codec: 'v2',
+          body: { kind: 'patch', operations: patch.operations },
+          patchBackoffRemaining: 0,
+        };
       }
     } catch {
-      // Unsafe pointer keys or a non-beneficial representation use the
-      // mandatory snapshot fallback.
+      // Unsafe pointer keys use the mandatory snapshot fallback.
     }
-    return { codec: 'v2', body: { kind: 'snapshot', view: snapshot } };
+    return {
+      codec: 'v2',
+      body: { kind: 'snapshot', view: structuredClone(next) },
+      patchBackoffRemaining: this.observationCodec.patchBackoffTicks,
+    };
   }
 
   private scopedView(
@@ -1593,7 +1635,13 @@ class SessionKernelImpl<
       for (const scope of scopes) {
         const scoped = this.scopedView(nextSnapshot, scope, draft.cursor, draft.tick);
         const unchanged = scope.canonical === scoped.canonical;
-        const encoded = this.encodedObservation(scope.view, scoped.view, unchanged);
+        const encoded = this.encodedObservation(
+          scope.view,
+          scoped.view,
+          scoped.canonical,
+          unchanged,
+          scope.patchBackoffRemaining,
+        );
         deltas.push({
           seat,
           scopeId: scope.scopeId,
@@ -1612,6 +1660,7 @@ class SessionKernelImpl<
         });
         scope.view = scoped.view;
         scope.canonical = scoped.canonical;
+        scope.patchBackoffRemaining = encoded.patchBackoffRemaining;
       }
     }
     draft.window = createIntentWindow(
@@ -2002,7 +2051,7 @@ class SessionKernelImpl<
       throw new TypeError('extension record must be a JSON object');
     }
     const canonical = canonicalJson(record);
-    if (new TextEncoder().encode(canonical).length > this.limits.maxExtensionBytes) {
+    if (utf8Encoder.encode(canonical).length > this.limits.maxExtensionBytes) {
       throw new RangeError('extension record exceeds maxExtensionBytes');
     }
     const draft = this.forkLive();
@@ -2136,6 +2185,7 @@ class SessionKernelImpl<
           declaration: structuredClone(submission.declaration),
           view: structuredClone(nextScope.view),
           canonical: nextScope.canonical,
+          patchBackoffRemaining: 0,
         },
       );
       const delta: ObservationDelta<TView> = {
@@ -2441,6 +2491,7 @@ class SessionKernelImpl<
             declaration: structuredClone(event.declaration),
             view: scoped.view,
             canonical: scoped.canonical,
+            patchBackoffRemaining: 0,
           },
         );
       } else if (event.kind === 'resolution') {

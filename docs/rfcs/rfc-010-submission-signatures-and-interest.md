@@ -1345,9 +1345,12 @@ TabletopLabs are both pre-release integrations and can migrate together, so
 carrying a snapshot-only v1 emission mode would freeze negotiation and testing
 cost without protecting a released consumer. `ObservationDelta.codec` is
 `'v2'`; bodies remain `patch | snapshot | unchanged`, with snapshot fallback
-required for unsafe, over-bound, or non-beneficial patches. The optional
-`observationCodec` setting configures v2 bounds only. This intentionally
-reopens the observation-delivery freeze; both product repins are the tag gate.
+required for unsafe, over-bound, or non-beneficial patches. Patch computation
+is not mandatory: `patchStrategy: 'never'` emits v2 snapshots, while the
+default `adaptive` strategy backs off for a bounded number of changed
+observations after a losing probe. The optional `observationCodec` setting
+configures that v2 delivery policy and its bounds. This intentionally reopens
+the observation-delivery freeze; both product repins are the tag gate.
 
 *Follow-up available: the consumer offers live traces once its authoritative
 host is deployed. Take them — the synthetic table is the caveat both sides
@@ -1614,12 +1617,12 @@ cause — the kernel holds the answer and makes the host re-derive it.*
 | E2 + E5 representation cost | both | measured | v0.20, patch codec + docs |
 | E6 host ergonomics ×4 | Arena | papercuts | v0.20, small |
 
-Implementation note (2026-07-26): D1–D3/D5, E2's mandatory bounded v2 patch
-codec, E3, E5's storage guidance, and E6 are implemented on the v0.20
-development line.
-The reproducible `npm run observations:benchmark` synthetic check changes one
-entity in 50/200/500-entity views and currently measures about
-31×/124×/315× fewer canonical bytes at 0.8/2.2/5.6 ms encoding after warm-up.
+Implementation note (2026-07-26): D1–D3/D5, E2's mandatory v2 envelope with
+bounded adaptive patch delivery, E3, E5's storage guidance, and E6 are
+implemented on the v0.20 development line. The reproducible
+`npm run observations:benchmark` synthetic check now reports snapshot,
+adaptive-probe, and adaptive steady-state CPU across sparse and high-churn
+50/200/500-entity views, alongside raw and deflated wire bytes.
 E1 is implemented as the additive `SessionView`/`TickView` split with an
 explicit `replayMetrics` seam for non-HUD observations. Arena resolved E4:
 unconfirmed chooser/dialogue state is presentation-only, while confirmation

@@ -9,7 +9,7 @@
 > below as review history, but its unconditional “drop-in” and “ship now”
 > wording is superseded. A later pre-release decision makes observation codec
 > v2 mandatory, so observation delivery is now intentionally breaking; see
-> Round 3. RFC-010 §C4 still requires both product repins and signed artifact
+> Round 4. RFC-010 §C4 still requires both product repins and signed artifact
 > adoption before tagging.
 
 Reviewed at `52fa4a1` against RFC-010 Parts A–E. Health: `tsc --noEmit` clean,
@@ -349,3 +349,34 @@ it. `canonicalJson` here is uncached, while the kernel now caches canonical
 seat views, which makes v1's real cost *lower* than measured and v2 look worse
 still. The robust result across all of these is the **v2/v1 ratio**, which is
 above 1 in every cell.
+
+---
+
+# Round 4 — one v2 wire, adaptive patch CPU
+
+Round 3 correctly found that unconditional patch probing is a CPU regression,
+but restoring a second wire version was not required to recover the cheaper
+path. Snapshot versus patch is a body-selection policy inside the v2 envelope,
+not a reason for protocol negotiation.
+
+The v0.20 disposition is therefore:
+
+- `ObservationDelta.codec` remains exactly `'v2'`;
+- `patchStrategy: 'never'` emits v2 snapshots without walking a diff;
+- the default `adaptive` strategy backs off for eight changed observations
+  after a probe loses, then probes again;
+- operation and canonical-byte limits abandon the diff during the walk;
+- the patch-size decision reuses the scoped view's cached canonical form; and
+- a successful patch no longer pays for an unused full snapshot clone.
+
+The benchmark now names the actual choices—snapshot, adaptive probe, and
+adaptive steady state—and keeps raw/deflated bandwidth beside CPU. This
+supersedes Round 3's recommendation to restore v1 while preserving its measured
+finding: patching is worthwhile for sparse changes, and repeated patch probes
+are not worthwhile for high-churn views.
+
+On the same 20 Hz × 4-seat synthetic run, 500 entities/all-changing now measure
+32.1% of the tick budget for snapshots, 88.1% for the occasional adaptive
+probe, and 38.3% in adaptive steady state. The previous repeated-probe path
+exceeded the whole tick budget. At 500 entities/one change, adaptive retains
+the intended trade: 1.86× snapshot CPU for 314.8× fewer raw bytes.

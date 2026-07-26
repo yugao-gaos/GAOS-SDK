@@ -1,5 +1,6 @@
 import {
   assertJsonValue,
+  canonicalJson,
   type JsonValue,
 } from './protocol.js';
 
@@ -59,26 +60,54 @@ function compareCodePoints(left: string, right: string): number {
   return a.length - b.length;
 }
 
+interface DiffJsonOptions {
+  maxOperations?: number;
+  maxBytes?: number;
+  canonical?: boolean;
+}
+
+interface DiffJsonResult {
+  operations: JsonPatchOperation[];
+  canonical?: string;
+  bytes?: number;
+}
+
+const textEncoder = new TextEncoder();
+
 function diffJson(
   previous: JsonValue,
   next: JsonValue,
-  limit = Number.POSITIVE_INFINITY,
-): JsonPatchOperation[] | null {
+  options: DiffJsonOptions = {},
+): DiffJsonResult | null {
   const operations: JsonPatchOperation[] = [];
+  const canonicalOperations: string[] = [];
+  let canonicalBytes = 2;
   let exceeded = false;
-  const visit = (left: JsonValue, right: JsonValue, path: string): void => {
-    // Stop walking as soon as the patch cannot pay for itself. Without this the
-    // diff costs O(view) even when the result is discarded, which is the whole
-    // CPU regression: a 500-entity tick where everything moved spent 15.02 ms
-    // building a patch that was then thrown away for a 2.81 ms snapshot.
+  const emit = (operation: JsonPatchOperation): void => {
     if (exceeded) return;
-    if (operations.length > limit) {
+    if (operations.length >= (options.maxOperations ?? Number.POSITIVE_INFINITY)) {
       exceeded = true;
       return;
     }
+    if (options.canonical || options.maxBytes !== undefined) {
+      const encoded = canonicalJson(operation as unknown as JsonValue);
+      const nextBytes = canonicalBytes
+        + (canonicalOperations.length === 0 ? 0 : 1)
+        + textEncoder.encode(encoded).length;
+      if (nextBytes > (options.maxBytes ?? Number.POSITIVE_INFINITY)) {
+        exceeded = true;
+        return;
+      }
+      canonicalOperations.push(encoded);
+      canonicalBytes = nextBytes;
+    }
+    operations.push(operation);
+  };
+  const visit = (left: JsonValue, right: JsonValue, path: string): void => {
+    if (exceeded) return;
     if (jsonEqual(left, right)) return;
     if (!objectValue(left) || !objectValue(right)) {
-      operations.push({ op: 'replace', path, value: structuredClone(right) });
+      emit({ op: 'replace', path, value: structuredClone(right) });
       return;
     }
     const leftKeys = Object.keys(left).sort(compareCodePoints);
@@ -86,21 +115,32 @@ function diffJson(
     const rightSet = new Set(rightKeys);
     for (const key of leftKeys) {
       if (!rightSet.has(key)) {
-        operations.push({ op: 'remove', path: `${path}/${pointerToken(key)}` });
+        emit({ op: 'remove', path: `${path}/${pointerToken(key)}` });
+        if (exceeded) return;
       }
     }
     const leftSet = new Set(leftKeys);
     for (const key of rightKeys) {
+      if (exceeded) return;
       const childPath = `${path}/${pointerToken(key)}`;
       if (!leftSet.has(key)) {
-        operations.push({ op: 'add', path: childPath, value: structuredClone(right[key]!) });
+        emit({ op: 'add', path: childPath, value: structuredClone(right[key]!) });
       } else {
         visit(left[key]!, right[key]!, childPath);
       }
     }
   };
   visit(previous, next, '');
-  return exceeded || operations.length > limit ? null : operations;
+  if (exceeded) return null;
+  return {
+    operations,
+    ...(options.canonical
+      ? {
+          canonical: `[${canonicalOperations.join(',')}]`,
+          bytes: canonicalBytes,
+        }
+      : {}),
+  };
 }
 
 /** Deterministic RFC-6902 subset. Arrays are atomically replaced. */
@@ -108,7 +148,7 @@ export function createJsonPatch(previous: JsonValue, next: JsonValue): JsonPatch
   assertJsonValue(previous, 'previous view');
   assertJsonValue(next, 'next view');
   // No limit supplied, so the walk never abandons and the result is never null.
-  return diffJson(previous, next)!;
+  return diffJson(previous, next)!.operations;
 }
 
 /** @internal Inputs have already passed the session canonical JSON boundary. */
@@ -124,7 +164,36 @@ export function createValidatedJsonPatch(
   next: JsonValue,
   maxOperations?: number,
 ): JsonPatchOperation[] | null {
-  return diffJson(previous, next, maxOperations);
+  return diffJson(previous, next, { maxOperations })?.operations ?? null;
+}
+
+/**
+ * Build a patch while enforcing operation and canonical-byte bounds during the
+ * walk. The canonical form is returned so callers do not serialize it twice.
+ *
+ * @internal Inputs have already passed the session canonical JSON boundary.
+ */
+export function createBoundedValidatedJsonPatch(
+  previous: JsonValue,
+  next: JsonValue,
+  maxOperations: number,
+  maxBytes: number,
+): {
+  operations: JsonPatchOperation[];
+  canonical: string;
+  bytes: number;
+} | null {
+  const result = diffJson(previous, next, {
+    maxOperations,
+    maxBytes,
+    canonical: true,
+  });
+  if (result === null) return null;
+  return {
+    operations: result.operations,
+    canonical: result.canonical!,
+    bytes: result.bytes!,
+  };
 }
 
 /** Apply the safe RFC-6902 subset without mutating the prior snapshot. */

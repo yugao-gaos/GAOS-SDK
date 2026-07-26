@@ -38,6 +38,7 @@ import {
   type SessionKernelOptions,
   type SessionTranscript,
 } from '../src/session.js';
+import { createBoundedValidatedJsonPatch } from '../src/observation-codec.js';
 
 interface Level { goal: number }
 interface State { total: number; actionsUsed: number }
@@ -203,9 +204,12 @@ describe('RFC-010 completed migration-informed scope', () => {
     });
   });
 
-  it('supports observation codec v1 as a snapshot-only emission mode', async () => {
+  it('emits v2 snapshots without diffing when patchStrategy is never', async () => {
     const { options } = await signedOptions();
-    const kernel = createSessionKernel({ ...options, observationCodec: 'v1' });
+    const kernel = createSessionKernel({
+      ...options,
+      observationCodec: { version: 'v2', patchStrategy: 'never' },
+    });
     const prepared = kernel.prepareIngest({
       protocol: PROTOCOL_ID,
       protocolVersion: PROTOCOL_VERSION,
@@ -213,7 +217,7 @@ describe('RFC-010 completed migration-informed scope', () => {
       tickId: makeTickId(options.sessionId, 0),
       revision: 0,
       participantId: 'alpha',
-      submissionId: 'v1-mode',
+      submissionId: 'v2-snapshot-mode',
       command: { amount: 1 },
     });
     kernel.commit(prepared);
@@ -222,8 +226,8 @@ describe('RFC-010 completed migration-informed scope', () => {
     kernel.commit(advance);
     expect(deltas.length).toBeGreaterThan(0);
     for (const delta of deltas) {
-      expect(delta.codec).toBe('v1');
-      expect(delta.body.kind).not.toBe('patch');
+      expect(delta.codec).toBe('v2');
+      expect(delta.body.kind).toBe('snapshot');
     }
   });
 
@@ -232,7 +236,7 @@ describe('RFC-010 completed migration-informed scope', () => {
     expect(() => createSessionKernel({
       ...options,
       observationCodec: 'v3' as never,
-    })).toThrow(/observationCodec must be 'v1' or a v2 options object/);
+    })).toThrow(/observationCodec must be a v2 options object/);
   });
 
   it('falls back to a snapshot when a patch does not win by the required margin', async () => {
@@ -270,6 +274,87 @@ describe('RFC-010 completed migration-informed scope', () => {
       ...options,
       observationCodec: { version: 'v2', minReduction: 0 },
     })).toThrow(/minReduction must be a finite number >= 1/);
+  });
+
+  it('rejects invalid patch strategy and backoff options', async () => {
+    const { options } = await signedOptions();
+    expect(() => createSessionKernel({
+      ...options,
+      observationCodec: { version: 'v2', patchStrategy: 'always' as never },
+    })).toThrow(/patchStrategy must be 'adaptive' or 'never'/);
+    expect(() => createSessionKernel({
+      ...options,
+      observationCodec: { version: 'v2', patchBackoffTicks: -1 },
+    })).toThrow(/patchBackoffTicks must be a non-negative safe integer/);
+  });
+
+  it('backs off adaptive patch probes after a bounded diff falls back', () => {
+    interface AdaptiveState {
+      tick: number;
+      values: number[];
+    }
+    interface AdaptiveView extends TickView {
+      entities: Record<string, { value: number }>;
+    }
+    const adaptiveReducer: TickReducer<Level, AdaptiveState, AdaptiveView> = {
+      init: () => ({
+        tick: 0,
+        values: Array.from({ length: 100 }, () => 0),
+      }),
+      advance: (state) => ({
+        tick: state.tick + 1,
+        values: state.values.map((value, index) => (
+          state.tick === 0 || index === 0 ? value + 1 : value
+        )),
+      }),
+      view: (state) => ({
+        actions: [{ id: 'advance', params: 'none' }],
+        status: 'playing',
+        hud: { actionsUsed: state.tick },
+        entities: Object.fromEntries(state.values.map(
+          (value, index) => [`entity-${index}`, { value }],
+        )),
+      }),
+    };
+    const kernel = createSessionKernel({
+      sessionId: 'adaptive-observation-codec',
+      game,
+      levelId: 'adaptive',
+      reducer: adaptiveReducer,
+      level: { goal: 1 },
+      seed: 1,
+      seedPolicy: 'explicit',
+      seats: ['alpha'],
+      cadence: { mode: 'turns' },
+      hostTime: 'none',
+      commandToAction: () => ({ id: 'advance' }),
+      observationCodec: {
+        version: 'v2',
+        patchStrategy: 'adaptive',
+        patchBackoffTicks: 1,
+        maxOperations: 10,
+      },
+    });
+    const advance = (submissionId: string) => {
+      kernel.commit(kernel.prepareIngest({
+        protocol: PROTOCOL_ID,
+        protocolVersion: PROTOCOL_VERSION,
+        sessionId: 'adaptive-observation-codec',
+        tickId: makeTickId('adaptive-observation-codec', kernel.cursor()),
+        revision: kernel.cursor(),
+        participantId: 'alpha',
+        submissionId,
+        command: { amount: 1 },
+      }));
+      const prepared = kernel.prepareAdvance();
+      const body = prepared.deltas[0]!.body;
+      kernel.commit(prepared);
+      return body;
+    };
+
+    expect(advance('adaptive-1').kind).toBe('snapshot');
+    expect(advance('adaptive-2').kind).toBe('snapshot');
+    expect(advance('adaptive-3').kind).toBe('patch');
   });
 
   it('preserves the v0.19 opaque timeout reservation for unsigned sessions', async () => {
@@ -319,6 +404,16 @@ describe('RFC-010 completed migration-informed scope', () => {
       path: '/array',
       value: [1, 3],
     });
+    const bounded = createBoundedValidatedJsonPatch(previous, next, 10, 10_000)!;
+    expect(bounded.operations).toEqual(patch);
+    expect(bounded.canonical).toBe(canonicalJson(patch as unknown as JsonValue));
+    expect(bounded.bytes).toBe(new TextEncoder().encode(bounded.canonical).length);
+    expect(createBoundedValidatedJsonPatch(
+      previous,
+      next,
+      10,
+      bounded.bytes - 1,
+    )).toBeNull();
     expect(applyJsonPatch(previous, patch)).toEqual(next);
     expect(() => applyJsonPatch({}, [{
       op: 'add',

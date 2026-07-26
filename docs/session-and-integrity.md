@@ -140,14 +140,30 @@ be filled by guessing.
 
 ### Patch delivery and interest scopes
 
-Every v0.20 session emits observation codec v2. It uses deterministic, bounded
-JSON patches when they are smaller than a snapshot; `observationCodec:
-{ version: 'v2', maxOperations, maxBytes }` optionally overrides the bounds.
+Every v0.20 session emits observation codec v2. Its default adaptive strategy
+uses deterministic, bounded JSON patches only when they beat a snapshot by the
+configured `minReduction`. After a probe falls back, that interest scope emits
+snapshots for `patchBackoffTicks` changed observations before probing again.
+Set `patchStrategy: 'never'` to skip diffing entirely while retaining the same
+v2 envelope:
+
+```ts
+observationCodec: {
+  version: 'v2',
+  patchStrategy: 'adaptive', // or 'never'
+  patchBackoffTicks: 8,
+  minReduction: 4,
+  maxOperations: 2_048,
+  maxBytes: 65_536,
+}
+```
+
 Arrays are replaced atomically; JSON Pointer escaping is normative;
-prototype-bearing paths are rejected. Operation and byte bounds fall back to
-a complete v2 snapshot. Clients reconstruct every `patch`, `snapshot`, or
-`unchanged` body with `applyObservationDelta`, which checks `viewDigest`.
-The snapshot-only v1 negotiation path was removed before release.
+prototype-bearing paths are rejected. Operation and byte bounds are enforced
+during the walk and fall back to a complete v2 snapshot. Clients reconstruct
+every `patch`, `snapshot`, or `unchanged` body with `applyObservationDelta`,
+which checks `viewDigest`. The snapshot-only v1 negotiation path was removed
+before release.
 
 An interest policy receives the already partitioned seat view and may only
 remove structure. The kernel checks that invariant before publishing:
