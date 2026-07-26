@@ -515,6 +515,9 @@ class SessionKernelImpl<
     private readonly options: SessionKernelOptions<TLevel, TState, TCommand, TView>,
     transcript?: SessionTranscript<TLevel>,
   ) {
+    if (!isObjectRecord(options)) {
+      throw new TypeError('session kernel options must be an object');
+    }
     if (!Number.isSafeInteger(options.seed) || options.seed < 0 || options.seed > 0xffff_ffff) {
       throw new RangeError('seed must be an unsigned 32-bit integer');
     }
@@ -1705,6 +1708,9 @@ export function rehydrateKernel<
   options: SessionKernelOptions<TLevel, TState, TCommand, TView>,
   transcript: SessionTranscript<TLevel>,
 ): SessionKernel<TCommand, TView> {
+  if (!isObjectRecord(transcript)) {
+    throw new TypeError('transcript must be an object');
+  }
   return new SessionKernelImpl(options, transcript);
 }
 
@@ -1963,6 +1969,11 @@ export function finalizeRunReplay<TLevel>(
   }
   if (transcripts.length === 0) {
     throw new RangeError('a run replay requires at least one transcript');
+  }
+  for (const [levelIndex, transcript] of transcripts.entries()) {
+    if (!isObjectRecord(transcript)) {
+      throw new TypeError(`run transcript ${levelIndex} must be an object`);
+    }
   }
   if (!Number.isSafeInteger(options.seed)
     || options.seed < 0
