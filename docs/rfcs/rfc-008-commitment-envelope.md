@@ -162,7 +162,7 @@ A commitment is bound to `(sessionId, seat, commitmentId, windowRef)`:
   proof of who cheated (client bugs, storage corruption, fabrication, or host
   tampering produce the same artifact). Products classify it under their own
   trust policy.
-- **v1.1 audit trust boundary (interim):** `commit-mismatch` and `deadline`
+- **v1.1 audit trust boundary (interim):** `commit-mismatch` and `timeout`
   records are host attestation. Their consistency checks catch implementation
   bugs, corruption, and unsophisticated tampering; they do not authenticate
   authorship, prevent fabrication/deletion, or prove that the host's audit
@@ -171,10 +171,11 @@ A commitment is bound to `(sessionId, seat, commitmentId, windowRef)`:
   NOT depend on unauthenticated v1.1 audit records. RFC-010 supplies
   per-submission signatures and per-seat hash chains in v1.2.
 - **RFC-010 reservations:** v1.1 reserves, without assigning cryptographic
-  meaning, header `seats`/`signaturePolicy`, action and resolution-input
-  `submissionId`/`canonicalCommand`/`cursor`/`prevChainHash`/`sig`, and
-  mismatch `canonicalCommand`/`cursor`/`prevChainHash`/`sig`. The strict
-  schema accepts and round-trips these slots so v1.2 remains additive.
+  meaning, header `seatKeys`/`signaturePolicy`/`timeoutPolicy`, the periodic
+  `seat-signature` carrier, action and resolution-input
+  `submissionId`/`canonicalCommand`/`cursor`/`clientTime`/`prevChainHash`/`sig`,
+  and matching mismatch fields. The strict schema accepts and round-trips
+  these slots so v1.2 remains additive.
 - Pre-reveal observation: commitments appear in every seat's view as
   `{ commitmentId, seat, scheme }` — existence is public, content is not.
   Post-reveal, payload joins the view per normal partition policy.

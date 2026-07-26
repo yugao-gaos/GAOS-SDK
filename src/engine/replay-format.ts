@@ -119,9 +119,11 @@ export interface ReplayHeader<TLevel> {
   totals: ReplayTotals;
   visibility?: TranscriptVisibility;
   /** RFC-010 reservation; ignored by the v1.1 verifier. */
-  seats?: ReplaySeatIntegrityReservation[];
+  seatKeys?: ReplaySeatIntegrityReservation[];
   /** RFC-010 reservation; ignored by the v1.1 verifier. */
   signaturePolicy?: JsonObject;
+  /** Reserved timeout-policy declaration; ignored by the v1.1 verifier. */
+  timeoutPolicy?: JsonObject;
   /** Host, creator, agent, signing, or benchmark metadata. */
   extensions?: JsonObject;
 }
@@ -130,10 +132,13 @@ export interface ReplayHeader<TLevel> {
 export interface ReplayAction extends TranscriptAction {
   kind: 'action';
   levelIndex: number;
+  /** Advisory host UTC milliseconds; ignored by replay verification. */
+  hostTime?: number;
   /** RFC-010 reservations; ignored by the v1.1 verifier. */
   submissionId?: string;
   canonicalCommand?: string;
   cursor?: number;
+  clientTime?: number;
   prevChainHash?: string;
   sig?: string;
   commit?: CommitmentEnvelope;
@@ -154,17 +159,26 @@ export interface ReplayResolution {
   levelIndex: number;
   tick: number;
   inputs: ReplayResolutionInput[];
-  cause: 'complete' | 'deadline' | 'tick';
+  cause: 'complete' | 'timeout' | 'tick';
+  /** Advisory host UTC milliseconds; ignored by replay verification. */
+  hostTime?: number;
   /** Exact canonical timeout/pass action when the host supplied one. */
   systemInput?: ReplayResolutionInput;
 }
 
-export interface ReplayDeadline {
-  kind: 'deadline';
+export interface ReplayTimeout {
+  kind: 'timeout';
   n: number;
   levelIndex: number;
   tick: number;
+  timeoutId: string;
+  windowRef: number;
+  participantId: string | null;
   reason: string;
+  /** Reserved reference into `ReplayHeader.timeoutPolicy`. */
+  timeoutPolicyRef?: string;
+  /** Advisory host UTC milliseconds; ignored by replay verification. */
+  hostTime?: number;
 }
 
 export interface ReplayExtension {
@@ -173,6 +187,8 @@ export interface ReplayExtension {
   levelIndex: number;
   lane: string;
   record: JsonObject;
+  /** Advisory host UTC milliseconds; ignored by replay verification. */
+  hostTime?: number;
 }
 
 export interface ReplayCheckpoint {
@@ -182,6 +198,8 @@ export interface ReplayCheckpoint {
   tick: number;
   /** Diagnostic FNV-1a digest, not an authentication primitive. */
   digest: number;
+  /** Advisory host UTC milliseconds; ignored by replay verification. */
+  hostTime?: number;
 }
 
 export interface ReplayCommitMismatchAudit {
@@ -196,21 +214,41 @@ export interface ReplayCommitMismatchAudit {
   /** RFC-010 reservations; ignored by the v1.1 verifier. */
   canonicalCommand?: string;
   cursor?: number;
+  clientTime?: number;
   prevChainHash?: string;
   sig?: string;
+  /** Advisory host UTC milliseconds; ignored by replay verification. */
+  hostTime?: number;
   attemptedReveal?: {
     salt: string;
     payload: JsonValue;
   };
 }
 
+/**
+ * RFC-010 tier-3 carrier reservation. v1.1 preserves this record but assigns
+ * no cryptographic or chain semantics to it.
+ */
+export interface ReplaySeatSignatureReservation {
+  kind: 'seat-signature';
+  n: number;
+  levelIndex: number;
+  tick: number;
+  participantId: string;
+  clientTime?: number;
+  prevChainHash?: string;
+  sig?: string;
+  hostTime?: number;
+}
+
 export type ReplayRecord =
   | ReplayAction
   | ReplayResolution
-  | ReplayDeadline
+  | ReplayTimeout
   | ReplayExtension
   | ReplayCheckpoint
-  | ReplayCommitMismatchAudit;
+  | ReplayCommitMismatchAudit
+  | ReplaySeatSignatureReservation;
 
 export interface ReplayArtifact<TLevel> {
   header: ReplayHeader<TLevel>;
@@ -235,9 +273,11 @@ export interface ReplayLevelInput<TLevel> {
 
 export interface ReplayActionInput extends TranscriptAction {
   levelIndex: number;
+  hostTime?: number;
   submissionId?: string;
   canonicalCommand?: string;
   cursor?: number;
+  clientTime?: number;
   prevChainHash?: string;
   sig?: string;
   commit?: CommitmentEnvelope;
@@ -257,8 +297,9 @@ export interface CreateReplayArtifactInput<TLevel> {
   records?: ReplayRecord[];
   totals?: ReplayTotals;
   visibility?: TranscriptVisibility;
-  seats?: ReplaySeatIntegrityReservation[];
+  seatKeys?: ReplaySeatIntegrityReservation[];
   signaturePolicy?: JsonObject;
+  timeoutPolicy?: JsonObject;
   extensions?: JsonObject;
 }
 
@@ -414,10 +455,13 @@ export function createReplayArtifact<TLevel>(
     levels,
     totals: input.totals ?? replayTotals(levels),
     ...(input.visibility === undefined ? {} : { visibility: input.visibility }),
-    ...(input.seats === undefined ? {} : { seats: structuredClone(input.seats) }),
+    ...(input.seatKeys === undefined ? {} : { seatKeys: structuredClone(input.seatKeys) }),
     ...(input.signaturePolicy === undefined
       ? {}
       : { signaturePolicy: structuredClone(input.signaturePolicy) }),
+    ...(input.timeoutPolicy === undefined
+      ? {}
+      : { timeoutPolicy: structuredClone(input.timeoutPolicy) }),
     ...(input.extensions === undefined ? {} : { extensions: input.extensions }),
   };
   const artifact: ReplayArtifact<TLevel> = {
@@ -484,8 +528,9 @@ export function validateReplayArtifact(value: unknown): string[] {
     'levels',
     'totals',
     'visibility',
-    'seats',
+    'seatKeys',
     'signaturePolicy',
+    'timeoutPolicy',
     'extensions',
   ], 'header', problems);
   if (header['kind'] !== 'header') problems.push('header.kind must be header');
@@ -500,7 +545,9 @@ export function validateReplayArtifact(value: unknown): string[] {
     );
   }
   if (header['formatVersion'] === GAOS_REPLAY_LEGACY_FORMAT_VERSION
-    && (header['seats'] !== undefined || header['signaturePolicy'] !== undefined)) {
+    && (header['seatKeys'] !== undefined
+      || header['signaturePolicy'] !== undefined
+      || header['timeoutPolicy'] !== undefined)) {
     problems.push('header integrity reservations require formatVersion 1.1');
   }
   if (typeof header['sessionId'] !== 'string' || header['sessionId'].length === 0) {
@@ -519,6 +566,11 @@ export function validateReplayArtifact(value: unknown): string[] {
       || (header['visibility'] !== 'full' && !/^seat:.+/.test(header['visibility'])))
   ) {
     problems.push('header.visibility must be full or seat:<id>');
+  }
+  for (const field of ['signaturePolicy', 'timeoutPolicy', 'extensions'] as const) {
+    if (header[field] !== undefined && !isRecord(header[field])) {
+      problems.push(`header.${field} must be an object`);
+    }
   }
 
   const game = header['game'];
@@ -588,6 +640,9 @@ export function validateReplayArtifact(value: unknown): string[] {
         problems.push(`level ${index} seed does not match ${GAOS_REPLAY_DERIVED_SEEDS}`);
       }
       if (!Object.hasOwn(candidate, 'level')) problems.push(`level ${index} must include level data`);
+      if (candidate['extensions'] !== undefined && !isRecord(candidate['extensions'])) {
+        problems.push(`level ${index} extensions must be an object`);
+      }
       const result = candidate['result'];
       if (!isRecord(result)) {
         problems.push(`level ${index} result must be an object`);
@@ -608,6 +663,9 @@ export function validateReplayArtifact(value: unknown): string[] {
         if (!validNonNegativeInteger(result['actionsUsed'])) {
           problems.push(`level ${index} result.actionsUsed must be a non-negative safe integer`);
         }
+        if (result['extensions'] !== undefined && !isRecord(result['extensions'])) {
+          problems.push(`level ${index} result.extensions must be an object`);
+        }
       }
     }
   }
@@ -627,6 +685,9 @@ export function validateReplayArtifact(value: unknown): string[] {
     }
     if (!validNonNegativeInteger(totals['totalActionsUsed'])) {
       problems.push('header.totals.totalActionsUsed must be a non-negative safe integer');
+    }
+    if (totals['extensions'] !== undefined && !isRecord(totals['extensions'])) {
+      problems.push('header.totals.extensions must be an object');
     }
   }
 
@@ -660,9 +721,11 @@ export function validateReplayArtifact(value: unknown): string[] {
         'seat',
         'targets',
         'tick',
+        'hostTime',
         'submissionId',
         'canonicalCommand',
         'cursor',
+        'clientTime',
         'prevChainHash',
         'sig',
         'commit',
@@ -713,6 +776,13 @@ export function validateReplayArtifact(value: unknown): string[] {
       for (const field of ['x', 'y', 'index', 'tick'] as const) {
         if (action[field] !== undefined && !Number.isSafeInteger(action[field])) {
           problems.push(`action ${String(action['n'])} ${field} must be a safe integer`);
+        }
+      }
+      for (const field of ['hostTime', 'clientTime'] as const) {
+        if (action[field] !== undefined && !validNonNegativeInteger(action[field])) {
+          problems.push(
+            `action ${String(action['n'])} ${field} must be a non-negative safe integer`,
+          );
         }
       }
       if (Number.isSafeInteger(action['tick']) && (action['tick'] as number) < 0) {
@@ -766,6 +836,8 @@ export function validateReplayArtifact(value: unknown): string[] {
           || action['submissionId'] !== undefined
           || action['canonicalCommand'] !== undefined
           || action['cursor'] !== undefined
+          || action['clientTime'] !== undefined
+          || action['hostTime'] !== undefined
           || action['prevChainHash'] !== undefined
           || action['sig'] !== undefined)) {
         problems.push(
@@ -857,6 +929,7 @@ export function validateReplayArtifact(value: unknown): string[] {
           'submissionId',
           'canonicalCommand',
           'cursor',
+          'clientTime',
           'prevChainHash',
           'sig',
         ], label, problems);
@@ -882,6 +955,12 @@ export function validateReplayArtifact(value: unknown): string[] {
         for (const field of ['x', 'y', 'index'] as const) {
           if (candidate[field] !== undefined && !Number.isSafeInteger(candidate[field])) {
             problems.push(`${label} ${field} must be a safe integer`);
+          }
+        }
+        for (const field of ['clientTime', ...(actionRecord ? ['hostTime'] : [])]) {
+          if (candidate[field] !== undefined
+            && !validNonNegativeInteger(candidate[field])) {
+            problems.push(`${label} ${field} must be a non-negative safe integer`);
           }
         }
         for (const field of ['boardId', 'zoneId', 'seat'] as const) {
@@ -968,20 +1047,28 @@ export function validateReplayArtifact(value: unknown): string[] {
           previousLevelIndex = record['levelIndex'];
         }
         const kind = record['kind'];
+        for (const field of ['hostTime', 'clientTime'] as const) {
+          if (record[field] !== undefined && !validNonNegativeInteger(record[field])) {
+            problems.push(
+              `record ${index} ${field} must be a non-negative safe integer`,
+            );
+          }
+        }
         if (![
           'action',
           'resolution',
-          'deadline',
+          'timeout',
           'extension',
           'checkpoint',
           'commit-mismatch',
+          'seat-signature',
         ].includes(
           typeof kind === 'string' ? kind : '',
         )) {
           problems.push(`record ${index} has unknown kind ${String(kind)}`);
           continue;
         }
-        const common = ['kind', 'n', 'levelIndex'];
+        const common = ['kind', 'n', 'levelIndex', 'hostTime'];
         const allowedByKind: Record<string, string[]> = {
           action: [
             ...common,
@@ -995,17 +1082,27 @@ export function validateReplayArtifact(value: unknown): string[] {
             'seat',
             'targets',
             'tick',
+            'hostTime',
             'commit',
             'reveal',
             'verifiedPayload',
             'submissionId',
             'canonicalCommand',
             'cursor',
+            'clientTime',
             'prevChainHash',
             'sig',
           ],
           resolution: [...common, 'tick', 'inputs', 'cause', 'systemInput'],
-          deadline: [...common, 'tick', 'reason'],
+          timeout: [
+            ...common,
+            'tick',
+            'timeoutId',
+            'windowRef',
+            'participantId',
+            'reason',
+            'timeoutPolicyRef',
+          ],
           extension: [...common, 'lane', 'record'],
           checkpoint: [...common, 'tick', 'digest'],
           'commit-mismatch': [
@@ -1018,6 +1115,15 @@ export function validateReplayArtifact(value: unknown): string[] {
             'attemptedReveal',
             'canonicalCommand',
             'cursor',
+            'clientTime',
+            'prevChainHash',
+            'sig',
+          ],
+          'seat-signature': [
+            ...common,
+            'tick',
+            'participantId',
+            'clientTime',
             'prevChainHash',
             'sig',
           ],
@@ -1043,12 +1149,12 @@ export function validateReplayArtifact(value: unknown): string[] {
               validateResolutionInput(input, `resolution ${index} input ${inputIndex}`);
             });
           }
-          if (!['complete', 'deadline', 'tick'].includes(String(record['cause']))) {
-            problems.push(`resolution ${index} cause must be complete, deadline, or tick`);
+          if (!['complete', 'timeout', 'tick'].includes(String(record['cause']))) {
+            problems.push(`resolution ${index} cause must be complete, timeout, or tick`);
           }
-          if (record['cause'] === 'deadline') {
+          if (record['cause'] === 'timeout') {
             if (record['systemInput'] === undefined) {
-              problems.push(`resolution ${index} deadline cause requires systemInput`);
+              problems.push(`resolution ${index} timeout cause requires systemInput`);
             } else {
               validateResolutionInput(record['systemInput'], `resolution ${index} systemInput`);
               if (Array.isArray(record['inputs'])) {
@@ -1065,7 +1171,7 @@ export function validateReplayArtifact(value: unknown): string[] {
               }
             }
           } else if (record['systemInput'] !== undefined) {
-            problems.push(`resolution ${index} systemInput requires deadline cause`);
+            problems.push(`resolution ${index} systemInput requires timeout cause`);
           }
           if (validNonNegativeInteger(record['levelIndex'])
             && validNonNegativeInteger(record['tick'])) {
@@ -1076,12 +1182,28 @@ export function validateReplayArtifact(value: unknown): string[] {
               recordTicks.set(record['levelIndex'], record['tick']);
             }
           }
-        } else if (kind === 'deadline') {
+        } else if (kind === 'timeout') {
           if (!validNonNegativeInteger(record['tick'])) {
-            problems.push(`deadline ${index} tick must be a non-negative safe integer`);
+            problems.push(`timeout ${index} tick must be a non-negative safe integer`);
           }
           if (typeof record['reason'] !== 'string' || record['reason'].length === 0) {
-            problems.push(`deadline ${index} reason must be a non-empty string`);
+            problems.push(`timeout ${index} reason must be a non-empty string`);
+          }
+          if (typeof record['timeoutId'] !== 'string' || record['timeoutId'].length === 0) {
+            problems.push(`timeout ${index} timeoutId must be a non-empty string`);
+          }
+          if (!validNonNegativeInteger(record['windowRef'])) {
+            problems.push(`timeout ${index} windowRef must be a non-negative safe integer`);
+          }
+          if (record['participantId'] !== null
+            && (typeof record['participantId'] !== 'string'
+              || record['participantId'].length === 0)) {
+            problems.push(`timeout ${index} participantId must be null or a non-empty string`);
+          }
+          if (record['timeoutPolicyRef'] !== undefined
+            && (typeof record['timeoutPolicyRef'] !== 'string'
+              || record['timeoutPolicyRef'].length === 0)) {
+            problems.push(`timeout ${index} timeoutPolicyRef must be a non-empty string`);
           }
         } else if (kind === 'extension') {
           if (typeof record['lane'] !== 'string' || record['lane'].length === 0) {
@@ -1127,6 +1249,18 @@ export function validateReplayArtifact(value: unknown): string[] {
             || !/^(?:[0-9a-f]{2}){16,64}$/.test(attempt['salt'])
             || !Object.hasOwn(attempt, 'payload'))) {
             problems.push(`commit-mismatch ${index} attemptedReveal is invalid`);
+          }
+        } else if (kind === 'seat-signature') {
+          if (!validNonNegativeInteger(record['tick'])) {
+            problems.push(
+              `seat-signature ${index} tick must be a non-negative safe integer`,
+            );
+          }
+          if (typeof record['participantId'] !== 'string'
+            || record['participantId'].length === 0) {
+            problems.push(
+              `seat-signature ${index} participantId must be a non-empty string`,
+            );
           }
         }
       }

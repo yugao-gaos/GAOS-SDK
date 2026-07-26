@@ -9,7 +9,7 @@ v0.20. Rev 10 makes rejection notices durable observation envelopes,
 adds transition-watermark snapshot recovery, and makes every accepted
 submission identity permanently single-use. Rev 9 adds deterministic
 per-seat rejection notices, pins
-`viewRevision(seat) === cursor()`, validates deadline audit context, and makes
+`viewRevision(seat) === cursor()`, validates timeout audit context, and makes
 accepted submission IDs permanently non-reapplicable after receipt eviction.
 Rev 8 adds the stable v0.19 acknowledgement identity/order contract
 and the multi-level `finalizeRunReplay` projection required by RFC-009.
@@ -29,7 +29,7 @@ See §M.
 Implementation evidence (2026-07-25): `src/session.ts`,
 `src/engine/replay-format.ts`, and `test/session.test.ts` cover the prepared
 lifecycle, mutable-state isolation, durable partial windows, rehydration,
-atomic grouped replay, deadlines, checkpoints, observation revisions,
+atomic grouped replay, timeouts, checkpoints, observation revisions,
 acknowledgement ordering, multi-level run composition, and bounded tick
 catch-up.
 
@@ -80,7 +80,7 @@ returned, never performed — §F-E2). It owns:
   `./protocol`: `collectIntent`, `createIntentWindow`,
   `validateIntentSubmission`, envelopes);
 - canonical ordering (`canonicalizeLockstepInputs`) and cadence policy
-  (sequential window / simultaneous window with deadlines-as-inputs / fixed
+  (sequential window / simultaneous window with timeouts-as-inputs / fixed
   tick rate via `createTickRate`);
 - advancing an injected `Reducer` (`TickReducer.advance` preferred;
   `ActionReducer` compat) exactly once per resolution — never sequential
@@ -91,7 +91,7 @@ returned, never performed — §F-E2). It owns:
 - digest checkpoints (`stateDigest`) for client reconciliation checks.
 
 The kernel never owns: sockets/HTTP, storage, wall clocks (time arrives as
-injected deadline inputs, per the A.5 time-as-input rule), auth/identity
+injected timeout inputs, per the A.5 time-as-input rule), auth/identity
 (hosts map credentials → seat before ingestion), matchmaking, billing,
 hibernation strategy. Those live in **host adapters**.
 
@@ -169,9 +169,9 @@ export interface SessionKernel<TCommand, TView> {
    */
   prepareIngest(submission: CommandSubmission<TCommand>): Prepared<IngestReceipt>;
   prepareAdvance(target?: number): Prepared<AdvanceSummary<TView>>;
-  prepareDeadline(
-    deadline: DeadlineInput,
-    systemInput: SubmittedAction,
+  prepareTimeout(
+    timeout: TimeoutInput,
+    forcedInput: SubmittedAction,
   ): Prepared<AdvanceSummary<TView>>;
   /** Structurally non-gameplay lane (§D answer 2); recorded, never reduced. */
   prepareExtension(lane: string, record: JsonObject): Prepared<void>;
@@ -181,9 +181,9 @@ export interface SessionKernel<TCommand, TView> {
    *  unchanged and calls stateIsolation.discard on the draft. Persistence
    *  failure REQUIRES abort. A stale prepared passed to commit is
    *  auto-aborted before the typed error is thrown (no second host call).
-   *  Double commit/abort, commit-after-abort, abort-after-commit, and
-   *  foreign values throw typed lifecycle errors without re-running
-   *  cleanup. */
+   *  abort is idempotent after an automatic or explicit abort. Double
+   *  commit, commit-after-abort, abort-after-commit, and foreign values
+   *  throw typed lifecycle errors without re-running cleanup. */
   abort(prepared: Prepared<unknown>): void;
 
   observe(seat: string): TView;
@@ -253,23 +253,30 @@ only canonical order does; `advance` in ticks mode may fast-forward many
 empty ticks in one call (event-driven hosts batch on message/alarm arrival,
 which is how a DO avoids wall-clock ticking).
 
-`prepareDeadline` accepts only a non-empty deadline ID for the current open
-tick. A named participant must belong to and still be awaiting input in that
-window; its system action is normalized to that seat and cannot name another.
-A window-wide deadline (`participantId: null`) cannot carry a seat-specific
-system action. Deadline system inputs cannot carry commitment/reveal
-verification fields. Finalization rejects any deadline audit event that does
-not immediately match either its recorded deadline resolution or a
-same-transition rejection. A successful deadline must match the window
-reference, participant, and system input. A rejected deadline records
-`deadline`, then `rejection`, then `checkpoint`; its forced input was not
+`prepareTimeout` accepts a non-empty timeout ID and reason (`elapsed`,
+`disconnect`, or a product-defined string) for the current open tick. A named
+participant must belong to and still be awaiting input in that window; its
+forced input is normalized to that seat and cannot name another.
+A window-wide timeout (`participantId: null`) cannot carry a seat-specific
+system action. Timeout system inputs cannot carry commitment/reveal
+verification fields. Finalization rejects any timeout audit event that does
+not immediately match either its recorded timeout resolution or a
+same-transition rejection. A successful timeout must match the window
+reference, participant, and system input. A rejected timeout records
+`timeout`, then `rejection`, then `checkpoint`; its forced input was not
 applied.
 
-In v0.19 these deadline and commitment-rejection audit records are advisory
+In v0.19 these timeout and commitment-rejection audit records are advisory
 host attestation. Live pre-reducer verification remains authoritative for
 gameplay, but portable replay consistency does not authenticate audit
 authorship or completeness. Leaderboard policy must not rely on the audit
 lane until RFC-010 supplies signed chained submissions.
+
+Every `SessionEvent` records advisory `hostTime` in host UTC milliseconds.
+It is never reducer input, signature-preimage material, or part of semantic
+input-to-transcript equivalence. Rehydration preserves it exactly. Replay
+projection is opt-in through `FinalizeOptions.includeHostTime` and replay
+verification ignores the value.
 
 `IntentCollectionError` and its `IntentErrorCode` union are re-exported from
 `./session`, so a host can map protocol ingest failures without reaching into
@@ -378,7 +385,7 @@ and acknowledge the submitter. On persistence failure: call
 live state is retired via `stateIsolation.retire` (absent ⇒
 product-managed). On crash between persist and commit: rehydrate via
 `rehydrateKernel(transcript)`; the persisted events win. Wall clocks never
-enter the kernel — deadlines are ingested inputs (§F-E3).
+enter the kernel — timeouts are ingested inputs (§F-E3).
 
 ### 3.5 Multi-level run projection
 
@@ -406,7 +413,7 @@ Kernel-bound (pure) pieces, extracted with their tests:
 
 - single-writer resolution loop; seed holding; perm shuffle application;
 - intent-window lifecycle incl. timeout-as-pass (`timeoutIntent` becomes an
-  injected deadline input);
+  injected timeout input);
 - idempotency semantics: duplicate `submissionId` + identical command →
   stored resolution; conflicting retry → conflict result (the HTTP 202/200/409
   mapping stays in the worker adapter);
@@ -512,7 +519,7 @@ Introduce two explicit concepts:
 - a finalized `ReplayArtifact` produced when a terminal result is available.
 
 Define the event union needed by the kernel. At minimum it must decide how to
-represent action batches, empty/deadline resolutions, extension-lane records,
+represent action batches, empty/timeout resolutions, extension-lane records,
 commit/reveal records, and checkpoints. If these become portable
 `gaos.replay` records, update the JSON schema and bump the replay format
 version; the v1 schema rejects unknown action properties and record kinds.
@@ -541,8 +548,8 @@ simultaneous window or tick must be grouped and passed to `advance` or
 - Specify `advance` precisely: inclusive or exclusive target tick, behavior
   for stale targets, maximum catch-up work, empty tick handling, and the
   turns-mode behavior when `target` is supplied.
-- Define deadline input types and replay semantics. A host observing a wall
-  clock and deciding that a deadline elapsed is an external input; the
+- Define timeout input types and replay semantics. A host observing a wall
+  clock and deciding that a timeout elapsed is an external input; the
   resulting timeout/pass must be durably ordered with gameplay.
 
 `ActionReducer` compatibility must be described as limited: it cannot advance
@@ -609,7 +616,7 @@ not trusted as an unbound value supplied by the revealer.
 
 ## Questions to resolve
 
-1. Are deadline, extension-lane, and commit/reveal entries portable replay
+1. Are timeout, extension-lane, and commit/reveal entries portable replay
    records, host-private session records, or two representations with an
    explicit finalization mapping?
 2. Is the extension lane ordered relative to gameplay? "Parallel but
@@ -643,7 +650,7 @@ Two explicit concepts:
 export type SessionEvent =
   | { kind: 'resolution'; tick: number; viewRevision: number;
       inputs: readonly CanonicalInput[] }          // one advance/applyIntents call
-  | { kind: 'deadline'; tick: number; deadlineId: string }   // durable timeout input
+  | { kind: 'timeout'; tick: number; timeoutId: string; reason: string }
   | { kind: 'extension'; tick: number; lane: string; record: JsonObject }
   | { kind: 'checkpoint'; tick: number; digest: number };
 
@@ -664,7 +671,7 @@ export function finalizeReplay(
   checker calls `advance`/`applyIntents` **exactly once per resolution** —
   this requires the replay format to represent input groups, so this RFC now
   explicitly depends on a **`gaos.replay` version bump (v1.1)**: grouped
-  actions + the new record kinds (deadline, extension, checkpoint) with a
+  actions + the new record kinds (timeout, extension, checkpoint) with a
   strict schema. Format work lands first, kernel second.
 - Answers §C-Q1: two representations with an explicit finalization mapping.
   SessionEvents are host-private; only the v1.1-portable subset survives
@@ -702,8 +709,10 @@ advance(target?): {
   itself is not "future". One call resolves at most `maxCatchUpTicks`
   inclusive ticks, returning `partial: true` when the host must loop. A stale
   target throws. Turns mode forbids `target` and resolves at most one window.
-- Deadlines: hosts submit `DeadlineInput { deadlineId, tick }` as ordinary
-  ingested inputs — durably ordered with gameplay, recorded as `deadline`
+- Timeouts: hosts submit
+  `TimeoutInput { timeoutId, tick, participantId?, reason, timeoutPolicyRef? }`
+  as ordinary
+  ingested inputs — durably ordered with gameplay, recorded as `timeout`
   events (time-as-input doctrine, now in the event union).
 - `ActionReducer` support is documented as **degraded**: no empty-tick
   advancement, no atomic multi-input resolution without `applyIntents`;
@@ -877,22 +886,23 @@ commit. Specify behavior for duplicate persistence, failure after persistence
 but before in-memory commit, and host restart. Event identifiers must make
 storage retries idempotent.
 
-### E3. Make deadline-to-reducer mapping replayable
+### E3. Make timeout-to-reducer mapping replayable
 
-`DeadlineInput { deadlineId, tick }` and the corresponding deadline event do
+The original `TimeoutInput { timeoutId, tick }` sketch and corresponding
+timeout event did
 not identify the affected participant/window or the canonical timeout/pass
 input supplied to the reducer. A replay verifier cannot reconstruct gameplay
-from `deadlineId` alone without relying on unrecorded product policy.
+from `timeoutId` alone without relying on unrecorded product policy.
 
 The transcript must either:
 
 - record the fully derived canonical system input in the associated
   `resolution`; or
-- define a versioned, pure `deadlineToAction(context, deadline)` adapter
+- define a versioned, pure `timeoutToAction(context, timeout)` adapter
   selected by the recorded game adapter.
 
-Record enough context to validate that the deadline applied to the expected
-open window and participant. Prefer the first option: the deadline event
+Record enough context to validate that the timeout applied to the expected
+open window and participant. Prefer the first option: the timeout event
 records why the resolution occurred, while the resolution event records
 exactly what the reducer consumed.
 
@@ -944,23 +954,25 @@ achieving the same durability ordering. Specified behaviors:
 - commit of a stale/foreign `Prepared` throws (`revision` mismatch);
 - acknowledgements and deltas are post-commit only.
 
-## E3 accepted: deadlines resolve to recorded canonical inputs
+## E3 accepted: timeouts resolve to recorded canonical inputs
 
-First option adopted: the `deadline` event records **why** (deadlineId,
-windowRef, affected participant); the subsequent `resolution` event records
+First option adopted: the `timeout` event records **why** (timeoutId,
+reason, windowRef, affected participant, and optional timeout-policy
+reference); the subsequent `resolution` event records
 **what** — the fully derived canonical system input (e.g. the concrete
 timeout/pass `SubmittedAction`) that the reducer consumed. Replay verifies
-gameplay entirely from `resolution` events; `deadline` events are audit
+gameplay entirely from `resolution` events; `timeout` events are audit
 context and must match the open window/participant they claim (checked at
 finalization). If a pending commitment mismatch prevents resolution, the
-deadline still survives immediately before the rejection and no forced input
+timeout still survives immediately before the rejection and no forced input
 is claimed as consumed. No unrecorded product policy participates in replay.
 
-The `deadline` event shape becomes:
+The `timeout` event shape becomes:
 
 ```ts
-| { kind: 'deadline'; tick: number; deadlineId: string;
-    windowRef: number; participantId: string | null }
+| { kind: 'timeout'; tick: number; timeoutId: string;
+    windowRef: number; participantId: string | null; reason: string;
+    timeoutPolicyRef?: string }
 ```
 
 ## Editorial consolidation
@@ -975,7 +987,7 @@ were replaced in place. §§C–E retained as design history.
 
 ## Disposition
 
-Revision 3 resolves E1–E3: accepted intents are durable, deadline resolutions
+Revision 3 resolves E1–E3: accepted intents are durable, timeout resolutions
 record the exact reducer input, and host ordering around persistence is now
 explicit.
 
@@ -1071,7 +1083,7 @@ Define two counters:
 - `cursor()` / gameplay revision: identifies the unresolved protocol window
   and advances on resolution; and
 - `transitionRevision`: advances on every committed prepared transition,
-  including each accepted intent, rejection, deadline, and resolution.
+  including each accepted intent, rejection, timeout, and resolution.
 
 Use `sessionId + transitionRevision + eventIndex` for event IDs and stale
 prepared-transition checks. Record the gameplay cursor separately on events
@@ -1109,7 +1121,7 @@ All three corrections **accepted** and folded into §§2–3.
   violates the existing reducer contract, not a new kernel rule.
 - **G3:** two counters adopted — the gameplay window `cursor()` (advances on
   resolution) and `transitionRevision` (advances on every committed
-  transition: accepted intent, rejection, deadline, extension, resolution).
+  transition: accepted intent, rejection, timeout, extension, resolution).
   Event ids are `sessionId + transitionRevision + eventIndex`; stale-Prepared
   checks use `baseTransitionRevision`; rehydration restores both counters.
 
@@ -1349,7 +1361,7 @@ a coherent, implementable boundary:
   explicit isolation behavior;
 - commit, abort, discard, and previous-state retirement have exactly-once
   ownership rules;
-- deadlines record both their audit cause and exact canonical reducer input;
+- timeouts record both their audit cause and exact canonical reducer input;
 - observations are revisioned, snapshot-first, and seat-scoped;
 - extension records are structurally non-gameplay; and
 - RFC-008 mismatch records survive as recomputable but advisory full-replay

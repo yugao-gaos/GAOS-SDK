@@ -8,7 +8,7 @@ SDK transcript.
 
 The first line is a `ReplayHeader`. A v1.0 stream follows it with individual
 `ReplayAction` lines. A v1.1 stream may instead contain grouped
-`resolution`, `deadline`, `extension`, `checkpoint`, and `commit-mismatch`
+`resolution`, `timeout`, `extension`, `checkpoint`, and `commit-mismatch`
 records.
 
 ```jsonl
@@ -140,22 +140,28 @@ Mismatch audit records must still occur before the successful reveal at the
 open tick and may not reuse a participant's rejection submission identity.
 Repeated identical bad reveals under fresh identities are permitted.
 
-The v1.1 `deadline` and `commit-mismatch` lanes are advisory host attestation,
+The v1.1 `timeout` and `commit-mismatch` lanes are advisory host attestation,
 not authenticated third-party evidence. Their checks detect inconsistent
 records, implementation mistakes, corruption, and simple tampering, but a
 host can still fabricate, reattribute, or delete a plausible audit story.
 `checked.ok` means replay consistency; it does not prove that audit records
 are true. Leaderboard admission and other trust decisions must not depend on
 unauthenticated v1.1 audit records. [RFC-010](/rfcs/rfc-010-submission-signatures-and-interest)
-closes this in v1.2 with per-submission signatures and per-seat chains.
+authenticates authorship in both lanes with per-submission signatures and
+per-seat chains. In ticks mode it can also constrain timeout position.
+Wall-clock earliness remains outside artifact verification, and turns-mode
+position checks necessarily degrade.
 
-Checkpoint digests are advisory reconciliation evidence. The portable
+Checkpoint digests and optional replay-record `hostTime` values are advisory
+reconciliation evidence. `hostTime` is never reducer input or signature
+preimage material, and replay verification ignores it. The portable
 verifier cannot reconstruct a host's seat-specific `viewFor` projection, so
 it preserves checkpoint records but does not treat their digest as an
 authentication primitive.
 
 To keep v1.2 additive under the strict schema, v1.1 reserves and round-trips
-the future header roster/policy fields and submission chain/signature fields.
+`seatKeys`, signature and timeout policies, `clientTime`, submission
+chain/signature fields, and the periodic `seat-signature` record carrier.
 The v1.1 verifier deliberately assigns them no cryptographic meaning.
 
 The checker verifies global action numbering and level ordering, per-level seed

@@ -30,6 +30,11 @@ export interface ProtocolExtensions extends JsonObject {}
  * authentication or chain semantics.
  */
 export interface SubmissionIntegrityReservation {
+  /**
+   * RFC-010 reservation. Required whenever `sig` is present once signing is
+   * implemented; v1 records it without judging client-clock correctness.
+   */
+  clientTime?: number;
   prevChainHash?: string;
   sig?: string;
 }
@@ -326,6 +331,11 @@ export function collectIntent<TCommand>(
     participantId: submission.participantId,
     submissionId: submission.submissionId,
     command: submission.command,
+    ...(submission.clientTime === undefined ? {} : { clientTime: submission.clientTime }),
+    ...(submission.prevChainHash === undefined
+      ? {}
+      : { prevChainHash: submission.prevChainHash }),
+    ...(submission.sig === undefined ? {} : { sig: submission.sig }),
   };
   const next: IntentWindow<TCommand> = {
     ...window,

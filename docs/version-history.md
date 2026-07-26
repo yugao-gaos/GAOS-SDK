@@ -21,7 +21,7 @@ Prepared July 25, 2026.
 - Multi-level `finalizeRunReplay` projection with derived level seeds, global
   action/record numbering, aggregate totals, and run-terminal validation.
 - `gaos.replay` v1.1 grouped resolutions preserve one reducer call per
-  authoritative resolution and add deadline, extension, and mismatch audit
+  authoritative resolution and add timeout, extension, and mismatch audit
   records. The parser continues to accept and reproduce v1.0 artifacts;
   TypeScript and Python share Unicode-code-point canonical key order,
   JavaScript-safe integers, and strict schema semantics.
@@ -32,7 +32,11 @@ Prepared July 25, 2026.
   validation, synchronous SHA-256 replay verification, published complete
   preimage vectors, and explicit non-fatal replay diagnostics. The v1.1 audit
   lane is advisory host attestation; additive v1.2 signature/chain/roster
-  fields are reserved for RFC-010.
+  fields are reserved for RFC-010 under `seatKeys`, `clientTime`,
+  `timeoutPolicy`, and `seat-signature`. Session events add advisory
+  `hostTime`; portable projection is opt-in.
+- Migration: the final API/wire name is `timeout`, not `deadline`, and
+  `finalizeRunReplay` source transcripts must use `seedPolicy: 'explicit'`.
 
 [Sessions and integrity →](/session-and-integrity) ·
 [Portable replay →](/mechanisms/replay)

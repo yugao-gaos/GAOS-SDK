@@ -28,8 +28,13 @@ import {
   finalizeRunReplay,
   rehydrateKernel,
   type ObservationDelta,
+  type SessionEvent,
   type SessionKernelOptions,
 } from '../src/session.js';
+
+function withoutHostTimes(events: readonly SessionEvent[]): unknown[] {
+  return events.map(({ hostTime: _hostTime, ...event }) => event);
+}
 
 interface Level {
   goal: number;
@@ -167,7 +172,8 @@ describe('./session kernel', () => {
     const right = kernel.prepareExtension('audit', { value: 2 });
     kernel.commit(left);
     expect(() => kernel.commit(right)).toThrowError(PreparedTransitionError);
-    expect(() => kernel.abort(right)).toThrow(/already aborted/);
+    expect(() => kernel.abort(right)).not.toThrow();
+    expect(() => kernel.abort(right)).not.toThrow();
   });
 
   it('validates the immutable envelope and full cursor before honoring a duplicate', () => {
@@ -268,6 +274,11 @@ describe('./session kernel', () => {
     const invalid = submission('red', 'bad', 1) as CommandSubmission<Command & JsonValue>;
     (invalid.command as { amount: number }).amount = Number.NaN;
     expect(() => kernel.prepareIngest(invalid)).toThrowError(
+      expect.objectContaining<Partial<IntentCollectionError>>({
+        code: 'invalid_submission',
+      }),
+    );
+    expect(() => kernel.prepareIngest(null as never)).toThrowError(
       expect.objectContaining<Partial<IntentCollectionError>>({
         code: 'invalid_submission',
       }),
@@ -596,29 +607,55 @@ describe('./session kernel', () => {
     recovered.commit(reused);
   });
 
-  it('bounds inclusive tick catch-up and records canonical deadline input', () => {
+  it('bounds inclusive tick catch-up and records canonical timeout input', () => {
     const tickOptions = {
       ...options(),
       cadence: { mode: 'ticks', rate: createTickRate(30) } as const,
       limits: { maxCatchUpTicks: 2 },
+      timeoutPolicy: { mode: 'ticks', maxTicks: 90 },
     };
     const kernel = createSessionKernel(tickOptions);
     const catchUp = kernel.prepareAdvance(5);
     expect(catchUp.result).toMatchObject({ resolutions: 2, partial: true, tick: 2 });
     expect(catchUp.result.cursor).toBe(catchUp.result.tick);
     kernel.abort(catchUp);
-    const deadline = kernel.prepareDeadline(
-      { deadlineId: 'turn-0', tick: 0, participantId: 'red' },
+    const timeout = kernel.prepareTimeout(
+      {
+        timeoutId: 'turn-0',
+        reason: 'elapsed',
+        tick: 0,
+        participantId: 'red',
+        timeoutPolicyRef: 'default',
+      },
       { id: 'Action 1', index: 3, seat: 'red' },
     );
-    expect(deadline.events.map(({ kind }) => kind))
-      .toEqual(['deadline', 'resolution', 'checkpoint']);
-    kernel.commit(deadline);
+    expect(timeout.events.map(({ kind }) => kind))
+      .toEqual(['timeout', 'resolution', 'checkpoint']);
+    kernel.commit(timeout);
     expect(kernel.cursor()).toBe(kernel.tick());
     expect(kernel.observe('red').status).toBe('won');
+    expect(timeout.events.every((event) => Number.isSafeInteger(event.hostTime))).toBe(true);
+
+    const ordinary = finalizeReplay(kernel.liveTranscript(), { perm: [0] });
+    expect(ordinary.header.timeoutPolicy).toEqual({ mode: 'ticks', maxTicks: 90 });
+    expect(ordinary.records?.every((record) => record.hostTime === undefined)).toBe(true);
+    expect(ordinary.records?.find((record) => record.kind === 'timeout')).toMatchObject({
+      kind: 'timeout',
+      timeoutId: 'turn-0',
+      windowRef: 0,
+      participantId: 'red',
+      reason: 'elapsed',
+      timeoutPolicyRef: 'default',
+    });
+
+    const timed = finalizeReplay(kernel.liveTranscript(), {
+      perm: [0],
+      includeHostTime: true,
+    });
+    expect(timed.records?.every((record) => Number.isSafeInteger(record.hostTime))).toBe(true);
   });
 
-  it('recovers persisted catch-up and deadline events before the live commit', () => {
+  it('recovers persisted catch-up and timeout events before the live commit', () => {
     const tickOptions = {
       ...options(),
       cadence: { mode: 'ticks', rate: createTickRate(30) } as const,
@@ -636,20 +673,20 @@ describe('./session kernel', () => {
     expect(recoveredCatchUp.liveTranscript()).toEqual(liveCatchUp.liveTranscript());
     expect(recoveredCatchUp.cursor()).toBe(recoveredCatchUp.tick());
 
-    const liveDeadline = createSessionKernel(options());
-    liveDeadline.commit(liveDeadline.prepareIngest(submission('red', 'red-1', 1)));
-    const deadline = liveDeadline.prepareDeadline(
-      { deadlineId: 'persisted', tick: 0, participantId: 'blue' },
+    const liveTimeout = createSessionKernel(options());
+    liveTimeout.commit(liveTimeout.prepareIngest(submission('red', 'red-1', 1)));
+    const timeout = liveTimeout.prepareTimeout(
+      { timeoutId: 'persisted', reason: 'elapsed', tick: 0, participantId: 'blue' },
       { id: 'Action 1', index: 2, seat: 'blue' },
     );
-    const deadlineBeforeCommit = liveDeadline.liveTranscript();
-    const recoveredDeadline = rehydrateKernel(options(), {
-      header: deadlineBeforeCommit.header,
-      events: [...deadlineBeforeCommit.events, ...deadline.events],
+    const timeoutBeforeCommit = liveTimeout.liveTranscript();
+    const recoveredTimeout = rehydrateKernel(options(), {
+      header: timeoutBeforeCommit.header,
+      events: [...timeoutBeforeCommit.events, ...timeout.events],
     });
-    liveDeadline.commit(deadline);
-    expect(recoveredDeadline.digest()).toBe(liveDeadline.digest());
-    expect(recoveredDeadline.liveTranscript()).toEqual(liveDeadline.liveTranscript());
+    liveTimeout.commit(timeout);
+    expect(recoveredTimeout.digest()).toBe(liveTimeout.digest());
+    expect(recoveredTimeout.liveTranscript()).toEqual(liveTimeout.liveTranscript());
   });
 
   it('keeps commitment bookkeeping atomic across mismatch rejection and rehydration', () => {
@@ -758,37 +795,37 @@ describe('./session kernel', () => {
       { kind: 'reveal', commitmentId: 0, salt: zuluSalt, payload: { order: 'wrong' } },
     )));
 
-    const deadlineKernel = rehydrateKernel(secretOptions, live.liveTranscript());
-    const deadlineRejected = deadlineKernel.prepareDeadline(
-      { deadlineId: 'window-timeout-with-rejection', tick: 1 },
+    const timeoutKernel = rehydrateKernel(secretOptions, live.liveTranscript());
+    const timeoutRejected = timeoutKernel.prepareTimeout(
+      { timeoutId: 'window-timeout-with-rejection', reason: 'elapsed', tick: 1 },
       { id: 'Action 1', index: 2 },
     );
-    expect(deadlineRejected.events.map((event) => event.kind)).toEqual([
-      'deadline',
+    expect(timeoutRejected.events.map((event) => event.kind)).toEqual([
+      'timeout',
       'rejection',
       'checkpoint',
     ]);
-    expect(deadlineRejected.events[0]).toMatchObject({
-      kind: 'deadline',
-      deadlineId: 'window-timeout-with-rejection',
+    expect(timeoutRejected.events[0]).toMatchObject({
+      kind: 'timeout',
+      timeoutId: 'window-timeout-with-rejection',
     });
-    expect(deadlineRejected.result.resolutions).toBe(0);
-    deadlineKernel.commit(deadlineRejected);
-    expect(() => rehydrateKernel(secretOptions, deadlineKernel.liveTranscript()))
+    expect(timeoutRejected.result.resolutions).toBe(0);
+    timeoutKernel.commit(timeoutRejected);
+    expect(() => rehydrateKernel(secretOptions, timeoutKernel.liveTranscript()))
       .not.toThrow();
-    deadlineKernel.commit(deadlineKernel.prepareIngest(submit(
+    timeoutKernel.commit(timeoutKernel.prepareIngest(submit(
       1,
       'zulu',
-      'zulu-reveal-after-deadline',
+      'zulu-reveal-after-timeout',
       { kind: 'reveal', commitmentId: 0, salt: zuluSalt, payload: honestPayload },
     )));
-    deadlineKernel.commit(deadlineKernel.prepareAdvance());
-    const deadlineArtifact = finalizeReplay(
-      deadlineKernel.liveTranscript(),
+    timeoutKernel.commit(timeoutKernel.prepareAdvance());
+    const timeoutArtifact = finalizeReplay(
+      timeoutKernel.liveTranscript(),
       { perm: [0] },
     );
-    expect(deadlineArtifact.records?.map((record) => record.kind)).toContain('deadline');
-    expect(recheckReplayArtifact(deadlineArtifact, () => secretReducer)).toMatchObject({
+    expect(timeoutArtifact.records?.map((record) => record.kind)).toContain('timeout');
+    expect(recheckReplayArtifact(timeoutArtifact, () => secretReducer)).toMatchObject({
       ok: true,
       problems: [],
     });
@@ -870,7 +907,8 @@ describe('./session kernel', () => {
       kernel.commit(kernel.prepareAdvance());
     }
     expect(recovered.digest()).toBe(live.digest());
-    expect(recovered.liveTranscript()).toEqual(live.liveTranscript());
+    expect(withoutHostTimes(recovered.liveTranscript().events))
+      .toEqual(withoutHostTimes(live.liveTranscript().events));
     expect(live.observe('alpha').status).toBe('won');
 
     const checked = recheckReplayArtifact(
@@ -884,32 +922,32 @@ describe('./session kernel', () => {
   it('projects the explicit system input and publishes matching checkpoint digests', () => {
     const kernel = createSessionKernel(options());
     kernel.commit(kernel.prepareIngest(submission('red', 'red-1', 1)));
-    expect(() => kernel.prepareDeadline(
-      { deadlineId: '', tick: 0, participantId: 'blue' },
+    expect(() => kernel.prepareTimeout(
+      { timeoutId: '', reason: 'elapsed', tick: 0, participantId: 'blue' },
       { id: 'Action 1', index: 2, seat: 'blue' },
-    )).toThrow(/deadlineId/);
-    expect(() => kernel.prepareDeadline(
-      { deadlineId: 'wrong-seat', tick: 0, participantId: 'blue' },
+    )).toThrow(/timeoutId/);
+    expect(() => kernel.prepareTimeout(
+      { timeoutId: 'wrong-seat', reason: 'elapsed', tick: 0, participantId: 'blue' },
       { id: 'Action 1', index: 2, seat: 'red' },
     )).toThrow(/impersonate/);
-    expect(() => kernel.prepareDeadline(
-      { deadlineId: 'unknown', tick: 0, participantId: 'green' },
+    expect(() => kernel.prepareTimeout(
+      { timeoutId: 'unknown', reason: 'elapsed', tick: 0, participantId: 'green' },
       { id: 'Action 1', index: 2 },
     )).toThrow(/not eligible/);
-    expect(() => kernel.prepareDeadline(
-      { deadlineId: 'already-submitted', tick: 0, participantId: 'red' },
+    expect(() => kernel.prepareTimeout(
+      { timeoutId: 'already-submitted', reason: 'elapsed', tick: 0, participantId: 'red' },
       { id: 'Action 1', index: 2 },
     )).toThrow(/already submitted/);
-    expect(() => kernel.prepareDeadline(
-      { deadlineId: 'window-seat', tick: 0 },
+    expect(() => kernel.prepareTimeout(
+      { timeoutId: 'window-seat', reason: 'elapsed', tick: 0 },
       { id: 'Action 1', index: 2, seat: 'blue' },
-    )).toThrow(/window deadline.*cannot name/);
-    const deadline = kernel.prepareDeadline(
-      { deadlineId: 'mixed', tick: 0, participantId: 'blue' },
+    )).toThrow(/window timeout.*cannot name/);
+    const timeout = kernel.prepareTimeout(
+      { timeoutId: 'mixed', reason: 'elapsed', tick: 0, participantId: 'blue' },
       { id: 'Action 1', index: 2, seat: 'blue' },
     );
-    const resolution = deadline.events.find((event) => event.kind === 'resolution');
-    const checkpoint = deadline.events.find((event) => event.kind === 'checkpoint');
+    const resolution = timeout.events.find((event) => event.kind === 'resolution');
+    const checkpoint = timeout.events.find((event) => event.kind === 'checkpoint');
     expect(resolution).toMatchObject({
       kind: 'resolution',
       inputs: { length: 2 },
@@ -919,23 +957,23 @@ describe('./session kernel', () => {
         action: { index: 2 },
       },
     });
-    expect(checkpoint).toMatchObject({ digest: deadline.result.digest });
-    expect(deadline.deltas.every((delta) => (
+    expect(checkpoint).toMatchObject({ digest: timeout.result.digest });
+    expect(timeout.deltas.every((delta) => (
       JSON.stringify(delta.acknowledgements)
       === JSON.stringify([{ participantId: 'red', submissionId: 'red-1' }])
     ))).toBe(true);
-    expect(deadline.deltas).not.toBe(deadline.result.deltas);
-    expect(Object.isFrozen(deadline.deltas)).toBe(true);
-    expect(Object.isFrozen(deadline.result.deltas)).toBe(true);
-    expect(Object.isFrozen(deadline.deltas[0]?.body)).toBe(true);
+    expect(timeout.deltas).not.toBe(timeout.result.deltas);
+    expect(Object.isFrozen(timeout.deltas)).toBe(true);
+    expect(Object.isFrozen(timeout.result.deltas)).toBe(true);
+    expect(Object.isFrozen(timeout.deltas[0]?.body)).toBe(true);
     expect(() => {
-      (deadline.deltas[0]?.body as unknown as Record<string, unknown>)['kind'] = 'unchanged';
+      (timeout.deltas[0]?.body as unknown as Record<string, unknown>)['kind'] = 'unchanged';
     }).toThrow(TypeError);
     expect(Object.isFrozen(resolution)).toBe(true);
     expect(() => {
       (resolution as unknown as Record<string, unknown>)['kind'] = 'extension';
     }).toThrow(TypeError);
-    kernel.commit(deadline);
+    kernel.commit(timeout);
     expect(kernel.digest()).toBe(checkpoint?.kind === 'checkpoint' ? checkpoint.digest : -1);
 
     const artifact = finalizeReplay(kernel.liveTranscript(), { perm: [0] });
@@ -951,54 +989,54 @@ describe('./session kernel', () => {
     if (legacyResolution?.kind === 'resolution') delete legacyResolution.systemInput;
     expect(finalizeReplay(legacyTranscript, { perm: [0] }).records)
       .toEqual(artifact.records);
-    const forgedDeadline = structuredClone(kernel.liveTranscript());
-    const deadlineEvent = forgedDeadline.events.find((event) => event.kind === 'deadline');
-    if (deadlineEvent?.kind === 'deadline') deadlineEvent.participantId = 'red';
-    expect(() => finalizeReplay(forgedDeadline, { perm: [0] }))
+    const forgedTimeout = structuredClone(kernel.liveTranscript());
+    const timeoutEvent = forgedTimeout.events.find((event) => event.kind === 'timeout');
+    if (timeoutEvent?.kind === 'timeout') timeoutEvent.participantId = 'red';
+    expect(() => finalizeReplay(forgedTimeout, { perm: [0] }))
       .toThrow(/participant must match/);
-    const forgedWindowDeadline = structuredClone(kernel.liveTranscript());
-    const forgedWindowEvent = forgedWindowDeadline.events.find(
-      (event) => event.kind === 'deadline',
+    const forgedWindowTimeout = structuredClone(kernel.liveTranscript());
+    const forgedWindowEvent = forgedWindowTimeout.events.find(
+      (event) => event.kind === 'timeout',
     );
-    const forgedWindowResolution = forgedWindowDeadline.events.find(
-      (event) => event.kind === 'resolution' && event.cause === 'deadline',
+    const forgedWindowResolution = forgedWindowTimeout.events.find(
+      (event) => event.kind === 'resolution' && event.cause === 'timeout',
     );
-    if (forgedWindowEvent?.kind === 'deadline') forgedWindowEvent.participantId = null;
+    if (forgedWindowEvent?.kind === 'timeout') forgedWindowEvent.participantId = null;
     if (forgedWindowResolution?.kind === 'resolution'
       && forgedWindowResolution.systemInput) {
       forgedWindowResolution.systemInput.participantId = null;
     }
-    expect(() => finalizeReplay(forgedWindowDeadline, { perm: [0] }))
-      .toThrow(/window deadline.*cannot name/);
-    expect(() => rehydrateKernel(options(), forgedWindowDeadline))
-      .toThrow(/window deadline.*cannot name/);
+    expect(() => finalizeReplay(forgedWindowTimeout, { perm: [0] }))
+      .toThrow(/window timeout.*cannot name/);
+    expect(() => rehydrateKernel(options(), forgedWindowTimeout))
+      .toThrow(/window timeout.*cannot name/);
     const forgedUnknownParticipant = structuredClone(kernel.liveTranscript());
-    const unknownDeadline = forgedUnknownParticipant.events.find(
-      (event) => event.kind === 'deadline',
+    const unknownTimeout = forgedUnknownParticipant.events.find(
+      (event) => event.kind === 'timeout',
     );
     const unknownResolution = forgedUnknownParticipant.events.find(
-      (event) => event.kind === 'resolution' && event.cause === 'deadline',
+      (event) => event.kind === 'resolution' && event.cause === 'timeout',
     );
-    if (unknownDeadline?.kind === 'deadline') unknownDeadline.participantId = 'green';
+    if (unknownTimeout?.kind === 'timeout') unknownTimeout.participantId = 'green';
     if (unknownResolution?.kind === 'resolution' && unknownResolution.systemInput) {
       unknownResolution.systemInput.participantId = 'green';
       unknownResolution.systemInput.action.seat = 'green';
     }
     expect(() => finalizeReplay(forgedUnknownParticipant, { perm: [0] }))
       .toThrow(/declared session seat/);
-    const forgedEmptyDeadline = structuredClone(kernel.liveTranscript());
-    const emptyDeadline = forgedEmptyDeadline.events.find((event) => event.kind === 'deadline');
-    if (emptyDeadline?.kind === 'deadline') emptyDeadline.deadlineId = '';
-    expect(() => finalizeReplay(forgedEmptyDeadline, { perm: [0] }))
-      .toThrow(/non-empty deadlineId/);
+    const forgedEmptyTimeout = structuredClone(kernel.liveTranscript());
+    const emptyTimeout = forgedEmptyTimeout.events.find((event) => event.kind === 'timeout');
+    if (emptyTimeout?.kind === 'timeout') emptyTimeout.timeoutId = '';
+    expect(() => finalizeReplay(forgedEmptyTimeout, { perm: [0] }))
+      .toThrow(/non-empty timeoutId/);
 
     const exactRetry = kernel.prepareIngest(submission('red', 'red-1', 1));
     expect(exactRetry.result.status).toBe('duplicate');
     kernel.commit(exactRetry);
     expect(() => kernel.prepareIngest(submission('red', 'late', 1)))
       .toThrowError(SessionAdvanceError);
-    expect(() => kernel.prepareDeadline(
-      { deadlineId: 'late', tick: 1 },
+    expect(() => kernel.prepareTimeout(
+      { timeoutId: 'late', reason: 'elapsed', tick: 1 },
       { id: 'Action 1', index: 1 },
     )).toThrowError(SessionAdvanceError);
     expect(() => kernel.prepareExtension('late', { value: 1 }))
@@ -1115,7 +1153,8 @@ describe('./session kernel', () => {
       kernel.commit(kernel.prepareIngest(submission('blue', 'blue-1', 2)));
       kernel.commit(kernel.prepareAdvance());
     }
-    expect(ticks.liveTranscript().events).toEqual(turns.liveTranscript().events);
+    expect(withoutHostTimes(ticks.liveTranscript().events))
+      .toEqual(withoutHostTimes(turns.liveTranscript().events));
     expect(ticks.digest()).toBe(turns.digest());
   });
 

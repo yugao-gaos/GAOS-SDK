@@ -39,14 +39,20 @@ class ReplayFormatError(ValueError):
         )
 
 
-def run_level_seed(session_seed: int, level_index: int) -> int:
+def run_level_seed(session_seed: int | float, level_index: int | float) -> int:
     """Match the TypeScript SDK's unsigned 32-bit per-level seed derivation."""
 
-    return (session_seed ^ (0x9E3779B9 * (level_index + 1))) & _U32_MAX
+    if not _is_int(session_seed) or not _is_int(level_index):
+        raise TypeError("session_seed and level_index must be integer numbers")
+    return (int(session_seed) ^ (0x9E3779B9 * (int(level_index) + 1))) & _U32_MAX
 
 
 def _is_int(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and (not isinstance(value, float) or (math.isfinite(value) and value.is_integer()))
+    )
 
 
 def _valid_safe_integer(value: Any) -> bool:
@@ -113,13 +119,21 @@ def _unicode_scalar_string(value: str) -> str | None:
     return "".join(result)
 
 
+def _message_value(value: Any) -> str:
+    """Render arbitrary rejected input without leaking lone surrogates."""
+
+    if isinstance(value, str) and _unicode_scalar_string(value) is not None:
+        return value
+    return ascii(value)
+
+
 def _reject_unknown(
     value: dict[str, Any],
     allowed: set[str],
     label: str,
 ) -> list[str]:
     return [
-        f"{label} has unknown property {key}"
+        f"{label} has unknown property {_message_value(key)}"
         for key in value
         if key not in allowed
     ]
@@ -147,6 +161,7 @@ def _validate_resolution_input(
         "submissionId",
         "canonicalCommand",
         "cursor",
+        "clientTime",
         "prevChainHash",
         "sig",
         "commit",
@@ -154,7 +169,7 @@ def _validate_resolution_input(
         "verifiedPayload",
     }
     if action_record:
-        allowed.update({"kind", "n", "levelIndex", "tick"})
+        allowed.update({"kind", "n", "levelIndex", "tick", "hostTime"})
     problems = _reject_unknown(candidate, allowed, label)
     parsed_ids: dict[str, int] = {}
     for field in ("wireId", "canonicalId"):
@@ -176,6 +191,11 @@ def _validate_resolution_input(
     for field in ("x", "y", "index"):
         if field in candidate and not _valid_safe_integer(candidate[field]):
             problems.append(f"{label} {field} must be a safe integer")
+    for field in ("clientTime",) + (("hostTime",) if action_record else ()):
+        if field in candidate and not _valid_non_negative_integer(candidate[field]):
+            problems.append(
+                f"{label} {field} must be a non-negative safe integer"
+            )
     for field in ("boardId", "zoneId", "seat"):
         if field in candidate and (
             not isinstance(candidate[field], str) or not candidate[field]
@@ -269,7 +289,7 @@ def _validate_json_value(value: Any, path: str = "artifact") -> list[str]:
         return (
             []
             if -_SAFE_INTEGER_MAX <= value <= _SAFE_INTEGER_MAX
-            else [f"{path} integers must be within the JavaScript safe range"]
+            else [f"{path} integer numbers must be within the JavaScript safe range"]
         )
     if isinstance(value, float):
         if not math.isfinite(value):
@@ -343,8 +363,9 @@ def validate_replay_artifact(value: Any) -> list[str]:
             "levels",
             "totals",
             "visibility",
-            "seats",
+            "seatKeys",
             "signaturePolicy",
+            "timeoutPolicy",
             "extensions",
         },
         "header",
@@ -363,7 +384,11 @@ def validate_replay_artifact(value: Any) -> list[str]:
         )
     if (
         header.get("formatVersion") == GAOS_REPLAY_LEGACY_FORMAT_VERSION
-        and ("seats" in header or "signaturePolicy" in header)
+        and (
+            "seatKeys" in header
+            or "signaturePolicy" in header
+            or "timeoutPolicy" in header
+        )
     ):
         problems.append("header integrity reservations require formatVersion 1.1")
     if not isinstance(header.get("sessionId"), str) or not header["sessionId"]:
@@ -387,6 +412,9 @@ def validate_replay_artifact(value: Any) -> list[str]:
         or visibility == "seat:"
     ):
         problems.append("header.visibility must be full or seat:<id>")
+    for field in ("signaturePolicy", "timeoutPolicy", "extensions"):
+        if field in header and not isinstance(header[field], dict):
+            problems.append(f"header.{field} must be an object")
 
     game = header.get("game")
     if not isinstance(game, dict):
@@ -444,7 +472,7 @@ def validate_replay_artifact(value: Any) -> list[str]:
             if not isinstance(level_id, str) or not level_id:
                 problems.append(f"level {index} id must be a non-empty string")
             elif level_id in seen_ids:
-                problems.append(f"level {index} duplicates id {level_id}")
+                problems.append(f"level {index} duplicates id {_message_value(level_id)}")
             else:
                 seen_ids.add(level_id)
             version = level.get("version")
@@ -470,6 +498,8 @@ def validate_replay_artifact(value: Any) -> list[str]:
                 )
             if "level" not in level:
                 problems.append(f"level {index} must include level data")
+            if "extensions" in level and not isinstance(level["extensions"], dict):
+                problems.append(f"level {index} extensions must be an object")
             result = level.get("result")
             if not isinstance(result, dict):
                 problems.append(f"level {index} result must be an object")
@@ -498,6 +528,13 @@ def validate_replay_artifact(value: Any) -> list[str]:
                     problems.append(
                         f"level {index} result.actionsUsed must be a non-negative safe integer"
                     )
+                if (
+                    "extensions" in result
+                    and not isinstance(result["extensions"], dict)
+                ):
+                    problems.append(
+                        f"level {index} result.extensions must be an object"
+                    )
 
     totals = header.get("totals")
     if not isinstance(totals, dict):
@@ -519,6 +556,8 @@ def validate_replay_artifact(value: Any) -> list[str]:
             problems.append(
                 "header.totals.totalActionsUsed must be a non-negative safe integer"
             )
+        if "extensions" in totals and not isinstance(totals["extensions"], dict):
+            problems.append("header.totals.extensions must be an object")
 
     if not isinstance(actions, list):
         problems.append("actions must be an array")
@@ -549,16 +588,18 @@ def validate_replay_artifact(value: Any) -> list[str]:
                     "seat",
                     "targets",
                     "tick",
+                    "hostTime",
                     "submissionId",
                     "canonicalCommand",
                     "cursor",
+                    "clientTime",
                     "prevChainHash",
                     "sig",
                     "commit",
                     "reveal",
                     "verifiedPayload",
                 },
-                f"action {action.get('n')}",
+                f"action {_message_value(action.get('n'))}",
             ))
             number = action.get("n")
             if (
@@ -571,7 +612,7 @@ def validate_replay_artifact(value: Any) -> list[str]:
                 or number != sequence_base + index
             ):
                 problems.append(
-                    f"action at index {index} has non-contiguous sequence number {number}"
+                    f"action at index {index} has non-contiguous sequence number {_message_value(number)}"
                 )
             level_index = action.get("levelIndex")
             if (
@@ -579,10 +620,10 @@ def validate_replay_artifact(value: Any) -> list[str]:
                 or level_index >= len(levels)
             ):
                 problems.append(
-                    f"action {number} has invalid levelIndex {level_index}"
+                    f"action {_message_value(number)} has invalid levelIndex {_message_value(level_index)}"
                 )
             elif level_index < previous_level_index:
-                problems.append(f"action {number} returns to an earlier level")
+                problems.append(f"action {_message_value(number)} returns to an earlier level")
             else:
                 previous_level_index = level_index
 
@@ -593,7 +634,7 @@ def validate_replay_artifact(value: Any) -> list[str]:
                 action_id = int(match.group(1)) if match else 0
                 if not match or not 1 <= action_id <= len(permutation):
                     problems.append(
-                        f"action {number} {field} must be within Action 1..{len(permutation)}"
+                        f"action {_message_value(number)} {field} must be within Action 1..{len(permutation)}"
                     )
                 else:
                     parsed_ids[field] = action_id - 1
@@ -603,21 +644,29 @@ def validate_replay_artifact(value: Any) -> list[str]:
                 and permutation[parsed_ids["wireId"]] != parsed_ids["canonicalId"]
             ):
                 problems.append(
-                    f"action {number}: wire {action.get('wireId')} to "
+                    f"action {_message_value(number)}: wire {action.get('wireId')} to "
                     f"{action.get('canonicalId')} contradicts the replay permutation"
                 )
 
             for field in ("x", "y", "index", "tick"):
                 if field in action and not _valid_safe_integer(action[field]):
-                    problems.append(f"action {number} {field} must be a safe integer")
+                    problems.append(f"action {_message_value(number)} {field} must be a safe integer")
+            for field in ("hostTime", "clientTime"):
+                if (
+                    field in action
+                    and not _valid_non_negative_integer(action[field])
+                ):
+                    problems.append(
+                        f"action {_message_value(number)} {field} must be a non-negative safe integer"
+                    )
             tick = action.get("tick")
             if _valid_safe_integer(tick) and tick < 0:
-                problems.append(f"action {number} tick must be non-negative")
+                problems.append(f"action {_message_value(number)} tick must be non-negative")
             if _valid_non_negative_integer(level_index) and _valid_non_negative_integer(tick):
                 previous_tick = level_ticks.get(level_index, 0)
                 if tick < previous_tick:
                     problems.append(
-                        f"action {number} tick must not precede its level's previous action"
+                        f"action {_message_value(number)} tick must not precede its level's previous action"
                     )
                 else:
                     level_ticks[level_index] = tick
@@ -625,15 +674,15 @@ def validate_replay_artifact(value: Any) -> list[str]:
                 if field in action and (
                     not isinstance(action[field], str) or not action[field]
                 ):
-                    problems.append(f"action {number} {field} must be a non-empty string")
+                    problems.append(f"action {_message_value(number)} {field} must be a non-empty string")
             if "targets" in action:
                 if not isinstance(action["targets"], list):
-                    problems.append(f"action {number} targets must be an array")
+                    problems.append(f"action {_message_value(number)} targets must be an array")
                 else:
                     for target_index, target in enumerate(action["targets"]):
                         if not _valid_location(target):
                             problems.append(
-                                f"action {number} target {target_index} is invalid"
+                                f"action {_message_value(number)} target {target_index} is invalid"
                             )
             commit = action.get("commit")
             reveal = action.get("reveal")
@@ -641,11 +690,11 @@ def validate_replay_artifact(value: Any) -> list[str]:
             has_reveal = "reveal" in action
             if has_commit and has_reveal:
                 problems.append(
-                    f"action {number} commit and reveal are mutually exclusive"
+                    f"action {_message_value(number)} commit and reveal are mutually exclusive"
                 )
             if "verifiedPayload" in action and not has_reveal:
                 problems.append(
-                    f"action {number} verifiedPayload requires reveal"
+                    f"action {_message_value(number)} verifiedPayload requires reveal"
                 )
             if (
                 header.get("formatVersion") == GAOS_REPLAY_LEGACY_FORMAT_VERSION
@@ -656,19 +705,21 @@ def validate_replay_artifact(value: Any) -> list[str]:
                     or "submissionId" in action
                     or "canonicalCommand" in action
                     or "cursor" in action
+                    or "clientTime" in action
+                    or "hostTime" in action
                     or "prevChainHash" in action
                     or "sig" in action
                 )
             ):
                 problems.append(
-                    f"action {number} v1.1 fields require formatVersion 1.1"
+                    f"action {_message_value(number)} v1.1 fields require formatVersion 1.1"
                 )
             if has_commit:
                 if isinstance(commit, dict):
                     problems.extend(_reject_unknown(
                         commit,
                         {"commitmentId", "scheme", "hash"},
-                        f"action {number} commit",
+                        f"action {_message_value(number)} commit",
                     ))
                 if (
                     not isinstance(commit, dict)
@@ -678,14 +729,14 @@ def validate_replay_artifact(value: Any) -> list[str]:
                     or not _LOWER_HASH.fullmatch(commit["hash"])
                 ):
                     problems.append(
-                        f"action {number} has an invalid commitment envelope"
+                        f"action {_message_value(number)} has an invalid commitment envelope"
                     )
             if has_reveal:
                 if isinstance(reveal, dict):
                     problems.extend(_reject_unknown(
                         reveal,
                         {"commitmentId", "salt", "payload"},
-                        f"action {number} reveal",
+                        f"action {_message_value(number)} reveal",
                     ))
                 if (
                     not isinstance(reveal, dict)
@@ -694,7 +745,7 @@ def validate_replay_artifact(value: Any) -> list[str]:
                     or not _LOWER_SALT.fullmatch(reveal["salt"])
                     or "payload" not in reveal
                 ):
-                    problems.append(f"action {number} has an invalid reveal envelope")
+                    problems.append(f"action {_message_value(number)} has an invalid reveal envelope")
 
     records = value.get("records")
     if "records" in value:
@@ -710,12 +761,13 @@ def validate_replay_artifact(value: Any) -> list[str]:
             allowed_kinds = {
                 "action",
                 "resolution",
-                "deadline",
+                "timeout",
                 "extension",
                 "checkpoint",
                 "commit-mismatch",
+                "seat-signature",
             }
-            common = {"kind", "n", "levelIndex"}
+            common = {"kind", "n", "levelIndex", "hostTime"}
             allowed_by_kind = {
                 "action": common | {
                     "wireId",
@@ -734,11 +786,19 @@ def validate_replay_artifact(value: Any) -> list[str]:
                     "submissionId",
                     "canonicalCommand",
                     "cursor",
+                    "clientTime",
                     "prevChainHash",
                     "sig",
                 },
                 "resolution": common | {"tick", "inputs", "cause", "systemInput"},
-                "deadline": common | {"tick", "reason"},
+                "timeout": common | {
+                    "tick",
+                    "timeoutId",
+                    "windowRef",
+                    "participantId",
+                    "reason",
+                    "timeoutPolicyRef",
+                },
                 "extension": common | {"lane", "record"},
                 "checkpoint": common | {"tick", "digest"},
                 "commit-mismatch": common | {
@@ -750,6 +810,14 @@ def validate_replay_artifact(value: Any) -> list[str]:
                     "attemptedReveal",
                     "canonicalCommand",
                     "cursor",
+                    "clientTime",
+                    "prevChainHash",
+                    "sig",
+                },
+                "seat-signature": common | {
+                    "tick",
+                    "participantId",
+                    "clientTime",
                     "prevChainHash",
                     "sig",
                 },
@@ -768,15 +836,23 @@ def validate_replay_artifact(value: Any) -> list[str]:
                     or level_index >= len(levels)
                 ):
                     problems.append(
-                        f"record {index} has invalid levelIndex {level_index}"
+                        f"record {index} has invalid levelIndex {_message_value(level_index)}"
                     )
                 elif level_index < previous_level_index:
                     problems.append(f"record {index} returns to an earlier level")
                 else:
                     previous_level_index = level_index
                 kind = record.get("kind")
-                if kind not in allowed_kinds:
-                    problems.append(f"record {index} has unknown kind {kind}")
+                for field in ("hostTime", "clientTime"):
+                    if (
+                        field in record
+                        and not _valid_non_negative_integer(record[field])
+                    ):
+                        problems.append(
+                            f"record {index} {field} must be a non-negative safe integer"
+                        )
+                if not isinstance(kind, str) or kind not in allowed_kinds:
+                    problems.append(f"record {index} has unknown kind {_message_value(kind)}")
                     continue
                 problems.extend(_reject_unknown(
                     record,
@@ -804,15 +880,15 @@ def validate_replay_artifact(value: Any) -> list[str]:
                                 f"resolution {index} input {input_index}",
                                 permutation,
                             ))
-                    if record.get("cause") not in ("complete", "deadline", "tick"):
+                    if record.get("cause") not in ("complete", "timeout", "tick"):
                         problems.append(
-                            f"resolution {index} cause must be complete, deadline, or tick"
+                            f"resolution {index} cause must be complete, timeout, or tick"
                         )
                     system_input = record.get("systemInput")
-                    if record.get("cause") == "deadline":
+                    if record.get("cause") == "timeout":
                         if system_input is None:
                             problems.append(
-                                f"resolution {index} deadline cause requires systemInput"
+                                f"resolution {index} timeout cause requires systemInput"
                             )
                         else:
                             problems.extend(_validate_resolution_input(
@@ -835,7 +911,7 @@ def validate_replay_artifact(value: Any) -> list[str]:
                                     )
                     elif "systemInput" in record:
                         problems.append(
-                            f"resolution {index} systemInput requires deadline cause"
+                            f"resolution {index} systemInput requires timeout cause"
                         )
                     tick = record.get("tick")
                     if (
@@ -849,17 +925,42 @@ def validate_replay_artifact(value: Any) -> list[str]:
                             )
                         else:
                             record_ticks[level_index] = tick
-                elif kind == "deadline":
+                elif kind == "timeout":
                     if not _valid_non_negative_integer(record.get("tick")):
                         problems.append(
-                            f"deadline {index} tick must be a non-negative safe integer"
+                            f"timeout {index} tick must be a non-negative safe integer"
                         )
                     if (
                         not isinstance(record.get("reason"), str)
                         or not record["reason"]
                     ):
                         problems.append(
-                            f"deadline {index} reason must be a non-empty string"
+                            f"timeout {index} reason must be a non-empty string"
+                        )
+                    if (
+                        not isinstance(record.get("timeoutId"), str)
+                        or not record["timeoutId"]
+                    ):
+                        problems.append(
+                            f"timeout {index} timeoutId must be a non-empty string"
+                        )
+                    if not _valid_non_negative_integer(record.get("windowRef")):
+                        problems.append(
+                            f"timeout {index} windowRef must be a non-negative safe integer"
+                        )
+                    participant_id = record.get("participantId")
+                    if participant_id is not None and (
+                        not isinstance(participant_id, str) or not participant_id
+                    ):
+                        problems.append(
+                            f"timeout {index} participantId must be null or a non-empty string"
+                        )
+                    if "timeoutPolicyRef" in record and (
+                        not isinstance(record["timeoutPolicyRef"], str)
+                        or not record["timeoutPolicyRef"]
+                    ):
+                        problems.append(
+                            f"timeout {index} timeoutPolicyRef must be a non-empty string"
                         )
                 elif kind == "extension":
                     if not isinstance(record.get("lane"), str) or not record["lane"]:
@@ -918,6 +1019,18 @@ def validate_replay_artifact(value: Any) -> list[str]:
                                 problems.append(
                                     f"commit-mismatch {index} attemptedReveal is invalid"
                                 )
+                elif kind == "seat-signature":
+                    if not _valid_non_negative_integer(record.get("tick")):
+                        problems.append(
+                            f"seat-signature {index} tick must be a non-negative safe integer"
+                        )
+                    if (
+                        not isinstance(record.get("participantId"), str)
+                        or not record["participantId"]
+                    ):
+                        problems.append(
+                            f"seat-signature {index} participantId must be a non-empty string"
+                        )
             if isinstance(actions, list):
                 try:
                     if canonical_json(_project_record_actions(records)) != canonical_json(actions):

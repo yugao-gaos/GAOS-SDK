@@ -175,16 +175,18 @@ describe('portable GAOS replay JSONL', () => {
 
   it('preserves the unimplemented RFC-010 integrity reservation slots', () => {
     const reserved = structuredClone(runArtifact());
-    reserved.header.seats = [{
+    reserved.header.seatKeys = [{
       id: 'red',
       publicKey: 'reserved-key',
       alg: 'reserved-algorithm',
     }];
     reserved.header.signaturePolicy = { scheme: 'reserved', N: 8 };
+    reserved.header.timeoutPolicy = { mode: 'ticks', maximum: 90 };
     Object.assign(reserved.actions[0]!, {
       submissionId: 'reserved-submission',
       canonicalCommand: '{"move":1}',
       cursor: 0,
+      clientTime: 1_785_032_000_000,
       prevChainHash: 'reserved-chain-link',
       sig: 'reserved-signature',
     });
@@ -192,6 +194,22 @@ describe('portable GAOS replay JSONL', () => {
     expect(validateReplayArtifact(reserved)).toEqual([]);
     const parsed = parseReplayJsonl(serializeReplayJsonl(reserved));
     expect(parsed).toEqual(reserved);
+
+    const periodic = structuredClone(reserved);
+    periodic.actions = [];
+    periodic.records = [{
+      kind: 'seat-signature',
+      n: 0,
+      levelIndex: 0,
+      tick: 12,
+      participantId: 'red',
+      clientTime: 1_785_032_000_000,
+      prevChainHash: 'reserved-chain-link',
+      sig: 'reserved-periodic-signature',
+      hostTime: 1_785_032_000_100,
+    }];
+    expect(validateReplayArtifact(periodic)).toEqual([]);
+    expect(parseReplayJsonl(serializeReplayJsonl(periodic))).toEqual(periodic);
 
     const legacy = structuredClone(reserved);
     legacy.header.formatVersion = '1.0';

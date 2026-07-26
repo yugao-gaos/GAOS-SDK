@@ -20,8 +20,10 @@ This release adds the optional authoritative session and integrity layer:
   transition watermark without inventing a gameplay revision; snapshots can
   replay missed notices after crash/reconnect, and accepted submission IDs
   remain permanently non-reusable;
-- replay v1.1 preserves grouped reducer calls plus deadline, extension, and
+- replay v1.1 preserves grouped reducer calls plus timeout, extension, and
   commitment-mismatch audit records while retaining v1.0 parsing;
+- the pre-tag API and wire vocabulary is `prepareTimeout`, `TimeoutInput`,
+  `timeoutId`, record/event kind `timeout`, and resolution cause `timeout`;
 - TypeScript and Python pin canonical object-key ordering to Unicode code
   points, share the JavaScript-safe integer domain, and enforce the same
   strict replay object/null semantics;
@@ -36,13 +38,20 @@ This release adds the optional authoritative session and integrity layer:
   own policy to diagnostics;
 - v1.1 audit records are explicitly advisory host attestation, not a
   leaderboard trust signal; strict-schema slots are reserved for RFC-010's
-  additive v1.2 roster, signature, and chain fields;
+  additive v1.2 `seatKeys`, `clientTime`, periodic signature, policy,
+  signature, and chain fields;
+- session events carry advisory `hostTime`; replay projection is opt-in and
+  verification ignores it;
 - session `AdvanceSummary` adds non-fatal `warnings`, currently used to
   surface live commitment-salt reuse.
 
 The [sessions and integrity guide](/session-and-integrity) normatively defines
 the host's prepare → persist → commit → publish order, event-id idempotency,
 crash recovery, and reducer-state ownership callbacks.
+
+Migration note: `finalizeRunReplay` requires each source level transcript to
+record its already-derived level seed with `seedPolicy: 'explicit'`.
+Transcripts using `gaos.run-level-seed.v1` directly are rejected.
 
 See [sessions and integrity](/session-and-integrity).
 

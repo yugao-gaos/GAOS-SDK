@@ -38,8 +38,9 @@
               "header": {
                 "not": {
                   "anyOf": [
-                    { "required": ["seats"] },
-                    { "required": ["signaturePolicy"] }
+                    { "required": ["seatKeys"] },
+                    { "required": ["signaturePolicy"] },
+                    { "required": ["timeoutPolicy"] }
                   ]
                 }
               }
@@ -57,6 +58,8 @@
                       { "required": ["submissionId"] },
                       { "required": ["canonicalCommand"] },
                       { "required": ["cursor"] },
+                      { "required": ["clientTime"] },
+                      { "required": ["hostTime"] },
                       { "required": ["prevChainHash"] },
                       { "required": ["sig"] }
                     ]
@@ -177,8 +180,9 @@
             { "type": "string", "pattern": "^seat:.+" }
           ]
         },
-        "seats": true,
-        "signaturePolicy": true,
+        "seatKeys": true,
+        "signaturePolicy": { "$ref": "#/$defs/jsonObject" },
+        "timeoutPolicy": { "$ref": "#/$defs/jsonObject" },
         "extensions": { "$ref": "#/$defs/jsonObject" }
       }
     },
@@ -238,9 +242,11 @@
           "items": { "$ref": "#/$defs/locationRef" }
         },
         "tick": { "type": "integer", "minimum": 0 },
+        "hostTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "submissionId": true,
         "canonicalCommand": true,
         "cursor": true,
+        "clientTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "prevChainHash": true,
         "sig": true,
         "commit": { "$ref": "#/$defs/commit" },
@@ -306,6 +312,7 @@
         "submissionId": true,
         "canonicalCommand": true,
         "cursor": true,
+        "clientTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "prevChainHash": true,
         "sig": true,
         "commit": { "$ref": "#/$defs/commit" },
@@ -320,7 +327,7 @@
       "allOf": [
         {
           "if": {
-            "properties": { "cause": { "const": "deadline" } },
+            "properties": { "cause": { "const": "timeout" } },
             "required": ["cause"]
           },
           "then": { "required": ["systemInput"] },
@@ -332,24 +339,39 @@
         "n": { "type": "integer", "minimum": 0 },
         "levelIndex": { "type": "integer", "minimum": 0 },
         "tick": { "type": "integer", "minimum": 0 },
+        "hostTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "inputs": {
           "type": "array",
           "items": { "$ref": "#/$defs/resolutionInput" }
         },
-        "cause": { "enum": ["complete", "deadline", "tick"] },
+        "cause": { "enum": ["complete", "timeout", "tick"] },
         "systemInput": { "$ref": "#/$defs/resolutionInput" }
       }
     },
-    "deadline": {
+    "timeout": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "n", "levelIndex", "tick", "reason"],
+      "required": [
+        "kind",
+        "n",
+        "levelIndex",
+        "tick",
+        "timeoutId",
+        "windowRef",
+        "participantId",
+        "reason"
+      ],
       "properties": {
-        "kind": { "const": "deadline" },
+        "kind": { "const": "timeout" },
         "n": { "type": "integer", "minimum": 0 },
         "levelIndex": { "type": "integer", "minimum": 0 },
         "tick": { "type": "integer", "minimum": 0 },
-        "reason": { "type": "string", "minLength": 1 }
+        "timeoutId": { "type": "string", "minLength": 1 },
+        "windowRef": { "type": "integer", "minimum": 0 },
+        "participantId": { "type": ["string", "null"], "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 },
+        "timeoutPolicyRef": { "type": "string", "minLength": 1 },
+        "hostTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
       }
     },
     "extension": {
@@ -362,6 +384,7 @@
         "levelIndex": { "type": "integer", "minimum": 0 },
         "lane": { "type": "string", "minLength": 1 },
         "record": { "$ref": "#/$defs/jsonObject" }
+        ,"hostTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
       }
     },
     "checkpoint": {
@@ -377,7 +400,8 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 4294967295
-        }
+        },
+        "hostTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
       }
     },
     "commitMismatch": {
@@ -408,8 +432,10 @@
         "scheme": { "const": "gaos.commit.sha256.v1" },
         "canonicalCommand": true,
         "cursor": true,
+        "clientTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "prevChainHash": true,
         "sig": true,
+        "hostTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "attemptedReveal": {
           "type": "object",
           "additionalProperties": false,
@@ -424,14 +450,31 @@
         }
       }
     },
+    "seatSignature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "n", "levelIndex", "tick", "participantId"],
+      "properties": {
+        "kind": { "const": "seat-signature" },
+        "n": { "type": "integer", "minimum": 0 },
+        "levelIndex": { "type": "integer", "minimum": 0 },
+        "tick": { "type": "integer", "minimum": 0 },
+        "participantId": { "type": "string", "minLength": 1 },
+        "clientTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "prevChainHash": true,
+        "sig": true,
+        "hostTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+      }
+    },
     "record": {
       "oneOf": [
         { "$ref": "#/$defs/action" },
         { "$ref": "#/$defs/resolution" },
-        { "$ref": "#/$defs/deadline" },
+        { "$ref": "#/$defs/timeout" },
         { "$ref": "#/$defs/extension" },
         { "$ref": "#/$defs/checkpoint" },
-        { "$ref": "#/$defs/commitMismatch" }
+        { "$ref": "#/$defs/commitMismatch" },
+        { "$ref": "#/$defs/seatSignature" }
       ]
     }
   }

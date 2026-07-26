@@ -64,7 +64,7 @@ A signature proves **the holder of key K produced these bytes**. It does not
 prove *who* K is. Binding K to an account, a person, or an agent is product
 policy and stays out of the SDK, exactly as authentication does in RFC-006 §2.
 
-- The artifact header carries a **seat roster**: `seats: [{ id, publicKey,
+- The artifact header carries a **seat roster**: `seatKeys: [{ id, publicKey,
   alg }]`.
 - How a verifier decides the roster is authentic is product policy (Arena
   signs the roster with a service key; a third party may pin it; a casual
@@ -110,6 +110,7 @@ domainTag = UTF8("gaos.submission.ed25519.v1")     // distinct from gaos.commit.
 fields, in order:
   domainTag, sessionId, seat, submissionId,
   cursor (u64-BE), tick (u64-BE),
+  clientTime (u64-BE),          // MANDATORY; see A5.2
   canonicalCommandBytes,        // UTF8(canonicalJson(command))
   prevChainHash                 // 32 raw bytes; see A5.1
 ```
@@ -143,6 +144,42 @@ compose without conflicting.
 Chain verification is a pure recomputation from the recorded submissions: any
 deletion, alteration, or reordering inside a seat's stream fails to reproduce
 the signed head.
+
+### A5.2 `clientTime` — mandatory, recorded but not validated
+
+The client's own UTC-millisecond timestamp is a **required** field of the
+signing preimage.
+
+**Why mandatory rather than optional.** An optional evidence field is a
+downgrade vector: a colluding or merely lazy host can request submissions
+without timestamps and the evidence disappears silently, while the artifact
+still looks well-formed. Mandatory inside the envelope means the only way to
+have no timestamp is to have **no signature at all** — which is already
+visible as `partial`/`unsigned` in the §A9b.1 verdict. The point is not
+completeness; it is making a downgrade impossible to hide.
+
+Three constraints ship with it:
+
+1. **Mandatory to record, never validated for correctness.** Client clocks
+   are wrong, skewed, and time-zoned. The verifier records and reports; it
+   MUST NOT reject a submission for an implausible absolute time, or a player
+   with a bad clock cannot play. Its evidentiary use is **relative intervals
+   cross-checked between seats**, never absolute time.
+2. **Its scope is the signed envelope.** Unsigned submissions (§A8) carry no
+   `clientTime`, which is self-consistent: unsigned material is not evidence
+   in the first place.
+3. **Format and privacy.** UTC milliseconds as an unsigned integer.
+   Document that it leaks behavioural signal — thinking time, time zone,
+   activity hours — since mandatory means products cannot opt out.
+
+Agents and bots sign with a `clientTime` like anyone else. It carries no
+fairness meaning for a batch evaluation, but a uniform rule beats an
+exception.
+
+**Weak by construction, and labelled as such:** a client can lie about its own
+clock, and a client colluding with the host provides no constraint at all.
+`clientTime` is bounded cross-seat evidence, not a time authority. The strong
+answer remains external anchoring (§A10).
 
 ## A6. Tiered signing policy
 
@@ -234,7 +271,7 @@ make the chain head a well-defined, reproducible value.
 
 ## A7. Artifact layout and the three-state result
 
-- Header: `seats: [{ id, publicKey, alg }]`, `signaturePolicy: { scheme, N }`.
+- Header: `seatKeys: [{ id, publicKey, alg }]`, `signaturePolicy: { scheme, N }`.
 - Each `ReplayAction` / resolution input: optional `sig`, `prevChainHash`.
 - **Rejection records must carry the signed submission** — that is the whole
   point: the verifier independently establishes that the seat really sent
@@ -251,12 +288,13 @@ make the chain head a well-defined, reproducible value.
   `gaos.replay` **v1.2**, not v2.
 
 The v1.1 reservation accepts and round-trips, without cryptographic meaning:
-header `seats`/`signaturePolicy`; action and resolution-input
-`submissionId`/`canonicalCommand`/`cursor`/`prevChainHash`/`sig`; and mismatch
-`canonicalCommand`/`cursor`/`prevChainHash`/`sig`. Live submission and session
-event types likewise reserve `prevChainHash` and `sig`, with rejected events
-also reserving the canonical command and cursor. v1.2 will validate and
-interpret these fields.
+header `seatKeys`/`signaturePolicy`/`timeoutPolicy`; the periodic
+`seat-signature` record; action and resolution-input
+`submissionId`/`canonicalCommand`/`cursor`/`clientTime`/`prevChainHash`/`sig`;
+and matching mismatch fields. Live submission and session-event types
+likewise reserve `clientTime`, `prevChainHash`, and `sig`. v1.2 will validate
+and interpret these fields; in particular, `clientTime` becomes mandatory
+whenever `sig` is present.
 
 ## A8. Unsigned submissions
 
@@ -588,3 +626,189 @@ Documentation lands **with** v0.20, never ahead of it. Until the feature
 ships, the honest description of the audit lane is the v0.19 wording:
 advisory, pending RFC-010. The credibility this feature buys is spent the
 first time a claim outruns the implementation.
+
+---
+
+## A9c. The timeout lane: what can and cannot be closed
+
+Amendment (2026-07-25). The v0.19 docs state that RFC-010 closes both the
+`commit-mismatch` and the `timeout` audit lanes. That is imprecise, and the
+imprecision matters at the freeze because the two lanes are structurally
+different: a `commit-mismatch` concerns a **client** submission, while a
+timeout is a **host-originated** event. A host signing its own claim proves
+nothing against that host, and the seat the timeout names is by definition
+the one that did not respond — possibly disconnected — so it cannot
+countersign either.
+
+Decomposing what a timeout record actually asserts shows four of five
+assertions are closable, most of them by machinery already in flight.
+
+| # | assertion a faithless host could falsify | closed by |
+|---|---|---|
+| 1 | the canonical action the timeout produced | **pure recomputation** (§A9c.1) |
+| 2 | "seat P did not submit" — when P did | **signatures + per-seat chain** (§A9c.2) |
+| 3 | a timeout fabricated where policy forbids one | **declared tick-bounded timeout policy** (§A9c.3) |
+| 4 | a timeout suppressed so a window stays open | **same policy** (§A9c.3) |
+| 5 | fired early in **wall-clock** terms | **not closable without external time** (§A9c.4) |
+
+### A9c.1 The forced action — deterministic, no cryptography
+
+RFC-006 §F-E3 offered two options and adopted the first: the `resolution`
+event records the fully derived canonical system input. Adopting the second
+as well — a **versioned, pure `timeoutToAction(context, timeout)`** — lets
+a verifier *recompute* that input from recorded context and compare. The host
+may still claim a timeout fired; it cannot misreport what the timeout
+produced. Requires no keys and no new records.
+
+### A9c.2 Misattribution — a free by-product of Part A
+
+A timeout asserts a **negative**: "P did not submit in this window."
+Negatives are unprovable in general, but this one has a provable complement:
+**accepted submissions are recorded, and under Part A they are signed.**
+
+- If P's signed submission is present in that window, the timeout is
+  refuted directly.
+- For the host to avoid that, it must **delete** P's submission — which
+  breaks P's per-seat chain (§A5.1) and is detected.
+
+So Part A closes the timeout lane's authorship problem **without any
+timeout-specific mechanism**. The asymmetry that makes it work: you cannot
+prove someone did *not* submit, but you can prove they *did* — and forging a
+timeout requires denying exactly that.
+
+### A9c.3 Fabrication and suppression — a declared timeout policy
+
+If the session header declares its timeout in **ticks** (never wall-clock),
+the verifier can recompute the legal position of every timeout:
+
+```
+timeoutPolicy: { mode: 'ticks', windowTicks: N }
+```
+
+- a window opened at tick `T` must either resolve before `T+N`, or carry a
+  timeout at **exactly** `T+N`;
+- a timeout at any earlier tick is **fabricated** → reject;
+- a window still open past `T+N` with no timeout is **suppressed** → reject.
+
+**Cadence caveat, must be documented:** this holds in **ticks mode**, where
+ticks are the clock. In **turns mode** the host decides when to close a
+window, so assertions 3 and 4 degrade to what §A9c.2 provides. State the
+distinction rather than implying uniform coverage.
+
+**Freeze requirement:** this needs a reserved `timeoutPolicy` slot on the
+header and a reference to it on the `timeout` record. The header rejects
+unknown properties today, so **reserving is a v0.19 tag decision** — see
+§A9c.5.
+
+### A9c.4 Wall-clock earliness — bounded weak evidence, not fully closable
+
+Firing a legitimate timeout *too soon in real time* (giving a player less
+than the promised seconds) cannot be proven from the reducer-visible record:
+the SDK is deliberately wall-clock-free.
+
+The mandatory `clientTime` in the signing envelope (§A5.2) does, however,
+give it **bounded** evidence. Client timestamps are signed, so a host cannot
+alter them; to remove them it must delete the submission, which breaks that
+seat's chain (§A5.1) and is detected. A host claiming a 60-second window
+while the surrounding seats' signed timestamps span three seconds is
+therefore contradicted by evidence it cannot forge. The reconstruction is an
+interval bound between *other* seats' submissions — the timed-out seat
+supplies nothing, by definition.
+
+It stays **weak** and must be labelled so: clients can misreport their own
+clocks, and a client colluding with the host removes the constraint
+entirely. Only external time anchoring (§A10) makes it strong.
+
+Note also that it is a different *class* of problem from 1–3: a **fairness**
+issue rather than an **integrity** one, observed live by the victim (a
+visibly short timer) even when it cannot be proven afterwards. It belongs to
+dispute handling, alongside truncation — with `clientTime` now supplying the
+dispute something to stand on.
+
+### A9c.5 Consequences for the v0.19 freeze and for the docs
+
+1. **Reserve `timeoutPolicy` on the header** and a policy reference on the
+   `timeout` record. Without them §A9c.3 cannot be added additively.
+2. **Reserve the `seat-signature` record carrier for tier-3 periodic
+   signatures** (§A6). They attach to no submission; v1.1 preserves this
+   carrier without assigning cryptographic semantics.
+3. **Correct the documentation claim.** Replace "RFC-010 closes the
+   `timeout` and `commit-mismatch` lanes" with the precise version: RFC-010
+   authenticates authorship in both lanes and, in ticks mode, additionally
+   constrains timeout position; **wall-clock earliness remains outside
+   artifact verification.** Two consumer teams will read the v0.19 wording
+   before v0.20 ships, so the correction belongs in this freeze, not the next.
+
+---
+
+## A9d. Naming: `deadline` → `timeout` (a v0.19 freeze decision)
+
+Decided 2026-07-25. `deadline` reads like a **game concept** — "the deadline
+for playing this card" — and two consumer teams are about to build against
+it. What the mechanism actually does is narrower: **the host substitutes an
+input for a seat that did not respond.** RFC-006's `durations` (turn- and
+round-counted expiry tied to phase boundaries) is the game-rule mechanism,
+and conflating the two would implement a rule as infrastructure while
+inheriting infrastructure's unverifiable wall-clock weakness.
+
+`timeout` is the right width. A broader name such as `forcedInput` invites
+misuse the other way — scripted NPC moves, admin actions — none of which
+belong here. Filtering the candidate cases leaves only non-response:
+
+- **disconnect** — concluding early that a seat will not respond; identical
+  kernel behaviour, so a `reason`, not a separate mechanism;
+- **kick / admin removal** — seat elimination (`eliminateSeat`) or a
+  lifecycle event, **not** this mechanism;
+- **human → bot takeover** — the bot then submits normally, **not** this;
+- **"no action for 3 turns ⇒ auto-pass"** — a game rule: `durations` plus a
+  legality rule, producing an ordinary action, **not** this.
+
+| current | renamed |
+|---|---|
+| `prepareDeadline(deadline, systemInput)` | `prepareTimeout(timeout, forcedInput)` |
+| `DeadlineInput` / `deadlineId` | `TimeoutInput` / `timeoutId` |
+| `SessionEvent` kind `deadline` | `timeout` |
+| replay record kind `deadline` | `timeout` |
+| `cause: 'deadline'` | `cause: 'timeout'` |
+| `validateDeadlineAudit` | `validateTimeoutAudit` |
+| — | new `reason: 'elapsed' \| 'disconnect' \| <product>` |
+
+The type names the **event** (`Timeout`); the parameter names the **payload**
+(`forcedInput`, the action actually executed).
+
+**This must happen in the v0.19 freeze.** The record kind and the `cause`
+value are wire format: renaming after the tag is a `gaos.replay` v2 break.
+It is the largest of the pre-tag changes (TypeScript, Python, JSON Schema,
+docs, tests) and warrants a full regression run, but the alternative is
+freezing a name that will mislead every reader for the life of v1.
+
+## A9e. Host timestamps (`hostTime`) — ops, explicitly advisory
+
+Adopted alongside `clientTime`, with a sharp distinction:
+
+| | `SessionEvent.hostTime` (live transcript) | projection into the artifact |
+|---|---|---|
+| cost | near zero — host-side, not wire format | wire format, needs a reservation **now** |
+| purpose | correlate the transcript with the host's own logs by `eventId` | replay-UI pacing, third-party analytics |
+| v0.19 | **add it** | **reserve an advisory slot; do not emit** |
+
+Four hard constraints:
+
+1. **Never a reducer input** — structurally, not by discipline.
+2. **Never inside a signature preimage, and never inside any canonical byte
+   comparison used for equivalence** — otherwise two hosts replaying the same
+   input log produce different bytes.
+3. **Replay verification ignores it entirely** — never compared.
+4. **Documented advisory**, in the same terms as `checkpoint.digest`: host
+   attestation, not evidence. A malicious host writes whatever it likes; the
+   value is bug detection and operations.
+
+Knock-on effect that must be written into the contract: `live === rehydrated`
+equivalence today compares canonical transcript bytes. Rehydration reproduces
+`hostTime` because it is recorded, but **any test or host check asserting
+"replaying these inputs yields this transcript" must exclude it**. Consumers
+will otherwise trip over it during migration.
+
+Projection is opt-in through `FinalizeOptions` and off by default: the host
+already owns its clock and can sidecar timestamps in its own storage, so the
+artifact should carry them only when a consumer explicitly wants pacing data.

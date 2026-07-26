@@ -82,6 +82,10 @@ export interface SessionKernelOptions<
     | { mode: 'turns' }
     | { mode: 'ticks'; rate: TickRate };
   commandToAction(command: TCommand, context: CommandContext): SubmittedAction;
+  /** Host UTC-millisecond clock used only to annotate durable session events. */
+  hostTime?: () => number;
+  /** Reserved timeout-policy declaration; v0.19 assigns no policy semantics. */
+  timeoutPolicy?: JsonObject;
   dmath?: Dmath;
   limits?: SessionLimits;
   stateIsolation?: SessionStateIsolation<TState>;
@@ -99,6 +103,8 @@ export interface SessionHeader<TLevel = unknown> {
   cadence:
     | { mode: 'turns' }
     | { mode: 'ticks'; ticksPerSecond: number };
+  /** Reserved timeout-policy declaration; v0.19 assigns no policy semantics. */
+  timeoutPolicy?: JsonObject;
   dmath?: {
     algorithm: string;
     backend: 'js' | 'wasm';
@@ -108,6 +114,8 @@ export interface SessionHeader<TLevel = unknown> {
 interface SessionEventBase {
   eventId: string;
   transitionRevision: number;
+  /** Advisory host UTC milliseconds; never reducer input or authentication evidence. */
+  hostTime: number;
 }
 
 export interface CanonicalInput extends SubmissionIntegrityReservation {
@@ -126,6 +134,8 @@ export type SessionEvent =
     command: JsonValue;
     canonicalCommand: string;
     /** RFC-010 reservation; v0.19 assigns no signature semantics. */
+    clientTime?: number;
+    /** RFC-010 reservation; v0.19 assigns no signature semantics. */
     prevChainHash?: string;
     /** RFC-010 reservation; v0.19 does not verify signatures. */
     sig?: string;
@@ -134,13 +144,13 @@ export type SessionEvent =
     kind: 'resolution';
     tick: number;
     cursor: number;
-    cause: 'complete' | 'deadline' | 'tick';
+    cause: 'complete' | 'timeout' | 'tick';
     consumed: ReadonlyArray<{
       participantId: string;
       submissionId: string;
     }>;
     inputs: readonly CanonicalInput[];
-    /** Exact host-derived input for a deadline resolution. */
+    /** Exact host-derived input for a timeout resolution. */
     systemInput?: CanonicalInput;
     result: {
       status: 'playing' | 'won' | 'failed';
@@ -149,11 +159,15 @@ export type SessionEvent =
     };
   })
   | (SessionEventBase & {
-    kind: 'deadline';
+    kind: 'timeout';
     tick: number;
-    deadlineId: string;
+    timeoutId: string;
     windowRef: number;
     participantId: string | null;
+    /** Why the host concluded that the seat would not respond. */
+    reason: string;
+    /** Reserved reference into `SessionHeader.timeoutPolicy`. */
+    timeoutPolicyRef?: string;
   })
   | (SessionEventBase & {
     kind: 'extension';
@@ -182,6 +196,7 @@ export type SessionEvent =
     canonicalCommand?: string;
     /** RFC-010 reservation for the rejected command cursor. */
     cursor?: number;
+    clientTime?: number;
     prevChainHash?: string;
     sig?: string;
   });
@@ -263,16 +278,22 @@ export interface SessionWarning {
   commitmentId: number;
 }
 
-export interface DeadlineInput {
-  deadlineId: string;
+export interface TimeoutInput {
+  timeoutId: string;
   tick: number;
   participantId?: string | null;
+  /** `elapsed`, `disconnect`, or a product-defined non-empty reason. */
+  reason: string;
+  /** Reserved reference into the declared timeout policy. */
+  timeoutPolicyRef?: string;
 }
 
 export interface FinalizeOptions {
   perm: number[];
   visibility?: TranscriptVisibility;
   extensions?: JsonObject;
+  /** Opt in to projecting advisory session-event times into replay records. */
+  includeHostTime?: boolean;
 }
 
 export interface FinalizeRunOptions extends FinalizeOptions {
@@ -380,9 +401,9 @@ export class SessionAdvanceError extends Error {
 export interface SessionKernel<TCommand extends JsonValue, TView> {
   prepareIngest(submission: CommandSubmission<TCommand>): Prepared<IngestReceipt>;
   prepareAdvance(target?: number): Prepared<AdvanceSummary<TView>>;
-  prepareDeadline(
-    deadline: DeadlineInput,
-    systemInput: SubmittedAction,
+  prepareTimeout(
+    timeout: TimeoutInput,
+    forcedInput: SubmittedAction,
   ): Prepared<AdvanceSummary<TView>>;
   prepareExtension(lane: string, record: JsonObject): Prepared<void>;
   commit(prepared: Prepared<unknown>): void;
@@ -494,6 +515,13 @@ class SessionKernelImpl<
     if (options.cadence.mode === 'ticks' && !('advance' in options.reducer)) {
       throw new TypeError('ticks cadence requires TickReducer.advance');
     }
+    if (options.timeoutPolicy !== undefined
+      && (options.timeoutPolicy === null
+        || typeof options.timeoutPolicy !== 'object'
+        || Array.isArray(options.timeoutPolicy))) {
+      throw new TypeError('timeoutPolicy must be an object');
+    }
+    if (options.timeoutPolicy !== undefined) canonicalJson(options.timeoutPolicy);
     this.limits = {
       maxFutureTicks: options.limits?.maxFutureTicks
         ?? (options.cadence.mode === 'ticks'
@@ -536,6 +564,9 @@ class SessionKernelImpl<
       cadence: options.cadence.mode === 'turns'
         ? { mode: 'turns' }
         : { mode: 'ticks', ticksPerSecond: options.cadence.rate.ticksPerSecond },
+      ...(options.timeoutPolicy === undefined
+        ? {}
+        : { timeoutPolicy: structuredClone(options.timeoutPolicy) }),
       ...(options.dmath === undefined
         ? {}
         : {
@@ -634,11 +665,18 @@ class SessionKernelImpl<
   ): Prepared<TResult> {
     const base = this.live.transitionRevision;
     const nextRevision = noop ? base : base + 1;
-    const events = rawEvents.map((raw, index): SessionEvent => ({
-      ...structuredClone(raw),
-      eventId: eventId(this.options.sessionId, nextRevision, index),
-      transitionRevision: nextRevision,
-    } as SessionEvent));
+    const events = rawEvents.map((raw, index): SessionEvent => {
+      const hostTime = this.options.hostTime?.() ?? Date.now();
+      if (!Number.isSafeInteger(hostTime) || hostTime < 0) {
+        throw new RangeError('hostTime must be non-negative UTC milliseconds');
+      }
+      return {
+        ...structuredClone(raw),
+        eventId: eventId(this.options.sessionId, nextRevision, index),
+        transitionRevision: nextRevision,
+        hostTime,
+      } as SessionEvent;
+    });
     if (!noop) {
       draft.transitionRevision = nextRevision;
       draft.events.push(...events);
@@ -663,14 +701,17 @@ class SessionKernelImpl<
     });
   }
 
-  private preparedState(prepared: Prepared<unknown>): PreparedState<TState, TCommand, TView> {
+  private preparedState(
+    prepared: Prepared<unknown>,
+    allowAborted = false,
+  ): PreparedState<TState, TCommand, TView> {
     const value = prepared?.[preparedTransition] as
       | PreparedState<TState, TCommand, TView>
       | undefined;
     if (!value || value.owner !== this.owner) {
       throw new PreparedTransitionError('foreign', 'prepared transition belongs to another kernel');
     }
-    if (value.completion !== 'open') {
+    if (value.completion !== 'open' && !(allowAborted && value.completion === 'aborted')) {
       throw new PreparedTransitionError(
         'already_completed',
         `prepared transition was already ${value.completion}`,
@@ -680,6 +721,9 @@ class SessionKernelImpl<
   }
 
   prepareIngest(submission: CommandSubmission<TCommand>): Prepared<IngestReceipt> {
+    if (submission === null || typeof submission !== 'object' || Array.isArray(submission)) {
+      throw new IntentCollectionError('invalid_submission', 'submission must be an object');
+    }
     if (submission.protocol !== PROTOCOL_ID || submission.protocolVersion !== PROTOCOL_VERSION) {
       throw new IntentCollectionError(
         'invalid_protocol',
@@ -822,6 +866,11 @@ class SessionKernelImpl<
         submissionId: submission.submissionId,
         command: structuredClone(submission.command),
         canonicalCommand,
+        ...(submission.clientTime === undefined ? {} : { clientTime: submission.clientTime }),
+        ...(submission.prevChainHash === undefined
+          ? {}
+          : { prevChainHash: submission.prevChainHash }),
+        ...(submission.sig === undefined ? {} : { sig: submission.sig }),
       }], [], receipt);
     } catch (error) {
       this.discardDraft(draft);
@@ -925,6 +974,11 @@ class SessionKernelImpl<
                 salt: action.reveal.salt,
                 payload: structuredClone(action.reveal.payload),
               },
+              ...(intent.clientTime === undefined ? {} : { clientTime: intent.clientTime }),
+              ...(intent.prevChainHash === undefined
+                ? {}
+                : { prevChainHash: intent.prevChainHash }),
+              ...(intent.sig === undefined ? {} : { sig: intent.sig }),
             },
           };
         }
@@ -935,6 +989,11 @@ class SessionKernelImpl<
         participantId: intent.participantId,
         submissionId: intent.submissionId,
         action,
+        ...(intent.clientTime === undefined ? {} : { clientTime: intent.clientTime }),
+        ...(intent.prevChainHash === undefined
+          ? {}
+          : { prevChainHash: intent.prevChainHash }),
+        ...(intent.sig === undefined ? {} : { sig: intent.sig }),
       });
     }
     draft.commitments = commitments;
@@ -945,7 +1004,7 @@ class SessionKernelImpl<
 
   private resolveOnce(
     draft: KernelState<TState, TCommand, TView>,
-    cause: 'complete' | 'deadline' | 'tick',
+    cause: 'complete' | 'timeout' | 'tick',
     forcedInputs?: readonly CanonicalInput[],
   ): {
     event?: Omit<Extract<SessionEvent, { kind: 'resolution' }>, keyof SessionEventBase>;
@@ -1205,43 +1264,51 @@ class SessionKernelImpl<
     }
   }
 
-  prepareDeadline(
-    deadline: DeadlineInput,
-    systemInput: SubmittedAction,
+  prepareTimeout(
+    timeout: TimeoutInput,
+    forcedInput: SubmittedAction,
   ): Prepared<AdvanceSummary<TView>> {
-    if (typeof deadline.deadlineId !== 'string' || deadline.deadlineId.length === 0) {
-      throw new TypeError('deadlineId must be a non-empty string');
+    if (typeof timeout.timeoutId !== 'string' || timeout.timeoutId.length === 0) {
+      throw new TypeError('timeoutId must be a non-empty string');
     }
-    if (!Number.isSafeInteger(deadline.tick) || deadline.tick !== this.live.tick) {
-      throw new SessionAdvanceError('stale_target', 'deadline tick must equal the open tick');
+    if (typeof timeout.reason !== 'string' || timeout.reason.length === 0) {
+      throw new TypeError('timeout reason must be a non-empty string');
     }
-    const participantId = deadline.participantId ?? null;
+    if (timeout.timeoutPolicyRef !== undefined
+      && (typeof timeout.timeoutPolicyRef !== 'string'
+        || timeout.timeoutPolicyRef.length === 0)) {
+      throw new TypeError('timeoutPolicyRef must be a non-empty string');
+    }
+    if (!Number.isSafeInteger(timeout.tick) || timeout.tick !== this.live.tick) {
+      throw new SessionAdvanceError('stale_target', 'timeout tick must equal the open tick');
+    }
+    const participantId = timeout.participantId ?? null;
     if (participantId !== null) {
       if (!this.live.window.participants.includes(participantId)) {
-        throw new SessionConflictError('deadline participant is not eligible in the open window');
+        throw new SessionConflictError('timeout participant is not eligible in the open window');
       }
       if (Object.hasOwn(this.live.window.intents, participantId)) {
-        throw new SessionConflictError('deadline participant already submitted in the open window');
+        throw new SessionConflictError('timeout participant already submitted in the open window');
       }
     }
-    if (systemInput.seat !== undefined) {
-      if (!this.live.window.participants.includes(systemInput.seat)) {
-        throw new SessionConflictError('deadline system input names a seat outside the open window');
+    if (forcedInput.seat !== undefined) {
+      if (!this.live.window.participants.includes(forcedInput.seat)) {
+        throw new SessionConflictError('timeout system input names a seat outside the open window');
       }
       if (participantId === null) {
         throw new SessionConflictError(
-          'window deadline system input cannot name a participant seat',
+          'window timeout system input cannot name a participant seat',
         );
       }
-      if (systemInput.seat !== participantId) {
-        throw new SessionConflictError('deadline system input cannot impersonate another seat');
+      if (forcedInput.seat !== participantId) {
+        throw new SessionConflictError('timeout system input cannot impersonate another seat');
       }
     }
-    if (systemInput.commit !== undefined
-      || systemInput.reveal !== undefined
-      || systemInput.verifiedPayload !== undefined) {
+    if (forcedInput.commit !== undefined
+      || forcedInput.reveal !== undefined
+      || forcedInput.verifiedPayload !== undefined) {
       throw new SessionConflictError(
-        'deadline system input cannot carry commitment verification fields',
+        'timeout system input cannot carry commitment verification fields',
       );
     }
     const draft = this.forkLive();
@@ -1250,20 +1317,24 @@ class SessionKernelImpl<
         throw new SessionAdvanceError('terminal', 'session is already terminal');
       }
       const windowRef = draft.cursor;
-      const action = actionCopy(systemInput);
+      const action = actionCopy(forcedInput);
       if (participantId !== null) action.seat ??= participantId;
       const canonical: CanonicalInput = {
         participantId,
         submissionId: null,
         action,
       };
-      const resolved = this.resolveOnce(draft, 'deadline', [canonical]);
+      const resolved = this.resolveOnce(draft, 'timeout', [canonical]);
       const rawEvents: RawSessionEvent[] = [{
-        kind: 'deadline',
-        tick: deadline.tick,
-        deadlineId: deadline.deadlineId,
+        kind: 'timeout',
+        tick: timeout.tick,
+        timeoutId: timeout.timeoutId,
         windowRef,
         participantId,
+        reason: timeout.reason,
+        ...(timeout.timeoutPolicyRef === undefined
+          ? {}
+          : { timeoutPolicyRef: timeout.timeoutPolicyRef }),
       }];
       if (resolved.rejection) rawEvents.push(resolved.rejection);
       if (resolved.event) rawEvents.push(resolved.event);
@@ -1358,7 +1429,8 @@ class SessionKernelImpl<
   }
 
   abort(prepared: Prepared<unknown>): void {
-    const state = this.preparedState(prepared);
+    const state = this.preparedState(prepared, true);
+    if (state.completion === 'aborted') return;
     state.completion = 'aborted';
     for (const draft of state.drafts) this.isolation.discard?.(draft);
   }
@@ -1439,9 +1511,12 @@ class SessionKernelImpl<
       throw new TypeError('transcript header does not match kernel options');
     }
     const events = [...transcript.events];
-    validateDeadlineAudit(transcript.header, events);
+    validateTimeoutAudit(transcript.header, events);
     let previousTransitionRevision = 0;
     for (const event of events) {
+      if (!Number.isSafeInteger(event.hostTime) || event.hostTime < 0) {
+        throw new TypeError('session event hostTime must be non-negative UTC milliseconds');
+      }
       if (event.transitionRevision < previousTransitionRevision) {
         throw new TypeError('transcript transition revisions must be monotonic');
       }
@@ -1459,6 +1534,11 @@ class SessionKernelImpl<
           participantId: event.participantId,
           submissionId: event.submissionId,
           command: structuredClone(event.command as TCommand),
+          ...(event.clientTime === undefined ? {} : { clientTime: event.clientTime }),
+          ...(event.prevChainHash === undefined
+            ? {}
+            : { prevChainHash: event.prevChainHash }),
+          ...(event.sig === undefined ? {} : { sig: event.sig }),
         };
         const collected = collectIntent(this.live.window, submission);
         this.live.window = collected.window;
@@ -1615,63 +1695,74 @@ function replayInput(input: CanonicalInput, perm: readonly number[]): ReplayReso
     ...(action.commit === undefined ? {} : { commit: action.commit }),
     ...(action.reveal === undefined ? {} : { reveal: action.reveal }),
     ...(action.verifiedPayload === undefined ? {} : { verifiedPayload: action.verifiedPayload }),
+    ...(input.clientTime === undefined ? {} : { clientTime: input.clientTime }),
+    ...(input.prevChainHash === undefined ? {} : { prevChainHash: input.prevChainHash }),
+    ...(input.sig === undefined ? {} : { sig: input.sig }),
   };
 }
 
-function deadlineSystemInput(
+function timeoutSystemInput(
   event: Extract<SessionEvent, { kind: 'resolution' }>,
 ): CanonicalInput | undefined {
   return event.systemInput
     ?? [...event.inputs].reverse().find((input) => input.submissionId === null);
 }
 
-function validateDeadlineAudit(
+function validateTimeoutAudit(
   header: SessionHeader,
   events: readonly SessionEvent[],
 ): void {
   for (const [index, event] of events.entries()) {
-    if (event.kind === 'deadline') {
-      if (event.deadlineId.length === 0) {
-        throw new TypeError('deadline audit event must name a non-empty deadlineId');
+    if (event.kind === 'timeout') {
+      if (typeof event.timeoutId !== 'string' || event.timeoutId.length === 0) {
+        throw new TypeError('timeout audit event must name a non-empty timeoutId');
+      }
+      if (typeof event.reason !== 'string' || event.reason.length === 0) {
+        throw new TypeError('timeout audit event must name a non-empty reason');
+      }
+      if (event.timeoutPolicyRef !== undefined
+        && (typeof event.timeoutPolicyRef !== 'string'
+          || event.timeoutPolicyRef.length === 0)) {
+        throw new TypeError('timeout audit event timeoutPolicyRef must be non-empty');
       }
       if (event.participantId !== null && !header.seats.includes(event.participantId)) {
-        throw new TypeError('deadline audit participant must be a declared session seat');
+        throw new TypeError('timeout audit participant must be a declared session seat');
       }
       const outcome = events[index + 1];
       if (outcome?.kind === 'rejection') {
         if (outcome.transitionRevision !== event.transitionRevision
           || outcome.tick !== event.tick) {
           throw new TypeError(
-            'deadline audit event must immediately precede its matching rejection',
+            'timeout audit event must immediately precede its matching rejection',
           );
         }
         continue;
       }
       if (outcome?.kind !== 'resolution'
-        || outcome.cause !== 'deadline'
+        || outcome.cause !== 'timeout'
         || outcome.transitionRevision !== event.transitionRevision
         || outcome.tick !== event.tick
         || outcome.cursor !== event.windowRef) {
         throw new TypeError(
-          'deadline audit event must immediately precede its matching resolution or rejection',
+          'timeout audit event must immediately precede its matching resolution or rejection',
         );
       }
-      const systemInput = deadlineSystemInput(outcome);
+      const systemInput = timeoutSystemInput(outcome);
       if (!systemInput || systemInput.participantId !== event.participantId) {
-        throw new TypeError('deadline audit participant must match the recorded system input');
+        throw new TypeError('timeout audit participant must match the recorded system input');
       }
       if (event.participantId === null && systemInput.action.seat !== undefined) {
-        throw new TypeError('window deadline audit input cannot name a participant seat');
+        throw new TypeError('window timeout audit input cannot name a participant seat');
       }
       if (event.participantId !== null
         && systemInput.action.seat !== event.participantId) {
-        throw new TypeError('deadline audit participant must match the system action seat');
+        throw new TypeError('timeout audit participant must match the system action seat');
       }
-    } else if (event.kind === 'resolution' && event.cause === 'deadline') {
-      const deadline = events[index - 1];
-      if (deadline?.kind !== 'deadline'
-        || deadline.transitionRevision !== event.transitionRevision) {
-        throw new TypeError('deadline resolution must immediately follow its audit event');
+    } else if (event.kind === 'resolution' && event.cause === 'timeout') {
+      const timeout = events[index - 1];
+      if (timeout?.kind !== 'timeout'
+        || timeout.transitionRevision !== event.transitionRevision) {
+        throw new TypeError('timeout resolution must immediately follow its audit event');
       }
     }
   }
@@ -1682,7 +1773,7 @@ export function finalizeReplay<TLevel>(
   transcript: SessionTranscript<TLevel>,
   options: FinalizeOptions,
 ): ReplayArtifact<TLevel> {
-  validateDeadlineAudit(transcript.header, transcript.events);
+  validateTimeoutAudit(transcript.header, transcript.events);
   const resolutions = transcript.events.filter(
     (event): event is Extract<SessionEvent, { kind: 'resolution' }> => event.kind === 'resolution',
   );
@@ -1693,8 +1784,8 @@ export function finalizeReplay<TLevel>(
   const records: ReplayRecord[] = [];
   for (const event of transcript.events) {
     if (event.kind === 'resolution') {
-      const systemInput = event.cause === 'deadline'
-        ? deadlineSystemInput(event)
+      const systemInput = event.cause === 'timeout'
+        ? timeoutSystemInput(event)
         : undefined;
       records.push({
         kind: 'resolution',
@@ -1703,17 +1794,25 @@ export function finalizeReplay<TLevel>(
         tick: event.tick,
         inputs: event.inputs.map((input) => replayInput(input, options.perm)),
         cause: event.cause,
-        ...(event.cause === 'deadline' && systemInput
+        ...(options.includeHostTime ? { hostTime: event.hostTime } : {}),
+        ...(event.cause === 'timeout' && systemInput
           ? { systemInput: replayInput(systemInput, options.perm) }
           : {}),
       });
-    } else if (event.kind === 'deadline') {
+    } else if (event.kind === 'timeout') {
       records.push({
-        kind: 'deadline',
+        kind: 'timeout',
         n: records.length,
         levelIndex: 0,
         tick: event.tick,
-        reason: `${event.deadlineId}:${event.participantId ?? 'window'}`,
+        timeoutId: event.timeoutId,
+        windowRef: event.windowRef,
+        participantId: event.participantId,
+        reason: event.reason,
+        ...(event.timeoutPolicyRef === undefined
+          ? {}
+          : { timeoutPolicyRef: event.timeoutPolicyRef }),
+        ...(options.includeHostTime ? { hostTime: event.hostTime } : {}),
       });
     } else if (event.kind === 'extension') {
       records.push({
@@ -1722,6 +1821,7 @@ export function finalizeReplay<TLevel>(
         levelIndex: 0,
         lane: event.lane,
         record: structuredClone(event.record),
+        ...(options.includeHostTime ? { hostTime: event.hostTime } : {}),
       });
     } else if (event.kind === 'checkpoint') {
       records.push({
@@ -1730,6 +1830,7 @@ export function finalizeReplay<TLevel>(
         levelIndex: 0,
         tick: event.tick,
         digest: event.digest,
+        ...(options.includeHostTime ? { hostTime: event.hostTime } : {}),
       });
     } else if (event.kind === 'rejection') {
       records.push({
@@ -1741,6 +1842,12 @@ export function finalizeReplay<TLevel>(
         submissionId: event.submissionId,
         commitmentId: event.commitmentId,
         scheme: event.scheme,
+        ...(event.clientTime === undefined ? {} : { clientTime: event.clientTime }),
+        ...(event.prevChainHash === undefined
+          ? {}
+          : { prevChainHash: event.prevChainHash }),
+        ...(event.sig === undefined ? {} : { sig: event.sig }),
+        ...(options.includeHostTime ? { hostTime: event.hostTime } : {}),
         ...(options.visibility && options.visibility !== 'full'
           ? {}
           : { attemptedReveal: structuredClone(event.attemptedReveal) }),
@@ -1784,6 +1891,9 @@ export function finalizeReplay<TLevel>(
       levelIndex: 0,
     })),
     records,
+    ...(transcript.header.timeoutPolicy === undefined
+      ? {}
+      : { timeoutPolicy: structuredClone(transcript.header.timeoutPolicy) }),
     ...(options.visibility === undefined ? {} : { visibility: options.visibility }),
     ...(Object.keys(extensions).length === 0 ? {} : { extensions }),
   });
@@ -1809,6 +1919,7 @@ export function finalizeRunReplay<TLevel>(
   const first = transcripts[0]!;
   const game = canonicalJson(first.header.game);
   const dmath = canonicalJson(first.header.dmath ?? null);
+  const timeoutPolicy = canonicalJson(first.header.timeoutPolicy ?? null);
   const levels = [];
   const actions = [];
   const records: ReplayRecord[] = [];
@@ -1821,6 +1932,9 @@ export function finalizeRunReplay<TLevel>(
     }
     if (canonicalJson(transcript.header.dmath ?? null) !== dmath) {
       throw new TypeError(`run transcript ${levelIndex} has a different dmath declaration`);
+    }
+    if (canonicalJson(transcript.header.timeoutPolicy ?? null) !== timeoutPolicy) {
+      throw new TypeError(`run transcript ${levelIndex} has a different timeout policy`);
     }
     if (transcript.header.seedPolicy !== 'explicit') {
       throw new TypeError(
@@ -1836,6 +1950,9 @@ export function finalizeRunReplay<TLevel>(
     const segment = finalizeReplay(transcript, {
       perm: options.perm,
       ...(options.visibility === undefined ? {} : { visibility: options.visibility }),
+      ...(options.includeHostTime === undefined
+        ? {}
+        : { includeHostTime: options.includeHostTime }),
     });
     const level = segment.header.levels[0]!;
     if (levelIndex < transcripts.length - 1 && level.result.status !== 'won') {
@@ -1879,6 +1996,9 @@ export function finalizeRunReplay<TLevel>(
     levels,
     actions,
     records,
+    ...(first.header.timeoutPolicy === undefined
+      ? {}
+      : { timeoutPolicy: structuredClone(first.header.timeoutPolicy) }),
     ...(options.visibility === undefined ? {} : { visibility: options.visibility }),
     ...(Object.keys(extensions).length === 0 ? {} : { extensions }),
   });
