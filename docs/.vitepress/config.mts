@@ -52,6 +52,7 @@ export default defineConfig({
         text: 'Build',
         items: [
           { text: 'Quickstart', link: '/quickstart' },
+          { text: 'Capabilities', link: '/capabilities' },
           { text: 'Mechanisms', link: '/mechanisms/' },
           { text: 'Agentic play', link: '/agentic-play' },
         ],
@@ -60,7 +61,6 @@ export default defineConfig({
         text: 'About',
         items: [
           { text: 'Mission', link: '/mission' },
-          { text: 'Capabilities', link: '/capabilities' },
           { text: 'Roadmap', link: '/roadmap' },
           { text: 'Version history', link: '/version-history' },
         ],
