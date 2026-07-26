@@ -15,6 +15,7 @@ import {
   validateReplayArtifact,
   type ReplayArtifact,
   type ReplayGameRef,
+  type ReplaySeatIntegrityReservation,
   type ActionReducer,
   type TickView,
 } from '../src/engine/index.js';
@@ -175,11 +176,12 @@ describe('portable GAOS replay JSONL', () => {
 
   it('preserves the unimplemented RFC-010 integrity reservation slots', () => {
     const reserved = structuredClone(runArtifact());
-    reserved.header.seatKeys = [{
+    const seatKey: ReplaySeatIntegrityReservation = {
       id: 'red',
       publicKey: 'reserved-key',
       alg: 'reserved-algorithm',
-    }];
+    };
+    reserved.header.seatKeys = [seatKey];
     reserved.header.signaturePolicy = { scheme: 'reserved', N: 8 };
     reserved.header.timeoutPolicy = { mode: 'ticks', maximum: 90 };
     Object.assign(reserved.actions[0]!, {

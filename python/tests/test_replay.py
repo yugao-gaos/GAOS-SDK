@@ -267,6 +267,29 @@ def test_python_validator_matches_json_integer_numbers_and_reports_safely():
     assert encoded
 
 
+def test_timeout_participant_id_is_required_even_when_null_is_allowed():
+    artifact = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
+    artifact["header"]["formatVersion"] = GAOS_REPLAY_FORMAT_VERSION
+    artifact["actions"] = []
+    artifact["records"] = [{
+        "kind": "timeout",
+        "n": 0,
+        "levelIndex": 0,
+        "tick": 0,
+        "timeoutId": "turn-0",
+        "windowRef": 0,
+        "participantId": None,
+        "reason": "elapsed",
+    }]
+    assert validate_replay_artifact(artifact) == []
+
+    del artifact["records"][0]["participantId"]
+    assert (
+        "timeout 0 participantId must be null or a non-empty string"
+        in validate_replay_artifact(artifact)
+    )
+
+
 def test_validators_require_extension_slots_to_be_objects():
     artifact = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
     artifact["header"]["extensions"] = []

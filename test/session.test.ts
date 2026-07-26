@@ -85,6 +85,7 @@ function options(
     seedPolicy: 'explicit',
     seats: ['red', 'blue'],
     cadence: { mode: 'turns' },
+    hostTime: 'none',
     commandToAction: (command, context) => ({
       id: 'Action 1',
       index: command.amount,
@@ -157,6 +158,26 @@ describe('./session kernel', () => {
     expect(kernel.viewRevision('red')).toBe(1);
     expect(cleanup.discarded.length).toBeGreaterThanOrEqual(2); // constructor probe + abort
     expect(cleanup.retired).toHaveLength(3);
+  });
+
+  it('requires an explicit host clock policy and never supplies a wall clock', () => {
+    const deterministic = createSessionKernel(options());
+    const withoutTime = deterministic.prepareIngest(submission('red', 'red-none', 1));
+    expect(Object.hasOwn(withoutTime.events[0]!, 'hostTime')).toBe(false);
+
+    const fixed = createSessionKernel({
+      ...options(),
+      hostTime: () => 1_785_032_663_000,
+    });
+    const withTime = fixed.prepareIngest(submission('red', 'red-fixed', 1));
+    expect(withTime.events[0]?.hostTime).toBe(1_785_032_663_000);
+
+    const unavailable = createSessionKernel({
+      ...options(),
+      hostTime: (() => undefined) as unknown as () => number,
+    });
+    expect(() => unavailable.prepareIngest(submission('red', 'red-bad-clock', 1)))
+      .toThrow(/UTC epoch milliseconds/);
   });
 
   it('makes exact retries idempotent and stale competing prepares self-cleaning', () => {
@@ -285,6 +306,24 @@ describe('./session kernel', () => {
     );
   });
 
+  it('rejects malformed public API shapes before they can enter durable state', () => {
+    const kernel = createSessionKernel(options());
+    expect(() => kernel.prepareTimeout(null as never, { id: 'Action 1' }))
+      .toThrow(/timeout must be an object/);
+    expect(() => kernel.prepareTimeout(
+      { timeoutId: 'bad-input', reason: 'elapsed', tick: 0 },
+      null as never,
+    )).toThrow(/forcedInput must be an object/);
+    expect(() => kernel.prepareExtension('bad-record', [] as never))
+      .toThrow(/JSON object/);
+    expect(() => rehydrateKernel(options(), null as never))
+      .toThrow(/transcript must be an object/);
+    expect(() => finalizeReplay(null as never, { perm: [0] }))
+      .toThrow(/transcript must be an object/);
+    expect(() => finalizeRunReplay(null as never, { seed: 1, perm: [0] }))
+      .toThrow(/transcripts must be an array/);
+  });
+
   it('verifies commit–reveal before reducer execution and through replay', () => {
     type SecretCommand =
       | { kind: 'commit'; hash: string }
@@ -322,6 +361,7 @@ describe('./session kernel', () => {
       seedPolicy: 'explicit',
       seats: ['red'],
       cadence: { mode: 'turns' },
+      hostTime: 'none',
       commandToAction: (command) => command.kind === 'commit'
         ? {
           id: 'Action 1',
@@ -522,6 +562,7 @@ describe('./session kernel', () => {
       seedPolicy: 'explicit',
       seats: ['red'],
       cadence: { mode: 'turns' },
+      hostTime: 'none',
       commandToAction: (command) => command.kind === 'commit'
         ? {
           id: 'Action 1',
@@ -613,6 +654,7 @@ describe('./session kernel', () => {
       cadence: { mode: 'ticks', rate: createTickRate(30) } as const,
       limits: { maxCatchUpTicks: 2 },
       timeoutPolicy: { mode: 'ticks', maxTicks: 90 },
+      hostTime: () => 1_785_032_663_000,
     };
     const kernel = createSessionKernel(tickOptions);
     const catchUp = kernel.prepareAdvance(5);
@@ -725,6 +767,7 @@ describe('./session kernel', () => {
       seedPolicy: 'explicit',
       seats: ['alpha', 'zulu'],
       cadence: { mode: 'turns' },
+      hostTime: 'none',
       commandToAction: (command) => command.kind === 'commit'
         ? {
           id: 'Action 1',
@@ -1209,6 +1252,7 @@ describe('./session kernel', () => {
       seedPolicy: 'explicit',
       seats: ['alpha', 'beta'],
       cadence: { mode: 'turns' },
+      hostTime: 'none',
       commandToAction: (_command, context) => ({
         id: 'Action 1',
         seat: context.participantId,

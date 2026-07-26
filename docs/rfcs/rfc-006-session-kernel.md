@@ -124,6 +124,12 @@ export interface SessionKernelOptions<
   cadence:
     | { mode: 'turns' }                                  // resolve per collection window
     | { mode: 'ticks'; rate: TickRate };                 // fixed-rate; empty ticks are cheap
+  /**
+   * Explicit host clock policy. Providers return UTC epoch milliseconds:
+   * `Date.now()` is suitable; monotonic `performance.now()` is not.
+   * `'none'` omits event timestamps for reproducible transcripts.
+   */
+  hostTime: (() => number) | 'none';
   /** Pure mapping from protocol commands to reducer actions. */
   commandToAction(command: TCommand, context: CommandContext): SubmittedAction;
   dmath?: Dmath;                       // RFC-007 immutable context, recorded in the header
@@ -272,11 +278,21 @@ gameplay, but portable replay consistency does not authenticate audit
 authorship or completeness. Leaderboard policy must not rely on the audit
 lane until RFC-010 supplies signed chained submissions.
 
-Every `SessionEvent` records advisory `hostTime` in host UTC milliseconds.
-It is never reducer input, signature-preimage material, or part of semantic
-input-to-transcript equivalence. Rehydration preserves it exactly. Replay
-projection is opt-in through `FinalizeOptions.includeHostTime` and replay
-verification ignores the value.
+`SessionKernelOptions.hostTime` makes the host's choice explicit: a provider
+returns UTC epoch milliseconds (`() => Date.now()`), while `'none'` omits
+`SessionEvent.hostTime` and keeps transcripts reproducible from seed and
+inputs. The kernel never reads a clock itself; a provider returning
+`null`/`undefined` is invalid rather than a fallback. `performance.now()` is
+the wrong source because it is monotonic process-relative time, not epoch
+time.
+
+When present, `hostTime` is advisory. It is never reducer input,
+signature-preimage material, or part of semantic input-to-transcript
+equivalence. Rehydration preserves recorded values exactly and accepts
+timestamp-free events. Replay projection is opt-in through
+`FinalizeOptions.includeHostTime`; verification ignores the value. Ordering
+is always `tick`, `cursor`, and `transitionRevision`, never `hostTime`,
+because wall clocks can move backwards after NTP or manual correction.
 
 `IntentCollectionError` and its `IntentErrorCode` union are re-exported from
 `./session`, so a host can map protocol ingest failures without reaching into
@@ -1294,9 +1310,9 @@ Lifecycle rules:
 - a stale prepared transition passed to `commit` is automatically aborted
   before throwing, or the caller must be able to call `abort` afterward—the
   RFC must choose one rule;
-- double commit, double abort, commit-after-abort, abort-after-commit, and
-  foreign prepared values throw typed lifecycle errors without invoking
-  cleanup twice; and
+- abort after an automatic or explicit abort is idempotent; double commit,
+  commit-after-abort, abort-after-commit, and foreign prepared values throw
+  typed lifecycle errors without invoking cleanup twice; and
 - tests cover explicit abort, persistence failure, competing prepares from one
   base revision, and exactly-once cleanup.
 
@@ -1326,10 +1342,10 @@ ownership is documented.
 - **Stale-commit rule chosen:** a stale prepared transition passed to
   `commit` is **automatically aborted before the typed error is thrown** —
   hosts never need a second call on that path, and error-path draft leaks
-  are impossible by construction. Double commit/abort, commit-after-abort,
-  abort-after-commit, and foreign prepared values throw typed lifecycle
-  errors without invoking cleanup twice (the prepared value carries an
-  internal completion flag).
+  are impossible by construction. Abort after an automatic or explicit abort
+  is idempotent. Double commit, commit-after-abort, abort-after-commit, and
+  foreign prepared values throw typed lifecycle errors without invoking
+  cleanup twice (the prepared value carries an internal completion flag).
 - **Successful-state retirement made explicit:**
   `SessionStateIsolation.retire?(previous)` is called exactly once with the
   previous live state after a successful commit publishes its draft; when

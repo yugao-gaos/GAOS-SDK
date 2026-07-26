@@ -240,6 +240,7 @@ export {
   type ReplayResolution,
   type ReplayResolutionInput,
   type ReplaySeedPolicy,
+  type ReplaySeatIntegrityReservation,
   type ReplaySeatSignatureReservation,
   type ReplayTotals,
   type TranscriptReplayOptions,

@@ -24,6 +24,8 @@ const kernel = createSessionKernel({
   seedPolicy: 'explicit',
   seats: ['blue', 'red'],
   cadence: { mode: 'turns' },
+  // UTC epoch milliseconds. Use `hostTime: 'none'` for no event timestamps.
+  hostTime: () => Date.now(),
   commandToAction: (command, context) => ({
     id: command.action,
     seat: context.participantId,
@@ -258,13 +260,20 @@ the `./session` subpath alongside `SessionConflictError` and
 `SessionAdvanceError`; malformed protocol commands are normalized to that
 public ingest taxonomy.
 
-Every durable `SessionEvent` carries advisory host UTC milliseconds in
-`hostTime` for correlation with host logs. Rehydration preserves the recorded
-value. It is never reducer input or signature-preimage material. Comparisons
-that ask whether the same inputs produce the same semantic transcript must
-exclude `hostTime`; only persistence/rehydration equality includes it.
-`FinalizeOptions.includeHostTime` projects it into replay records, off by
-default, and the portable verifier ignores it.
+Hosts must explicitly choose `hostTime: (() => number) | 'none'`.
+A provider returns UTC epoch milliseconds: `() => Date.now()` is correct;
+`performance.now()` is process-relative and therefore wrong. `'none'` omits
+the field for byte-reproducible transcripts. The kernel never reads a clock
+or falls back when a provider returns `null`/`undefined`.
+
+When present, `SessionEvent.hostTime` is advisory correlation data.
+Rehydration preserves it, while timestamp-free persisted events remain valid.
+It is never reducer input or signature-preimage material. Semantic
+input-to-transcript comparisons exclude it; persistence/rehydration equality
+includes any recorded value. `FinalizeOptions.includeHostTime` projects it
+into replay records, off by default, and the verifier ignores it. Never sort
+by `hostTime`: wall clocks can move backwards. Durable ordering is `tick`,
+`cursor`, then `transitionRevision`.
 
 The strict v1.1 replay schema reserves the RFC-010 `seatKeys`,
 signature/timeout-policy, periodic `seat-signature`, `clientTime`,

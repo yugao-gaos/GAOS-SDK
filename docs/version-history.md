@@ -33,10 +33,13 @@ Prepared July 25, 2026.
   preimage vectors, and explicit non-fatal replay diagnostics. The v1.1 audit
   lane is advisory host attestation; additive v1.2 signature/chain/roster
   fields are reserved for RFC-010 under `seatKeys`, `clientTime`,
-  `timeoutPolicy`, and `seat-signature`. Session events add advisory
-  `hostTime`; portable projection is opt-in.
+  `timeoutPolicy`, and `seat-signature`. Session construction requires an
+  explicit UTC-epoch clock provider or `'none'`; event `hostTime` is advisory
+  and optional, and portable projection is opt-in.
 - Migration: the final API/wire name is `timeout`, not `deadline`, and
   `finalizeRunReplay` source transcripts must use `seedPolicy: 'explicit'`.
+  Hosts must also add the explicit `hostTime` policy; timestamp-free
+  persisted events remain valid.
 
 [Sessions and integrity →](/session-and-integrity) ·
 [Portable replay →](/mechanisms/replay)
