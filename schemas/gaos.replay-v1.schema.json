@@ -17,6 +17,58 @@
       "items": { "$ref": "#/$defs/record" }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "header": {
+            "properties": {
+              "formatVersion": { "const": "1.0" }
+            },
+            "required": ["formatVersion"]
+          }
+        },
+        "required": ["header"]
+      },
+      "then": {
+        "allOf": [
+          { "not": { "required": ["records"] } },
+          {
+            "properties": {
+              "header": {
+                "not": {
+                  "anyOf": [
+                    { "required": ["seats"] },
+                    { "required": ["signaturePolicy"] }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "actions": {
+                "items": {
+                  "not": {
+                    "anyOf": [
+                      { "required": ["commit"] },
+                      { "required": ["reveal"] },
+                      { "required": ["verifiedPayload"] },
+                      { "required": ["submissionId"] },
+                      { "required": ["canonicalCommand"] },
+                      { "required": ["cursor"] },
+                      { "required": ["prevChainHash"] },
+                      { "required": ["sig"] }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
   "$defs": {
     "jsonObject": {
       "type": "object",
@@ -125,6 +177,8 @@
             { "type": "string", "pattern": "^seat:.+" }
           ]
         },
+        "seats": true,
+        "signaturePolicy": true,
         "extensions": { "$ref": "#/$defs/jsonObject" }
       }
     },
@@ -154,6 +208,13 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["kind", "n", "levelIndex", "wireId", "canonicalId"],
+      "allOf": [
+        { "not": { "required": ["commit", "reveal"] } },
+        {
+          "if": { "required": ["verifiedPayload"] },
+          "then": { "required": ["reveal"] }
+        }
+      ],
       "properties": {
         "kind": { "const": "action" },
         "n": { "type": "integer", "minimum": 0 },
@@ -177,6 +238,11 @@
           "items": { "$ref": "#/$defs/locationRef" }
         },
         "tick": { "type": "integer", "minimum": 0 },
+        "submissionId": true,
+        "canonicalCommand": true,
+        "cursor": true,
+        "prevChainHash": true,
+        "sig": true,
         "commit": { "$ref": "#/$defs/commit" },
         "reveal": { "$ref": "#/$defs/reveal" },
         "verifiedPayload": true
@@ -217,6 +283,13 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["wireId", "canonicalId"],
+      "allOf": [
+        { "not": { "required": ["commit", "reveal"] } },
+        {
+          "if": { "required": ["verifiedPayload"] },
+          "then": { "required": ["reveal"] }
+        }
+      ],
       "properties": {
         "wireId": { "type": "string", "pattern": "^Action [1-9][0-9]*$" },
         "canonicalId": { "type": "string", "pattern": "^Action [1-9][0-9]*$" },
@@ -230,6 +303,11 @@
           "type": "array",
           "items": { "$ref": "#/$defs/locationRef" }
         },
+        "submissionId": true,
+        "canonicalCommand": true,
+        "cursor": true,
+        "prevChainHash": true,
+        "sig": true,
         "commit": { "$ref": "#/$defs/commit" },
         "reveal": { "$ref": "#/$defs/reveal" },
         "verifiedPayload": true
@@ -239,6 +317,16 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["kind", "n", "levelIndex", "tick", "inputs", "cause"],
+      "allOf": [
+        {
+          "if": {
+            "properties": { "cause": { "const": "deadline" } },
+            "required": ["cause"]
+          },
+          "then": { "required": ["systemInput"] },
+          "else": { "not": { "required": ["systemInput"] } }
+        }
+      ],
       "properties": {
         "kind": { "const": "resolution" },
         "n": { "type": "integer", "minimum": 0 },
@@ -318,6 +406,10 @@
           "maximum": 4294967295
         },
         "scheme": { "const": "gaos.commit.sha256.v1" },
+        "canonicalCommand": true,
+        "cursor": true,
+        "prevChainHash": true,
+        "sig": true,
         "attemptedReveal": {
           "type": "object",
           "additionalProperties": false,

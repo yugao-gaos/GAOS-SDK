@@ -25,7 +25,10 @@ canonical_bytes = serialize_replay_jsonl(artifact)
 ```
 
 `validate_replay_artifact` performs transport-level checks without executing
-game code. Reducer re-simulation requires the TypeScript engine plus the
+game code. Canonical object keys use Unicode code-point order, unpaired
+surrogates are rejected, and every integer-valued replay number must remain
+within the JavaScript safe range so Python produces the same bytes as
+TypeScript. Reducer re-simulation requires the TypeScript engine plus the
 product-owned historical adapter declared in
 `artifact["header"]["game"]["adapter"]`.
 

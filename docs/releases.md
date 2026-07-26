@@ -16,16 +16,27 @@ This release adds the optional authoritative session and integrity layer:
   global record numbering, aggregate totals, and run-terminal validation;
 - observation deltas carry applied submission acknowledgements in canonical
   reducer order for prediction reconciliation;
+- rejection advances carry durable per-seat rejection identities at a
+  transition watermark without inventing a gameplay revision; snapshots can
+  replay missed notices after crash/reconnect, and accepted submission IDs
+  remain permanently non-reusable;
 - replay v1.1 preserves grouped reducer calls plus deadline, extension, and
   commitment-mismatch audit records while retaining v1.0 parsing;
+- TypeScript and Python pin canonical object-key ordering to Unicode code
+  points, share the JavaScript-safe integer domain, and enforce the same
+  strict replay object/null semantics;
 - `dmath-1` supplies deterministic trigonometry and rounding, frozen for the
   first time by the v0.19 tag with independent-oracle and cross-runtime
   evidence;
 - `gaos.commit.sha256.v1` supplies context-bound commit–reveal verification
   with complete cross-language byte vectors;
-- replay recheck results add non-fatal `diagnostics`; consumers claiming
-  independent cryptographic verification must require an empty diagnostics
-  list in addition to `ok`;
+- replay recheck results add non-fatal `diagnostics`, including verified and
+  redacted commitment mismatches; mismatch identities and chronology are
+  checked, `ok` is reserved for replay consistency, and consumers apply their
+  own policy to diagnostics;
+- v1.1 audit records are explicitly advisory host attestation, not a
+  leaderboard trust signal; strict-schema slots are reserved for RFC-010's
+  additive v1.2 roster, signature, and chain fields;
 - session `AdvanceSummary` adds non-fatal `warnings`, currently used to
   surface live commitment-salt reuse.
 

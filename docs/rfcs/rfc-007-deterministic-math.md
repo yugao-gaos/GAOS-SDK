@@ -112,9 +112,9 @@ export function createDmath(options?: {
 
 | Function | Accepted domain | Accuracy/boundary contract | Out of contract |
 | --- | --- | --- | --- |
-| `sin` | finite `|x| <= 2^30` | at most 1 ulp; preserves `sin(-0) = -0`; 256-bit fixed-point reduction outside `[-π/4, π/4]` | `RangeError` |
-| `cos` | finite `|x| <= 2^30` | at most 1 ulp; 256-bit fixed-point reduction outside `[-π/4, π/4]` | `RangeError` |
-| `atan2` | finite `x` and `y` | at most 3 ulp; IEEE signed-zero quadrants, range `[-π, π]` | `RangeError` |
+| `sin` | finite `|x| <= 2^30` | `|x| <= 2π`: <= 1 ulp bit-distance (evidence <= 1.5 ulp real error); full domain: <= 2 ulp bit-distance; preserves `sin(-0) = -0`; 256-bit fixed-point reduction outside `[-π/4, π/4]` | `RangeError` |
+| `cos` | finite `|x| <= 2^30` | `|x| <= 2π`: <= 1 ulp bit-distance (evidence <= 1.5 ulp real error); full domain: <= 2 ulp bit-distance; 256-bit fixed-point reduction outside `[-π/4, π/4]` | `RangeError` |
+| `atan2` | finite `x` and `y` | <= 3 ulp bit-distance (evidence <= 2.818 ulp real error); IEEE signed-zero quadrants, range `[-π, π]` | `RangeError` |
 | `clamp` | finite `x`, `lo`, `hi`; `lo <= hi` | exact endpoint selection; preserves an in-range signed zero | `RangeError` |
 | `roundTo` | finite `x`; integer decimals `[-15, 15]`; scaled magnitude `< 2^53` | fixed binary64 operation order; half away from zero; preserves a negative zero result | `RangeError` |
 
@@ -732,8 +732,10 @@ All JS implementation gates from §12 are now executable in the repository:
 1. the normative per-function table is in §3;
 2. the generator reproduces the Taylor coefficients and Machin-derived
    fixed-point constants;
-3. the 512-bit oracle observes maxima of 1 ulp (`sin`), 1 ulp (`cos`), and
-   2 ulp (`atan2`) across the reproducible evidence sample;
+3. measured bit-distance maxima across the reproducible 512-bit-oracle sample
+   are 1 ulp (`sin`), 1 ulp (`cos`), and 2 ulp (`atan2`); these observed
+   values are evidence within the normative per-range bounds, not a
+   redefinition of classical real-error ulps;
 4. Node, Chromium, Firefox, WebKit, and workerd run the same frozen vectors;
    and
 5. WASM remains unshipped and subject to its separate evidence and performance

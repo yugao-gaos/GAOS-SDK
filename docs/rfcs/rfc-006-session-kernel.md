@@ -1,11 +1,17 @@
 # RFC — `./session`: the authoritative session kernel (optional subpath)
 
-Status: **implemented (rev 8, v0.19.0, 2026-07-25)** · Target: v0.19 · Breaking: no
+Status: **implemented (rev 10, v0.19.0, 2026-07-25)** · Target: v0.19 · Breaking: no
 (new subpath; requires the gaos.replay v1.1 format bump, which lands first)
 
-Current disposition (rev 8, 2026-07-25): §§1–6 are the sole normative
+Current disposition (rev 10, 2026-07-25): §§1–6 are the sole normative
 text except the `PredictionSession` class sketch in §3.2, which is deferred to
-v0.20. Rev 8 adds the stable v0.19 acknowledgement identity/order contract
+v0.20. Rev 10 makes rejection notices durable observation envelopes,
+adds transition-watermark snapshot recovery, and makes every accepted
+submission identity permanently single-use. Rev 9 adds deterministic
+per-seat rejection notices, pins
+`viewRevision(seat) === cursor()`, validates deadline audit context, and makes
+accepted submission IDs permanently non-reapplicable after receipt eviction.
+Rev 8 adds the stable v0.19 acknowledgement identity/order contract
 and the multi-level `finalizeRunReplay` projection required by RFC-009.
 Rev 5 resolves the fourth review: §3.1 adds SessionStateIsolation
 (fork/discard/retire) so mutable/COW reducers are first-class in prepared
@@ -163,6 +169,10 @@ export interface SessionKernel<TCommand, TView> {
    */
   prepareIngest(submission: CommandSubmission<TCommand>): Prepared<IngestReceipt>;
   prepareAdvance(target?: number): Prepared<AdvanceSummary<TView>>;
+  prepareDeadline(
+    deadline: DeadlineInput,
+    systemInput: SubmittedAction,
+  ): Prepared<AdvanceSummary<TView>>;
   /** Structurally non-gameplay lane (§D answer 2); recorded, never reduced. */
   prepareExtension(lane: string, record: JsonObject): Prepared<void>;
   commit(prepared: Prepared<unknown>): void;
@@ -181,7 +191,10 @@ export interface SessionKernel<TCommand, TView> {
   cursor(): number;
   tick(): number;
   viewRevision(seat: string): number;
-  snapshot(seat: string): ObservationDelta;              // reconnect/late-join path
+  snapshot(
+    seat: string,
+    afterTransitionRevision?: number,
+  ): ObservationDelta;                                  // reconnect/late-join path
   sessionHeader(): SessionHeader;
   liveTranscript(): SessionTranscript;                   // append-only event log
   digest(): number;
@@ -201,6 +214,27 @@ export interface Prepared<TResult> {
    *  cannot construct or modify a valid prepared transition. */
   readonly [preparedTransition]: PreparedState;
 }
+
+export interface AdvanceSummary<TView> {
+  resolutions: number;
+  partial: boolean;
+  cursor: number;
+  tick: number;
+  digest: number;
+  deltas: readonly ObservationDelta<TView>[];
+  /** One routable identity notice per destination seat for each rejection. */
+  rejections: readonly ObservationRejectionNotice[];
+  warnings: readonly SessionWarning[];
+}
+
+export interface ObservationRejectionNotice {
+  seat: string;
+  transitionRevision: number;
+  tick: number;
+  participantId: string;
+  submissionId: string;
+  code: 'commit_mismatch';
+}
 // Event ids: `sessionId + transitionRevision + eventIndex` (storage-retry
 // idempotent). The gameplay window cursor is a SEPARATE counter recorded on
 // events that need it; rehydration restores both (§G3).
@@ -218,6 +252,29 @@ Determinism rules (contractual): ingestion order never affects outcomes —
 only canonical order does; `advance` in ticks mode may fast-forward many
 empty ticks in one call (event-driven hosts batch on message/alarm arrival,
 which is how a DO avoids wall-clock ticking).
+
+`prepareDeadline` accepts only a non-empty deadline ID for the current open
+tick. A named participant must belong to and still be awaiting input in that
+window; its system action is normalized to that seat and cannot name another.
+A window-wide deadline (`participantId: null`) cannot carry a seat-specific
+system action. Deadline system inputs cannot carry commitment/reveal
+verification fields. Finalization rejects any deadline audit event that does
+not immediately match either its recorded deadline resolution or a
+same-transition rejection. A successful deadline must match the window
+reference, participant, and system input. A rejected deadline records
+`deadline`, then `rejection`, then `checkpoint`; its forced input was not
+applied.
+
+In v0.19 these deadline and commitment-rejection audit records are advisory
+host attestation. Live pre-reducer verification remains authoritative for
+gameplay, but portable replay consistency does not authenticate audit
+authorship or completeness. Leaderboard policy must not rely on the audit
+lane until RFC-010 supplies signed chained submissions.
+
+`IntentCollectionError` and its `IntentErrorCode` union are re-exported from
+`./session`, so a host can map protocol ingest failures without reaching into
+a second package subpath. Session conflicts and advance failures retain their
+own exported typed classes.
 
 ### 3.2 Client companion (informative; deferred to v0.20)
 
@@ -248,6 +305,7 @@ the pending-input replay discipline.
 ```ts
 export interface ObservationDelta {
   seat: string;
+  transitionRevision: number; // durable resume watermark
   viewRevision: number;    // monotonic per seat; advances on EVERY resolution
   tick: number;
   codec: 'v1';             // v1 is snapshot-only; patch codecs are future, negotiated
@@ -255,6 +313,7 @@ export interface ObservationDelta {
     participantId: string;
     submissionId: string;
   }[];
+  rejections: readonly ObservationRejectionNotice[];
   body:
     | { kind: 'snapshot'; view: TickView<unknown, unknown> }
     | { kind: 'unchanged' };
@@ -269,15 +328,43 @@ applied by the resolution that produced this `viewRevision`, in exact
 canonical reducer-input order. Host-derived inputs with a null submission id
 are excluded. Every seat delta for one resolution carries the same identities;
 the identities acknowledge ordering, not visibility of action payloads.
-`snapshot(seat)` applies no new input and therefore carries an empty list.
+`snapshot(seat, afterTransitionRevision)` applies no new input and therefore
+carries an empty acknowledgement list. It includes every durable rejection
+notice after the supplied transition watermark; omitting the watermark means
+zero and therefore replays all rejection identities. Duplicate rejection
+notices are harmless because submission identities are permanently
+single-use.
 
-Clients consume deltas in strictly increasing `viewRevision` order. For each
-delta they apply the authoritative body, remove pending submissions whose
+At every observable kernel state, `viewRevision(seat) === cursor()` for every
+declared seat. Ingest, rejection, and extension transitions advance neither;
+each resolution advances both by one. This equality is the stable bridge from
+an `IngestReceipt.cursor` to the authoritative revision used after snapshot
+resynchronization.
+
+A rejected input creates one rejection-only `ObservationDelta` per destination
+seat. Its `transitionRevision` advances to the durable rejection transition,
+while its `viewRevision` remains equal to the unchanged gameplay cursor; the
+body is `unchanged`, acknowledgements are empty, and `rejections` contains the
+exact rejected identity. `AdvanceSummary.rejections` exposes the same notices
+as a convenience. After durable commit the host publishes `prepared.deltas`
+normally. A client removes the exact `(participantId, submissionId)` from
+pending and records the transition watermark. If delivery fails, the host
+retries the prepared delta or supplies
+`snapshot(seat, lastTransitionRevision)`, which reconstructs missed notices
+from durable rejection events. Rejection notices are therefore part of the
+frozen v0.19 reconciliation contract, not an out-of-band product convention.
+
+Clients consume observation envelopes in increasing `transitionRevision`
+order and resolution bodies in increasing `viewRevision` order. Multiple
+resolution bodies prepared in one transition are ordered by `viewRevision`;
+a rejection-only envelope may share the current `viewRevision`. For each
+envelope clients apply any newer authoritative body, remove pending
+submissions whose
 exact `(participantId, submissionId)` identity appears in
-`acknowledgements`, then replay the remaining pending inputs in their original
-local enqueue order. Duplicate acknowledgements are harmless. A revision gap
-requires retransmission or snapshot/resync; clients must not guess the missing
-acknowledgement order.
+`acknowledgements` or `rejections`, then replay the remaining pending inputs
+in their original local enqueue order. Duplicate identities are harmless. A
+view-revision gap requires retransmission or snapshot/resync; clients must not
+guess the missing acknowledgement order.
 
 ### 3.4 Host obligations (adapter interface withdrawn — §D2/§F-E2)
 
@@ -300,7 +387,8 @@ an ordered, non-empty list of terminal level transcripts into one
 `gaos.replay` v1.1 run:
 
 - `FinalizeRunOptions.seed` is the run seed, and transcript `i` must record
-  exactly `runLevelSeed(runSeed, i)`;
+  exactly `runLevelSeed(runSeed, i)` with `seedPolicy: 'explicit'` (a segment
+  that already declares derived-seed policy would otherwise be derived twice);
 - all segments must share `sessionId`, game/adapter identity, and dmath
   declaration;
 - every non-final segment must end `won`; a failed segment terminates the run;
@@ -632,7 +720,11 @@ advance(target?): {
   possible; an injected-adapter design could not order it).
 - Retention: `limits.receiptRetention` (default: receipts for the last 64
   resolutions per seat). After eviction, a retried key returns
-  `unknown_submission` — never silent re-application.
+  `unknown_submission` — never silent re-application. Bounded receipt
+  storage may forget the original response, but an O(1) historical index
+  rebuilt from append-only `intent-accepted` events permanently reserves every
+  accepted identity, including submissions later rejected before gameplay.
+  A corrected command must use a fresh submission ID.
 - Restart recovery: kernel state = `SessionTranscript` replay; hosts rebuild
   by feeding persisted events to `rehydrateKernel(transcript)`; receipts
   within the retention window are reconstructed from `resolution` events.
@@ -860,7 +952,9 @@ windowRef, affected participant); the subsequent `resolution` event records
 timeout/pass `SubmittedAction`) that the reducer consumed. Replay verifies
 gameplay entirely from `resolution` events; `deadline` events are audit
 context and must match the open window/participant they claim (checked at
-finalization). No unrecorded product policy participates in replay.
+finalization). If a pending commitment mismatch prevents resolution, the
+deadline still survives immediately before the rejection and no forced input
+is claimed as consumed. No unrecorded product policy participates in replay.
 
 The `deadline` event shape becomes:
 
@@ -1258,8 +1352,8 @@ a coherent, implementable boundary:
 - deadlines record both their audit cause and exact canonical reducer input;
 - observations are revisioned, snapshot-first, and seat-scoped;
 - extension records are structurally non-gameplay; and
-- RFC-008 mismatch records survive as independently verifiable full-replay
-  audit events.
+- RFC-008 mismatch records survive as recomputable but advisory full-replay
+  audit events; authentication is deferred to RFC-010.
 
 This is design approval. Implementation merge remains gated on:
 

@@ -4,12 +4,16 @@ import {
   canonicalJson,
   collectIntent,
   createIntentWindow,
+  IntentCollectionError,
   type CollectedIntent,
   type CommandSubmission,
   type IntentWindow,
   type JsonObject,
   type JsonValue,
+  type SubmissionIntegrityReservation,
 } from './protocol.js';
+export { IntentCollectionError };
+export type { IntentErrorCode } from './protocol.js';
 import {
   COMMITMENT_SCHEME,
   GAOS_REPLAY_DERIVED_SEEDS,
@@ -106,7 +110,7 @@ interface SessionEventBase {
   transitionRevision: number;
 }
 
-export interface CanonicalInput {
+export interface CanonicalInput extends SubmissionIntegrityReservation {
   participantId: string | null;
   submissionId: string | null;
   action: SubmittedAction;
@@ -121,6 +125,10 @@ export type SessionEvent =
     submissionId: string;
     command: JsonValue;
     canonicalCommand: string;
+    /** RFC-010 reservation; v0.19 assigns no signature semantics. */
+    prevChainHash?: string;
+    /** RFC-010 reservation; v0.19 does not verify signatures. */
+    sig?: string;
   })
   | (SessionEventBase & {
     kind: 'resolution';
@@ -170,6 +178,12 @@ export type SessionEvent =
       salt: string;
       payload: JsonValue;
     };
+    /** RFC-010 reservation for the rejected signed command. */
+    canonicalCommand?: string;
+    /** RFC-010 reservation for the rejected command cursor. */
+    cursor?: number;
+    prevChainHash?: string;
+    sig?: string;
   });
 
 type RawSessionEvent = SessionEvent extends infer T
@@ -185,6 +199,8 @@ export interface SessionTranscript<TLevel = unknown> {
 
 export interface ObservationDelta<TView = TickView<unknown, unknown>> {
   seat: string;
+  /** Durable transition watermark used to resume rejection delivery. */
+  transitionRevision: number;
   viewRevision: number;
   tick: number;
   codec: 'v1';
@@ -193,6 +209,8 @@ export interface ObservationDelta<TView = TickView<unknown, unknown>> {
    * A reconnect snapshot applies no new input and therefore carries `[]`.
    */
   acknowledgements: readonly ObservationAcknowledgement[];
+  /** Rejected identities ordered within this durable transition. */
+  rejections: readonly ObservationRejectionNotice[];
   body:
     | { kind: 'snapshot'; view: TView }
     | { kind: 'unchanged' };
@@ -222,8 +240,20 @@ export interface AdvanceSummary<TView> {
   tick: number;
   digest: number;
   deltas: readonly ObservationDelta<TView>[];
+  /** Per-seat notices for rejected inputs that did not advance gameplay. */
+  rejections: readonly ObservationRejectionNotice[];
   /** Non-fatal integrity warnings observed while preparing this advance. */
   warnings: readonly SessionWarning[];
+}
+
+export interface ObservationRejectionNotice {
+  /** Destination seat for this notice. */
+  seat: string;
+  transitionRevision: number;
+  tick: number;
+  participantId: string;
+  submissionId: string;
+  code: 'commit_mismatch';
 }
 
 export interface SessionWarning {
@@ -362,7 +392,7 @@ export interface SessionKernel<TCommand extends JsonValue, TView> {
   cursor(): number;
   tick(): number;
   viewRevision(seat: string): number;
-  snapshot(seat: string): ObservationDelta<TView>;
+  snapshot(seat: string, afterTransitionRevision?: number): ObservationDelta<TView>;
   sessionHeader(): SessionHeader;
   liveTranscript(): SessionTranscript;
   digest(): number;
@@ -443,6 +473,8 @@ class SessionKernelImpl<
   private readonly isolation: SessionStateIsolation<TState>;
   private readonly limits: Required<SessionLimits>;
   private readonly header: SessionHeader<TLevel>;
+  /** O(1) permanent idempotency index, rebuilt from durable accepted events. */
+  private readonly historicalSubmissionKeys = new Set<string>();
   private readonly draftForks = new WeakMap<
     KernelState<TState, TCommand, TView>,
     TState
@@ -648,11 +680,33 @@ class SessionKernelImpl<
   }
 
   prepareIngest(submission: CommandSubmission<TCommand>): Prepared<IngestReceipt> {
+    if (submission.protocol !== PROTOCOL_ID || submission.protocolVersion !== PROTOCOL_VERSION) {
+      throw new IntentCollectionError(
+        'invalid_protocol',
+        `expected ${PROTOCOL_ID} ${PROTOCOL_VERSION}`,
+      );
+    }
+    if (submission.sessionId !== this.options.sessionId) {
+      throw new IntentCollectionError(
+        'wrong_session',
+        'submission session does not match endpoint',
+      );
+    }
     const key = receiptKey(submission.participantId, submission.submissionId);
-    const canonicalCommand = canonicalJson(submission.command);
+    let canonicalCommand: string;
+    try {
+      canonicalCommand = canonicalJson(submission.command);
+    } catch (error) {
+      throw new IntentCollectionError(
+        'invalid_submission',
+        error instanceof Error ? error.message : 'submission command must contain plain JSON',
+      );
+    }
     const existing = this.live.receipts.get(key);
     if (existing) {
-      if (existing.canonicalCommand !== canonicalCommand || existing.tickId !== submission.tickId) {
+      if (existing.canonicalCommand !== canonicalCommand
+        || existing.tickId !== submission.tickId
+        || existing.cursor !== submission.revision) {
         throw new SessionConflictError('submission id was reused with different content or cursor');
       }
       const draft = this.forkLive();
@@ -672,7 +726,8 @@ class SessionKernelImpl<
     if (this.options.reducer.view(this.live.reducerState).status !== 'playing') {
       throw new SessionAdvanceError('terminal', 'session is already terminal');
     }
-    if (this.live.expiredReceiptKeys.has(key)) {
+    if (this.live.expiredReceiptKeys.has(key)
+      || this.historicalSubmissionKeys.has(key)) {
       throw new SessionConflictError(
         'unknown_submission',
         'receipt retention has expired',
@@ -695,7 +750,14 @@ class SessionKernelImpl<
       throw new SessionConflictError('commit and reveal are mutually exclusive');
     }
     if (preview.commit) {
-      assertCommitmentEnvelope(preview.commit);
+      try {
+        assertCommitmentEnvelope(preview.commit);
+      } catch (error) {
+        throw new SessionConflictError(
+          `invalid commitment envelope: `
+          + `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       const expected = this.live.nextCommitmentIds.get(submission.participantId) ?? 0;
       if (preview.commit.commitmentId !== expected) {
         throw new SessionConflictError(
@@ -941,10 +1003,12 @@ class SessionKernelImpl<
       const unchanged = canonicalJson(previous) === canonicalJson(next);
       const delta: ObservationDelta<TView> = {
         seat,
+        transitionRevision: draft.transitionRevision + 1,
         viewRevision: revision,
         tick: draft.tick,
         codec: 'v1',
         acknowledgements: structuredClone(acknowledgements),
+        rejections: [],
         body: unchanged
           ? { kind: 'unchanged' }
           : { kind: 'snapshot', view: structuredClone(next) },
@@ -1004,10 +1068,60 @@ class SessionKernelImpl<
     }
   }
 
+  private rejectionDeltas(
+    draft: KernelState<TState, TCommand, TView>,
+    rejection: Pick<
+      Extract<SessionEvent, { kind: 'rejection' }>,
+      'tick' | 'participantId' | 'submissionId' | 'code'
+    >,
+  ): ObservationDelta<TView>[] {
+    const transitionRevision = draft.transitionRevision + 1;
+    return this.options.seats.map((seat) => {
+      const view = draft.views.get(seat)!;
+      return {
+        seat,
+        transitionRevision,
+        viewRevision: draft.viewRevisions.get(seat)!,
+        tick: draft.tick,
+        codec: 'v1',
+        acknowledgements: [],
+        rejections: [{
+          seat,
+          transitionRevision,
+          tick: rejection.tick,
+          participantId: rejection.participantId,
+          submissionId: rejection.submissionId,
+          code: rejection.code,
+        }],
+        body: { kind: 'unchanged' },
+        viewDigest: viewDigest(view),
+      };
+    });
+  }
+
+  private rejectionNoticesSince(
+    seat: string,
+    afterTransitionRevision: number,
+  ): ObservationRejectionNotice[] {
+    if (!this.options.seats.includes(seat)) throw new RangeError(`unknown seat ${seat}`);
+    return this.live.events.flatMap((event) => event.kind === 'rejection'
+      && event.transitionRevision > afterTransitionRevision
+      ? [{
+        seat,
+        transitionRevision: event.transitionRevision,
+        tick: event.tick,
+        participantId: event.participantId,
+        submissionId: event.submissionId,
+        code: event.code,
+      }]
+      : []);
+  }
+
   prepareAdvance(target?: number): Prepared<AdvanceSummary<TView>> {
     const draft = this.forkLive();
     const rawEvents: RawSessionEvent[] = [];
     const deltas: ObservationDelta<TView>[] = [];
+    const rejections: ObservationRejectionNotice[] = [];
     const warnings: SessionWarning[] = [];
     try {
       const currentView = this.options.reducer.view(draft.reducerState);
@@ -1052,6 +1166,15 @@ class SessionKernelImpl<
         warnings.push(...resolved.warnings);
         if (resolved.rejection) {
           rawEvents.push(resolved.rejection);
+          rejections.push(...this.options.seats.map((seat) => ({
+            seat,
+            transitionRevision: this.live.transitionRevision + 1,
+            tick: resolved.rejection!.tick,
+            participantId: resolved.rejection!.participantId,
+            submissionId: resolved.rejection!.submissionId,
+            code: resolved.rejection!.code,
+          })));
+          deltas.push(...this.rejectionDeltas(draft, resolved.rejection));
           break;
         }
         if (resolved.event) {
@@ -1063,11 +1186,7 @@ class SessionKernelImpl<
       }
       const digest = this.digestState(draft);
       if (resolutions > 0 || rawEvents.at(-1)?.kind === 'rejection') {
-        const rejection = rawEvents.at(-1)?.kind === 'rejection'
-          ? rawEvents.pop()
-          : undefined;
         rawEvents.push({ kind: 'checkpoint', tick: draft.tick, digest });
-        if (rejection) rawEvents.push(rejection);
       }
       const result: AdvanceSummary<TView> = {
         resolutions,
@@ -1076,6 +1195,7 @@ class SessionKernelImpl<
         tick: draft.tick,
         digest,
         deltas,
+        rejections,
         warnings,
       };
       return this.makePrepared(draft, rawEvents, deltas, result);
@@ -1089,8 +1209,40 @@ class SessionKernelImpl<
     deadline: DeadlineInput,
     systemInput: SubmittedAction,
   ): Prepared<AdvanceSummary<TView>> {
+    if (typeof deadline.deadlineId !== 'string' || deadline.deadlineId.length === 0) {
+      throw new TypeError('deadlineId must be a non-empty string');
+    }
     if (!Number.isSafeInteger(deadline.tick) || deadline.tick !== this.live.tick) {
       throw new SessionAdvanceError('stale_target', 'deadline tick must equal the open tick');
+    }
+    const participantId = deadline.participantId ?? null;
+    if (participantId !== null) {
+      if (!this.live.window.participants.includes(participantId)) {
+        throw new SessionConflictError('deadline participant is not eligible in the open window');
+      }
+      if (Object.hasOwn(this.live.window.intents, participantId)) {
+        throw new SessionConflictError('deadline participant already submitted in the open window');
+      }
+    }
+    if (systemInput.seat !== undefined) {
+      if (!this.live.window.participants.includes(systemInput.seat)) {
+        throw new SessionConflictError('deadline system input names a seat outside the open window');
+      }
+      if (participantId === null) {
+        throw new SessionConflictError(
+          'window deadline system input cannot name a participant seat',
+        );
+      }
+      if (systemInput.seat !== participantId) {
+        throw new SessionConflictError('deadline system input cannot impersonate another seat');
+      }
+    }
+    if (systemInput.commit !== undefined
+      || systemInput.reveal !== undefined
+      || systemInput.verifiedPayload !== undefined) {
+      throw new SessionConflictError(
+        'deadline system input cannot carry commitment verification fields',
+      );
     }
     const draft = this.forkLive();
     try {
@@ -1098,10 +1250,12 @@ class SessionKernelImpl<
         throw new SessionAdvanceError('terminal', 'session is already terminal');
       }
       const windowRef = draft.cursor;
+      const action = actionCopy(systemInput);
+      if (participantId !== null) action.seat ??= participantId;
       const canonical: CanonicalInput = {
-        participantId: deadline.participantId ?? null,
+        participantId,
         submissionId: null,
-        action: actionCopy(systemInput),
+        action,
       };
       const resolved = this.resolveOnce(draft, 'deadline', [canonical]);
       const rawEvents: RawSessionEvent[] = [{
@@ -1109,11 +1263,22 @@ class SessionKernelImpl<
         tick: deadline.tick,
         deadlineId: deadline.deadlineId,
         windowRef,
-        participantId: deadline.participantId ?? null,
+        participantId,
       }];
       if (resolved.rejection) rawEvents.push(resolved.rejection);
       if (resolved.event) rawEvents.push(resolved.event);
       const deltas = resolved.deltas;
+      const rejections: ObservationRejectionNotice[] = resolved.rejection
+        ? this.options.seats.map((seat) => ({
+          seat,
+          transitionRevision: this.live.transitionRevision + 1,
+          tick: resolved.rejection!.tick,
+          participantId: resolved.rejection!.participantId,
+          submissionId: resolved.rejection!.submissionId,
+          code: resolved.rejection!.code,
+        }))
+        : [];
+      if (resolved.rejection) deltas.push(...this.rejectionDeltas(draft, resolved.rejection));
       const digest = this.digestState(draft);
       if (resolved.event || resolved.rejection) {
         rawEvents.push({ kind: 'checkpoint', tick: draft.tick, digest });
@@ -1125,6 +1290,7 @@ class SessionKernelImpl<
         tick: draft.tick,
         digest,
         deltas,
+        rejections,
         warnings: resolved.warnings,
       };
       return this.makePrepared(draft, rawEvents, deltas, result);
@@ -1177,6 +1343,13 @@ class SessionKernelImpl<
     }
     const previous = this.live.reducerState;
     this.live = state.next;
+    for (const event of prepared.events) {
+      if (event.kind === 'intent-accepted') {
+        this.historicalSubmissionKeys.add(
+          receiptKey(event.participantId, event.submissionId),
+        );
+      }
+    }
     state.completion = 'committed';
     for (const draft of state.drafts) {
       if (draft !== state.next.reducerState) this.isolation.discard?.(draft);
@@ -1216,14 +1389,21 @@ class SessionKernelImpl<
     return revision;
   }
 
-  snapshot(seat: string): ObservationDelta<TView> {
+  snapshot(seat: string, afterTransitionRevision = 0): ObservationDelta<TView> {
+    if (!Number.isSafeInteger(afterTransitionRevision)
+      || afterTransitionRevision < 0
+      || afterTransitionRevision > this.live.transitionRevision) {
+      throw new RangeError('afterTransitionRevision must identify committed session history');
+    }
     const view = this.observe(seat);
     return {
       seat,
+      transitionRevision: this.live.transitionRevision,
       viewRevision: this.viewRevision(seat),
       tick: this.live.tick,
       codec: 'v1',
       acknowledgements: [],
+      rejections: this.rejectionNoticesSince(seat, afterTransitionRevision),
       body: { kind: 'snapshot', view },
       viewDigest: viewDigest(view),
     };
@@ -1259,6 +1439,7 @@ class SessionKernelImpl<
       throw new TypeError('transcript header does not match kernel options');
     }
     const events = [...transcript.events];
+    validateDeadlineAudit(transcript.header, events);
     let previousTransitionRevision = 0;
     for (const event of events) {
       if (event.transitionRevision < previousTransitionRevision) {
@@ -1266,6 +1447,9 @@ class SessionKernelImpl<
       }
       previousTransitionRevision = event.transitionRevision;
       if (event.kind === 'intent-accepted') {
+        this.historicalSubmissionKeys.add(
+          receiptKey(event.participantId, event.submissionId),
+        );
         const submission: CommandSubmission<TCommand> = {
           protocol: PROTOCOL_ID,
           protocolVersion: PROTOCOL_VERSION,
@@ -1413,10 +1597,13 @@ export function rehydrateKernel<
   return new SessionKernelImpl(options, transcript);
 }
 
-function replayInput(input: CanonicalInput): ReplayResolutionInput {
+function replayInput(input: CanonicalInput, perm: readonly number[]): ReplayResolutionInput {
   const action = input.action;
+  const canonicalMatch = /^Action ([1-9]\d*)$/.exec(action.id);
+  const canonicalIndex = canonicalMatch ? Number(canonicalMatch[1]) - 1 : -1;
+  const wireIndex = perm.indexOf(canonicalIndex);
   return {
-    wireId: action.id,
+    wireId: wireIndex < 0 ? action.id : `Action ${wireIndex + 1}`,
     canonicalId: action.id,
     ...(action.x === undefined ? {} : { x: action.x }),
     ...(action.y === undefined ? {} : { y: action.y }),
@@ -1431,11 +1618,71 @@ function replayInput(input: CanonicalInput): ReplayResolutionInput {
   };
 }
 
+function deadlineSystemInput(
+  event: Extract<SessionEvent, { kind: 'resolution' }>,
+): CanonicalInput | undefined {
+  return event.systemInput
+    ?? [...event.inputs].reverse().find((input) => input.submissionId === null);
+}
+
+function validateDeadlineAudit(
+  header: SessionHeader,
+  events: readonly SessionEvent[],
+): void {
+  for (const [index, event] of events.entries()) {
+    if (event.kind === 'deadline') {
+      if (event.deadlineId.length === 0) {
+        throw new TypeError('deadline audit event must name a non-empty deadlineId');
+      }
+      if (event.participantId !== null && !header.seats.includes(event.participantId)) {
+        throw new TypeError('deadline audit participant must be a declared session seat');
+      }
+      const outcome = events[index + 1];
+      if (outcome?.kind === 'rejection') {
+        if (outcome.transitionRevision !== event.transitionRevision
+          || outcome.tick !== event.tick) {
+          throw new TypeError(
+            'deadline audit event must immediately precede its matching rejection',
+          );
+        }
+        continue;
+      }
+      if (outcome?.kind !== 'resolution'
+        || outcome.cause !== 'deadline'
+        || outcome.transitionRevision !== event.transitionRevision
+        || outcome.tick !== event.tick
+        || outcome.cursor !== event.windowRef) {
+        throw new TypeError(
+          'deadline audit event must immediately precede its matching resolution or rejection',
+        );
+      }
+      const systemInput = deadlineSystemInput(outcome);
+      if (!systemInput || systemInput.participantId !== event.participantId) {
+        throw new TypeError('deadline audit participant must match the recorded system input');
+      }
+      if (event.participantId === null && systemInput.action.seat !== undefined) {
+        throw new TypeError('window deadline audit input cannot name a participant seat');
+      }
+      if (event.participantId !== null
+        && systemInput.action.seat !== event.participantId) {
+        throw new TypeError('deadline audit participant must match the system action seat');
+      }
+    } else if (event.kind === 'resolution' && event.cause === 'deadline') {
+      const deadline = events[index - 1];
+      if (deadline?.kind !== 'deadline'
+        || deadline.transitionRevision !== event.transitionRevision) {
+        throw new TypeError('deadline resolution must immediately follow its audit event');
+      }
+    }
+  }
+}
+
 /** Purely project a terminal live transcript into portable replay v1.1. */
 export function finalizeReplay<TLevel>(
   transcript: SessionTranscript<TLevel>,
   options: FinalizeOptions,
 ): ReplayArtifact<TLevel> {
+  validateDeadlineAudit(transcript.header, transcript.events);
   const resolutions = transcript.events.filter(
     (event): event is Extract<SessionEvent, { kind: 'resolution' }> => event.kind === 'resolution',
   );
@@ -1446,19 +1693,18 @@ export function finalizeReplay<TLevel>(
   const records: ReplayRecord[] = [];
   for (const event of transcript.events) {
     if (event.kind === 'resolution') {
-      const legacySystemInput = event.cause === 'deadline' && !event.systemInput
-        ? [...event.inputs].reverse().find((input) => input.submissionId === null)
+      const systemInput = event.cause === 'deadline'
+        ? deadlineSystemInput(event)
         : undefined;
-      const systemInput = event.systemInput ?? legacySystemInput;
       records.push({
         kind: 'resolution',
         n: records.length,
         levelIndex: 0,
         tick: event.tick,
-        inputs: event.inputs.map(replayInput),
+        inputs: event.inputs.map((input) => replayInput(input, options.perm)),
         cause: event.cause,
         ...(event.cause === 'deadline' && systemInput
-          ? { systemInput: replayInput(systemInput) }
+          ? { systemInput: replayInput(systemInput, options.perm) }
           : {}),
       });
     } else if (event.kind === 'deadline') {
@@ -1501,7 +1747,10 @@ export function finalizeReplay<TLevel>(
       });
     }
   }
-  const replayActions = resolutions.flatMap((event) => event.inputs.map(replayInput));
+  const replayActions = resolutions.flatMap((event) => event.inputs.map((input) => ({
+    ...replayInput(input, options.perm),
+    tick: event.tick,
+  })));
   const extensions: JsonObject = {
     ...(options.extensions ?? {}),
     ...(transcript.header.dmath === undefined
@@ -1573,6 +1822,11 @@ export function finalizeRunReplay<TLevel>(
     if (canonicalJson(transcript.header.dmath ?? null) !== dmath) {
       throw new TypeError(`run transcript ${levelIndex} has a different dmath declaration`);
     }
+    if (transcript.header.seedPolicy !== 'explicit') {
+      throw new TypeError(
+        `run transcript ${levelIndex} must record its derived level seed as explicit`,
+      );
+    }
     const expectedSeed = runLevelSeed(options.seed, levelIndex);
     if (transcript.header.seed !== expectedSeed) {
       throw new TypeError(
@@ -1609,6 +1863,7 @@ export function finalizeRunReplay<TLevel>(
       });
     }
   }
+
   const extensions: JsonObject = {
     ...(options.extensions ?? {}),
     ...(first.header.dmath === undefined

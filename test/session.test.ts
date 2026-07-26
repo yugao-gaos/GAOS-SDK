@@ -19,6 +19,7 @@ import {
   type TickView,
 } from '../src/engine/index.js';
 import {
+  IntentCollectionError,
   PreparedTransitionError,
   SessionAdvanceError,
   SessionConflictError,
@@ -136,6 +137,10 @@ describe('./session kernel', () => {
     expect(advance.deltas.every(
       (delta) => JSON.stringify(delta.acknowledgements) === JSON.stringify(consumed),
     )).toBe(true);
+    expect(advance.deltas.every((delta) => (
+      delta.transitionRevision === advance.nextTransitionRevision
+      && delta.rejections.length === 0
+    ))).toBe(true);
     kernel.abort(advance);
     expect(kernel.cursor()).toBe(0);
     expect(kernel.digest()).toBe(before);
@@ -163,6 +168,23 @@ describe('./session kernel', () => {
     kernel.commit(left);
     expect(() => kernel.commit(right)).toThrowError(PreparedTransitionError);
     expect(() => kernel.abort(right)).toThrow(/already aborted/);
+  });
+
+  it('validates the immutable envelope and full cursor before honoring a duplicate', () => {
+    const kernel = createSessionKernel(options());
+    kernel.commit(kernel.prepareIngest(submission('red', 'red-1', 1)));
+    expect(() => kernel.prepareIngest({
+      ...submission('red', 'red-1', 1),
+      protocol: 'foreign' as typeof PROTOCOL_ID,
+    })).toThrow(/expected agilabs\.ticks/);
+    expect(() => kernel.prepareIngest({
+      ...submission('red', 'red-1', 1),
+      sessionId: 'another-session',
+    })).toThrow(/does not match endpoint/);
+    expect(() => kernel.prepareIngest({
+      ...submission('red', 'red-1', 1),
+      revision: 999,
+    })).toThrowError(SessionConflictError);
   });
 
   it('freezes cyclic adapter output without recursion or aliasing', () => {
@@ -209,8 +231,11 @@ describe('./session kernel', () => {
     const advance = recovered.prepareAdvance();
     recovered.commit(advance);
 
-    const artifact = finalizeReplay(recovered.liveTranscript(), { perm: [0] });
+    const artifact = finalizeReplay(recovered.liveTranscript(), { perm: [1, 0] });
     expect(artifact.header.formatVersion).toBe('1.1');
+    expect(artifact.actions.every((action) => (
+      action.wireId === 'Action 2' && action.canonicalId === 'Action 1'
+    ))).toBe(true);
     expect(artifact.records).toHaveLength(2);
     expect(artifact.records?.[0]).toMatchObject({
       kind: 'resolution',
@@ -242,7 +267,11 @@ describe('./session kernel', () => {
     const kernel = createSessionKernel(options());
     const invalid = submission('red', 'bad', 1) as CommandSubmission<Command & JsonValue>;
     (invalid.command as { amount: number }).amount = Number.NaN;
-    expect(() => kernel.prepareIngest(invalid)).toThrow();
+    expect(() => kernel.prepareIngest(invalid)).toThrowError(
+      expect.objectContaining<Partial<IntentCollectionError>>({
+        code: 'invalid_submission',
+      }),
+    );
   });
 
   it('verifies commit–reveal before reducer execution and through replay', () => {
@@ -366,7 +395,7 @@ describe('./session kernel', () => {
       return kernel.liveTranscript();
     };
     const transcripts = [finishLevel(0), finishLevel(1)];
-    const artifact = finalizeRunReplay(transcripts, { seed: runSeed, perm: [0] });
+    const artifact = finalizeRunReplay(transcripts, { seed: runSeed, perm: [1, 0] });
     expect(artifact.header).toMatchObject({
       sessionId,
       seed: runSeed,
@@ -385,6 +414,9 @@ describe('./session kernel', () => {
         { n: 2, levelIndex: 1 },
         { n: 3, levelIndex: 1 },
       ]);
+    expect(artifact.actions.every((action) => (
+      action.wireId === 'Action 2' && action.canonicalId === 'Action 1'
+    ))).toBe(true);
     expect(artifact.records?.map(({ n, levelIndex }) => ({ n, levelIndex })))
       .toEqual([
         { n: 0, levelIndex: 0 },
@@ -403,6 +435,13 @@ describe('./session kernel', () => {
       [transcripts[0]!, wrongSeed],
       { seed: runSeed, perm: [0] },
     )).toThrow(/runLevelSeed/);
+
+    const derivedPolicy = structuredClone(transcripts[0]!);
+    derivedPolicy.header.seedPolicy = 'gaos.run-level-seed.v1';
+    expect(() => finalizeRunReplay(
+      [derivedPolicy],
+      { seed: runSeed, perm: [0] },
+    )).toThrow(/must record its derived level seed as explicit/);
 
     const wrongSession = structuredClone(transcripts[1]!);
     wrongSession.header.sessionId = 'another-run';
@@ -718,20 +757,112 @@ describe('./session kernel', () => {
       'zulu-reveal',
       { kind: 'reveal', commitmentId: 0, salt: zuluSalt, payload: { order: 'wrong' } },
     )));
+
+    const deadlineKernel = rehydrateKernel(secretOptions, live.liveTranscript());
+    const deadlineRejected = deadlineKernel.prepareDeadline(
+      { deadlineId: 'window-timeout-with-rejection', tick: 1 },
+      { id: 'Action 1', index: 2 },
+    );
+    expect(deadlineRejected.events.map((event) => event.kind)).toEqual([
+      'deadline',
+      'rejection',
+      'checkpoint',
+    ]);
+    expect(deadlineRejected.events[0]).toMatchObject({
+      kind: 'deadline',
+      deadlineId: 'window-timeout-with-rejection',
+    });
+    expect(deadlineRejected.result.resolutions).toBe(0);
+    deadlineKernel.commit(deadlineRejected);
+    expect(() => rehydrateKernel(secretOptions, deadlineKernel.liveTranscript()))
+      .not.toThrow();
+    deadlineKernel.commit(deadlineKernel.prepareIngest(submit(
+      1,
+      'zulu',
+      'zulu-reveal-after-deadline',
+      { kind: 'reveal', commitmentId: 0, salt: zuluSalt, payload: honestPayload },
+    )));
+    deadlineKernel.commit(deadlineKernel.prepareAdvance());
+    const deadlineArtifact = finalizeReplay(
+      deadlineKernel.liveTranscript(),
+      { perm: [0] },
+    );
+    expect(deadlineArtifact.records?.map((record) => record.kind)).toContain('deadline');
+    expect(recheckReplayArtifact(deadlineArtifact, () => secretReducer)).toMatchObject({
+      ok: true,
+      problems: [],
+    });
+
     const rejected = live.prepareAdvance();
     expect(rejected.events.some((event) => event.kind === 'checkpoint')).toBe(true);
-    expect(rejected.events.at(-1)).toMatchObject({
+    expect(rejected.events.map((event) => event.kind)).toEqual([
+      'rejection',
+      'checkpoint',
+    ]);
+    expect(rejected.events[0]).toMatchObject({
       kind: 'rejection',
       participantId: 'zulu',
     });
+    expect(rejected.result.rejections).toEqual([
+      {
+        seat: 'alpha',
+        transitionRevision: rejected.nextTransitionRevision,
+        tick: 1,
+        participantId: 'zulu',
+        submissionId: 'zulu-reveal',
+        code: 'commit_mismatch',
+      },
+      {
+        seat: 'zulu',
+        transitionRevision: rejected.nextTransitionRevision,
+        tick: 1,
+        participantId: 'zulu',
+        submissionId: 'zulu-reveal',
+        code: 'commit_mismatch',
+      },
+    ]);
+    expect(rejected.deltas).toHaveLength(2);
+    expect(rejected.deltas.every((delta) => (
+      delta.transitionRevision === rejected.nextTransitionRevision
+      && delta.viewRevision === live.cursor()
+      && delta.body.kind === 'unchanged'
+      && delta.rejections.length === 1
+      && delta.rejections[0]?.submissionId === 'zulu-reveal'
+    ))).toBe(true);
     live.commit(rejected);
 
     const recovered = rehydrateKernel(secretOptions, live.liveTranscript());
     for (const kernel of [live, recovered]) {
-      const retry = kernel.prepareIngest(submit(
+      expect(kernel.snapshot('alpha', rejected.baseTransitionRevision).rejections)
+        .toEqual([rejected.result.rejections[0]]);
+      expect(kernel.snapshot('alpha', rejected.nextTransitionRevision).rejections)
+        .toEqual([]);
+      expect(() => kernel.prepareIngest(submit(
         1,
         'zulu',
         'zulu-reveal',
+        { kind: 'reveal', commitmentId: 0, salt: zuluSalt, payload: honestPayload },
+      ))).toThrowError(SessionConflictError);
+    }
+    for (const kernel of [live, recovered]) {
+      kernel.commit(kernel.prepareIngest(submit(
+        1,
+        'zulu',
+        'zulu-reveal-second-fumble',
+        { kind: 'reveal', commitmentId: 0, salt: zuluSalt, payload: { order: 'wrong' } },
+      )));
+      const secondFumble = kernel.prepareAdvance();
+      expect(secondFumble.events.map((event) => event.kind)).toEqual([
+        'rejection',
+        'checkpoint',
+      ]);
+      kernel.commit(secondFumble);
+    }
+    for (const kernel of [live, recovered]) {
+      const retry = kernel.prepareIngest(submit(
+        1,
+        'zulu',
+        'zulu-reveal-corrected',
         { kind: 'reveal', commitmentId: 0, salt: zuluSalt, payload: honestPayload },
       ));
       expect(retry.result.status).toBe('accepted');
@@ -746,12 +877,33 @@ describe('./session kernel', () => {
       finalizeReplay(live.liveTranscript(), { perm: [0] }),
       () => secretReducer,
     );
-    expect(checked.problems.join('\n')).toMatch(/commit_mismatch.*zulu.*0/);
+    expect(checked.ok).toBe(true);
+    expect(checked.diagnostics.join('\n')).toMatch(/verified commit_mismatch.*zulu.*0/);
   });
 
   it('projects the explicit system input and publishes matching checkpoint digests', () => {
     const kernel = createSessionKernel(options());
     kernel.commit(kernel.prepareIngest(submission('red', 'red-1', 1)));
+    expect(() => kernel.prepareDeadline(
+      { deadlineId: '', tick: 0, participantId: 'blue' },
+      { id: 'Action 1', index: 2, seat: 'blue' },
+    )).toThrow(/deadlineId/);
+    expect(() => kernel.prepareDeadline(
+      { deadlineId: 'wrong-seat', tick: 0, participantId: 'blue' },
+      { id: 'Action 1', index: 2, seat: 'red' },
+    )).toThrow(/impersonate/);
+    expect(() => kernel.prepareDeadline(
+      { deadlineId: 'unknown', tick: 0, participantId: 'green' },
+      { id: 'Action 1', index: 2 },
+    )).toThrow(/not eligible/);
+    expect(() => kernel.prepareDeadline(
+      { deadlineId: 'already-submitted', tick: 0, participantId: 'red' },
+      { id: 'Action 1', index: 2 },
+    )).toThrow(/already submitted/);
+    expect(() => kernel.prepareDeadline(
+      { deadlineId: 'window-seat', tick: 0 },
+      { id: 'Action 1', index: 2, seat: 'blue' },
+    )).toThrow(/window deadline.*cannot name/);
     const deadline = kernel.prepareDeadline(
       { deadlineId: 'mixed', tick: 0, participantId: 'blue' },
       { id: 'Action 1', index: 2, seat: 'blue' },
@@ -799,6 +951,46 @@ describe('./session kernel', () => {
     if (legacyResolution?.kind === 'resolution') delete legacyResolution.systemInput;
     expect(finalizeReplay(legacyTranscript, { perm: [0] }).records)
       .toEqual(artifact.records);
+    const forgedDeadline = structuredClone(kernel.liveTranscript());
+    const deadlineEvent = forgedDeadline.events.find((event) => event.kind === 'deadline');
+    if (deadlineEvent?.kind === 'deadline') deadlineEvent.participantId = 'red';
+    expect(() => finalizeReplay(forgedDeadline, { perm: [0] }))
+      .toThrow(/participant must match/);
+    const forgedWindowDeadline = structuredClone(kernel.liveTranscript());
+    const forgedWindowEvent = forgedWindowDeadline.events.find(
+      (event) => event.kind === 'deadline',
+    );
+    const forgedWindowResolution = forgedWindowDeadline.events.find(
+      (event) => event.kind === 'resolution' && event.cause === 'deadline',
+    );
+    if (forgedWindowEvent?.kind === 'deadline') forgedWindowEvent.participantId = null;
+    if (forgedWindowResolution?.kind === 'resolution'
+      && forgedWindowResolution.systemInput) {
+      forgedWindowResolution.systemInput.participantId = null;
+    }
+    expect(() => finalizeReplay(forgedWindowDeadline, { perm: [0] }))
+      .toThrow(/window deadline.*cannot name/);
+    expect(() => rehydrateKernel(options(), forgedWindowDeadline))
+      .toThrow(/window deadline.*cannot name/);
+    const forgedUnknownParticipant = structuredClone(kernel.liveTranscript());
+    const unknownDeadline = forgedUnknownParticipant.events.find(
+      (event) => event.kind === 'deadline',
+    );
+    const unknownResolution = forgedUnknownParticipant.events.find(
+      (event) => event.kind === 'resolution' && event.cause === 'deadline',
+    );
+    if (unknownDeadline?.kind === 'deadline') unknownDeadline.participantId = 'green';
+    if (unknownResolution?.kind === 'resolution' && unknownResolution.systemInput) {
+      unknownResolution.systemInput.participantId = 'green';
+      unknownResolution.systemInput.action.seat = 'green';
+    }
+    expect(() => finalizeReplay(forgedUnknownParticipant, { perm: [0] }))
+      .toThrow(/declared session seat/);
+    const forgedEmptyDeadline = structuredClone(kernel.liveTranscript());
+    const emptyDeadline = forgedEmptyDeadline.events.find((event) => event.kind === 'deadline');
+    if (emptyDeadline?.kind === 'deadline') emptyDeadline.deadlineId = '';
+    expect(() => finalizeReplay(forgedEmptyDeadline, { perm: [0] }))
+      .toThrow(/non-empty deadlineId/);
 
     const exactRetry = kernel.prepareIngest(submission('red', 'red-1', 1));
     expect(exactRetry.result.status).toBe('duplicate');
@@ -871,6 +1063,43 @@ describe('./session kernel', () => {
       throw new Error('expected the expired receipt to be rejected');
     } catch (error) {
       expect(error).toBeInstanceOf(SessionConflictError);
+      expect((error as SessionConflictError).code).toBe('unknown_submission');
+    }
+  });
+
+  it('never reapplies an accepted submission ID after bounded receipt cleanup', () => {
+    const kernel = createSessionKernel({
+      ...options(),
+      limits: { receiptRetention: 1 },
+    });
+    for (const [round, redId, blueId] of [
+      [0, 'red-original', 'blue-0'],
+      [1, 'red-1', 'blue-1'],
+      [2, 'red-2', 'blue-2'],
+    ] as const) {
+      const atCursor = (participantId: string, submissionId: string) => ({
+        ...submission(participantId, submissionId, 0),
+        tickId: makeTickId('session-kernel-test', round),
+        revision: round,
+      });
+      kernel.commit(kernel.prepareIngest(atCursor('red', redId)));
+      kernel.commit(kernel.prepareIngest(atCursor('blue', blueId)));
+      kernel.commit(kernel.prepareAdvance());
+    }
+
+    expect(kernel.cursor()).toBe(3);
+    expect(() => kernel.prepareIngest({
+      ...submission('red', 'red-original', 0),
+      tickId: makeTickId('session-kernel-test', 3),
+      revision: 3,
+    })).toThrowError(SessionConflictError);
+    try {
+      kernel.prepareIngest({
+        ...submission('red', 'red-original', 0),
+        tickId: makeTickId('session-kernel-test', 3),
+        revision: 3,
+      });
+    } catch (error) {
       expect((error as SessionConflictError).code).toBe('unknown_submission');
     }
   });
@@ -961,6 +1190,7 @@ describe('./session kernel', () => {
     for (const seat of hiddenOptions.seats) {
       const snapshot = kernel.snapshot(seat);
       expect(snapshot.acknowledgements).toEqual([]);
+      expect(snapshot.rejections).toEqual([]);
       if (snapshot.body.kind === 'snapshot') reproduced.set(seat, snapshot.body.view);
     }
     kernel.commit(kernel.prepareIngest(hiddenSubmission('alpha')));

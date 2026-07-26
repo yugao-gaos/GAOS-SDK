@@ -4,9 +4,12 @@ Status: **implemented (v0.19.0, 2026-07-25)** · Target: scopes v0.19 (final) an
 
 Current disposition: all v0.19 release gates in §2 are implemented.
 `finalizeRunReplay` supplies derived-seed multi-level projection;
-`ObservationDelta.acknowledgements` freezes the reconciliation identity/order
-contract; the public session guide contains the normative host sequence and
-crash/ownership rules; and N1–N5 plus their evidence suites are closed.
+`ObservationDelta.acknowledgements` and `.rejections` freeze the reconciliation
+identity/order contract with durable transition-watermark recovery; the public
+session guide contains the normative host sequence and
+crash/ownership rules; v1.1 audit records are explicitly advisory host
+attestation with additive RFC-010 integrity slots reserved; and N1–N5 plus
+their evidence suites are closed.
 
 ## 1. Problem
 
@@ -91,8 +94,9 @@ piece that must be stable *before* anyone writes reconcile code.
 `PredictionSession` (the class) stays in v0.20 — see §3.1 for why that is now
 an advantage rather than a concession.
 
-Implemented as `ObservationDelta.acknowledgements`; RFC-006 rev 8 freezes the
-identity semantics and pending replay order.
+Implemented as `ObservationDelta.acknowledgements` plus rejection-only
+observation envelopes. RFC-006 rev 10 freezes identity semantics, transition
+watermarks, snapshot recovery, and pending replay order.
 
 ### 2.3 Both — host obligations must be normative in v0.19
 
@@ -203,5 +207,6 @@ v0.19 because the final implementation review made them release evidence.
 1. `finalizeRunReplay` requires the run seed and rejects any transcript whose
    recorded per-level seed differs from `runLevelSeed(runSeed, index)`.
 2. Acknowledgements live directly on `ObservationDelta` and are ordered
-   exactly like the applied reducer input batch.
+   exactly like the applied reducer input batch. Rejections use the same
+   observation stream and are resumable by durable transition watermark.
 3. Publish `0.19.0` directly; migration-blocking additive fixes use `0.19.x`.

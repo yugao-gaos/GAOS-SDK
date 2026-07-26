@@ -4,6 +4,7 @@ import {
   PROTOCOL_VERSION,
   IntentCollectionError,
   GameRegistry,
+  canonicalJson,
   collectIntent,
   createIntentWindow,
   createParticipationIntentWindow,
@@ -93,6 +94,18 @@ describe('v1 simultaneous intent collection', () => {
     expect(() => collectIntent(initial, submit('alpha', Number.NaN))).toThrowError(
       expect.objectContaining<Partial<IntentCollectionError>>({ code: 'invalid_submission' }),
     );
+    expect(() => collectIntent(
+      initial,
+      submit('alpha', Number.MAX_SAFE_INTEGER + 1),
+    )).toThrowError(
+      expect.objectContaining<Partial<IntentCollectionError>>({ code: 'invalid_submission' }),
+    );
+    expect(() => collectIntent(initial, submit('alpha', 1e20))).toThrowError(
+      expect.objectContaining<Partial<IntentCollectionError>>({ code: 'invalid_submission' }),
+    );
+    expect(() => collectIntent(initial, submit('alpha', '\ud800'))).toThrowError(
+      expect.objectContaining<Partial<IntentCollectionError>>({ code: 'invalid_submission' }),
+    );
     expect(() => collectIntent(initial, submit('alpha', BigInt(1)))).toThrowError(
       expect.objectContaining<Partial<IntentCollectionError>>({ code: 'invalid_submission' }),
     );
@@ -117,6 +130,8 @@ describe('v1 simultaneous intent collection', () => {
     expect(() => collectIntent(initial, submit('alpha', cyclic))).toThrowError(
       expect.objectContaining<Partial<IntentCollectionError>>({ code: 'invalid_submission' }),
     );
+    expect(canonicalJson({ '\ue000': 2, '😀': 1 })).toBe('{"":2,"😀":1}');
+    expect(() => canonicalJson({ '\ud800': true })).toThrow(/unpaired surrogates/);
   });
 
   it('treats hostile object-property participant ids as ordinary seats', () => {

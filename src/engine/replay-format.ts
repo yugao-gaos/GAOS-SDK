@@ -96,6 +96,13 @@ export interface ReplayTotals {
   extensions?: JsonObject;
 }
 
+/** Reserved roster slot for RFC-010; v1.1 assigns no trust semantics. */
+export interface ReplaySeatIntegrityReservation {
+  id: string;
+  publicKey?: string;
+  alg?: string;
+}
+
 /** First line of a GAOS replay JSONL artifact. */
 export interface ReplayHeader<TLevel> {
   kind: 'header';
@@ -111,6 +118,10 @@ export interface ReplayHeader<TLevel> {
   levels: Array<ReplayLevelRecord<TLevel>>;
   totals: ReplayTotals;
   visibility?: TranscriptVisibility;
+  /** RFC-010 reservation; ignored by the v1.1 verifier. */
+  seats?: ReplaySeatIntegrityReservation[];
+  /** RFC-010 reservation; ignored by the v1.1 verifier. */
+  signaturePolicy?: JsonObject;
   /** Host, creator, agent, signing, or benchmark metadata. */
   extensions?: JsonObject;
 }
@@ -119,6 +130,12 @@ export interface ReplayHeader<TLevel> {
 export interface ReplayAction extends TranscriptAction {
   kind: 'action';
   levelIndex: number;
+  /** RFC-010 reservations; ignored by the v1.1 verifier. */
+  submissionId?: string;
+  canonicalCommand?: string;
+  cursor?: number;
+  prevChainHash?: string;
+  sig?: string;
   commit?: CommitmentEnvelope;
   reveal?: RevealEnvelope;
   /** Present only after a reveal has passed commitment verification. */
@@ -176,6 +193,11 @@ export interface ReplayCommitMismatchAudit {
   submissionId: string;
   commitmentId: number;
   scheme: typeof COMMITMENT_SCHEME;
+  /** RFC-010 reservations; ignored by the v1.1 verifier. */
+  canonicalCommand?: string;
+  cursor?: number;
+  prevChainHash?: string;
+  sig?: string;
   attemptedReveal?: {
     salt: string;
     payload: JsonValue;
@@ -213,6 +235,11 @@ export interface ReplayLevelInput<TLevel> {
 
 export interface ReplayActionInput extends TranscriptAction {
   levelIndex: number;
+  submissionId?: string;
+  canonicalCommand?: string;
+  cursor?: number;
+  prevChainHash?: string;
+  sig?: string;
   commit?: CommitmentEnvelope;
   reveal?: RevealEnvelope;
   verifiedPayload?: JsonValue;
@@ -230,6 +257,8 @@ export interface CreateReplayArtifactInput<TLevel> {
   records?: ReplayRecord[];
   totals?: ReplayTotals;
   visibility?: TranscriptVisibility;
+  seats?: ReplaySeatIntegrityReservation[];
+  signaturePolicy?: JsonObject;
   extensions?: JsonObject;
 }
 
@@ -291,6 +320,29 @@ export class ReplayFormatError extends Error {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function projectRecordActions(stream: readonly unknown[]): ReplayAction[] {
+  const projected: ReplayAction[] = [];
+  for (const record of stream) {
+    if (isRecord(record) && record['kind'] === 'action') {
+      projected.push(record as unknown as ReplayAction);
+    } else if (isRecord(record)
+      && record['kind'] === 'resolution'
+      && Array.isArray(record['inputs'])) {
+      for (const input of record['inputs']) {
+        if (!isRecord(input)) continue;
+        projected.push({
+          ...input,
+          kind: 'action',
+          n: projected.length,
+          levelIndex: record['levelIndex'] as number,
+          tick: record['tick'] as number,
+        } as unknown as ReplayAction);
+      }
+    }
+  }
+  return projected.map((action, index) => ({ ...action, n: index }));
 }
 
 function rejectUnknownProperties(
@@ -362,6 +414,10 @@ export function createReplayArtifact<TLevel>(
     levels,
     totals: input.totals ?? replayTotals(levels),
     ...(input.visibility === undefined ? {} : { visibility: input.visibility }),
+    ...(input.seats === undefined ? {} : { seats: structuredClone(input.seats) }),
+    ...(input.signaturePolicy === undefined
+      ? {}
+      : { signaturePolicy: structuredClone(input.signaturePolicy) }),
     ...(input.extensions === undefined ? {} : { extensions: input.extensions }),
   };
   const artifact: ReplayArtifact<TLevel> = {
@@ -428,6 +484,8 @@ export function validateReplayArtifact(value: unknown): string[] {
     'levels',
     'totals',
     'visibility',
+    'seats',
+    'signaturePolicy',
     'extensions',
   ], 'header', problems);
   if (header['kind'] !== 'header') problems.push('header.kind must be header');
@@ -440,6 +498,10 @@ export function validateReplayArtifact(value: unknown): string[] {
       `header.formatVersion must be ${GAOS_REPLAY_LEGACY_FORMAT_VERSION}`
       + ` or ${GAOS_REPLAY_FORMAT_VERSION}`,
     );
+  }
+  if (header['formatVersion'] === GAOS_REPLAY_LEGACY_FORMAT_VERSION
+    && (header['seats'] !== undefined || header['signaturePolicy'] !== undefined)) {
+    problems.push('header integrity reservations require formatVersion 1.1');
   }
   if (typeof header['sessionId'] !== 'string' || header['sessionId'].length === 0) {
     problems.push('header.sessionId must be a non-empty string');
@@ -598,6 +660,11 @@ export function validateReplayArtifact(value: unknown): string[] {
         'seat',
         'targets',
         'tick',
+        'submissionId',
+        'canonicalCommand',
+        'cursor',
+        'prevChainHash',
+        'sig',
         'commit',
         'reveal',
         'verifiedPayload',
@@ -695,8 +762,15 @@ export function validateReplayArtifact(value: unknown): string[] {
       if (header['formatVersion'] === GAOS_REPLAY_LEGACY_FORMAT_VERSION
         && (action['commit'] !== undefined
           || action['reveal'] !== undefined
-          || action['verifiedPayload'] !== undefined)) {
-        problems.push(`action ${String(action['n'])} commitment fields require formatVersion 1.1`);
+          || action['verifiedPayload'] !== undefined
+          || action['submissionId'] !== undefined
+          || action['canonicalCommand'] !== undefined
+          || action['cursor'] !== undefined
+          || action['prevChainHash'] !== undefined
+          || action['sig'] !== undefined)) {
+        problems.push(
+          `action ${String(action['n'])} v1.1 fields require formatVersion 1.1`,
+        );
       }
       if (action['commit'] !== undefined) {
         const commit = action['commit'];
@@ -780,6 +854,11 @@ export function validateReplayArtifact(value: unknown): string[] {
           'commit',
           'reveal',
           'verifiedPayload',
+          'submissionId',
+          'canonicalCommand',
+          'cursor',
+          'prevChainHash',
+          'sig',
         ], label, problems);
         const indexes: Record<'wireId' | 'canonicalId', number | undefined> = {
           wireId: undefined,
@@ -919,6 +998,11 @@ export function validateReplayArtifact(value: unknown): string[] {
             'commit',
             'reveal',
             'verifiedPayload',
+            'submissionId',
+            'canonicalCommand',
+            'cursor',
+            'prevChainHash',
+            'sig',
           ],
           resolution: [...common, 'tick', 'inputs', 'cause', 'systemInput'],
           deadline: [...common, 'tick', 'reason'],
@@ -932,6 +1016,10 @@ export function validateReplayArtifact(value: unknown): string[] {
             'commitmentId',
             'scheme',
             'attemptedReveal',
+            'canonicalCommand',
+            'cursor',
+            'prevChainHash',
+            'sig',
           ],
         };
         if (kind !== 'action') {
@@ -1042,6 +1130,15 @@ export function validateReplayArtifact(value: unknown): string[] {
           }
         }
       }
+      if (Array.isArray(actions)) {
+        try {
+          if (canonicalJson(projectRecordActions(records)) !== canonicalJson(actions)) {
+            problems.push('actions must exactly match the projection of records');
+          }
+        } catch {
+          problems.push('actions and records must contain only plain JSON');
+        }
+      }
     }
   }
 
@@ -1085,29 +1182,11 @@ export function parseReplayJsonl<TLevel = unknown>(jsonl: string): ReplayArtifac
   const hasV11Records = isRecord(header)
     && header['formatVersion'] === GAOS_REPLAY_FORMAT_VERSION
     && stream.some((record) => isRecord(record) && record['kind'] !== 'action');
-  const projectedActions: ReplayAction[] = [];
-  for (const record of stream) {
-    if (isRecord(record) && record['kind'] === 'action') {
-      projectedActions.push(record as unknown as ReplayAction);
-    } else if (isRecord(record)
-      && record['kind'] === 'resolution'
-      && Array.isArray(record['inputs'])) {
-      for (const input of record['inputs']) {
-        if (!isRecord(input)) continue;
-        projectedActions.push({
-          ...input,
-          kind: 'action',
-          n: projectedActions.length,
-          levelIndex: record['levelIndex'] as number,
-          tick: record['tick'] as number,
-        } as unknown as ReplayAction);
-      }
-    }
-  }
+  const projectedActions = projectRecordActions(stream);
   const artifact = {
     header,
     actions: hasV11Records
-      ? projectedActions.map((action, index) => ({ ...action, n: index }))
+      ? projectedActions
       : stream,
     ...(hasV11Records ? { records: stream } : {}),
   };
@@ -1154,6 +1233,8 @@ function recheckGroupedLevel<
   const diagnostics: string[] = [];
   const commitments = new Map<string, RecordedCommitment>();
   const nextCommitmentId = new Map<string, number>();
+  const seenMismatchSubmissionIds = new Set<string>();
+  let lastResolutionTick: number | undefined;
   let state = reducer.init(level.level, level.seed);
   const records = (artifact.records ?? []).filter(
     (record) => record.levelIndex === level.index,
@@ -1293,6 +1374,7 @@ function recheckGroupedLevel<
       }
       try {
         state = advanceTick(reducer, state, inputs);
+        lastResolutionTick = resolution.tick;
       } catch (error) {
         problems.push(
           `resolution ${resolution.n} rejected on replay: `
@@ -1302,12 +1384,39 @@ function recheckGroupedLevel<
       }
     } else if (record.kind === 'commit-mismatch') {
       const key = `${record.participantId}\u0000${record.commitmentId}`;
+      const submissionKey = `${record.participantId}\u0000${record.submissionId}`;
+      let duplicate = false;
+      if (seenMismatchSubmissionIds.has(submissionKey)) {
+        problems.push(
+          `commit-mismatch record ${record.n} reuses submissionId `
+          + `${record.participantId}/${record.submissionId}`,
+        );
+        duplicate = true;
+      } else {
+        seenMismatchSubmissionIds.add(submissionKey);
+      }
+      const expectedTick = lastResolutionTick === undefined
+        ? undefined
+        : lastResolutionTick + 1;
+      if (expectedTick !== undefined && record.tick !== expectedTick) {
+        problems.push(
+          `commit-mismatch record ${record.n} tick ${record.tick} must match `
+          + `the open tick ${expectedTick}`,
+        );
+      }
       const commitment = commitments.get(key);
       if (!commitment) {
         problems.push(
           `commit-mismatch record ${record.n} references unknown commitment `
           + `${record.participantId}/${record.commitmentId}`,
         );
+      } else if (commitment.revealed) {
+        problems.push(
+          `commit-mismatch record ${record.n} references already revealed commitment `
+          + `${record.participantId}/${record.commitmentId}`,
+        );
+      } else if (duplicate) {
+        continue;
       } else if (!record.attemptedReveal) {
         diagnostics.push(
           `commit-mismatch record ${record.n} was recorded but is not independently recheckable`,
@@ -1334,8 +1443,9 @@ function recheckGroupedLevel<
               `commit-mismatch record ${record.n} is inconsistent: attempted reveal matches`,
             );
           } else {
-            problems.push(
-              `commit_mismatch: seat ${record.participantId}, commitmentId ${record.commitmentId}`,
+            diagnostics.push(
+              `verified commit_mismatch: seat ${record.participantId}, `
+              + `commitmentId ${record.commitmentId}`,
             );
           }
         } catch (error) {

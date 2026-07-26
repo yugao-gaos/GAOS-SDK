@@ -17,9 +17,12 @@ records.
 {"canonicalId":"Action 2","index":2,"kind":"action","levelIndex":0,"n":1,"wireId":"Action 2"}
 ```
 
-Property order is not semantic. `serializeReplayJsonl` emits canonical
-lexicographically ordered JSON with one trailing newline, making the exact
-artifact suitable for hashing, signing, and object storage.
+Property order is not semantic. `serializeReplayJsonl` emits canonical JSON
+whose object keys are ordered lexicographically by Unicode code point (not
+UTF-16 code unit), with one trailing newline. JSON numbers must be finite,
+and every integer-valued number must be within the JavaScript-safe range in
+both implementations. Unpaired surrogates are rejected. The resulting exact
+artifact is suitable for hashing, signing, and object storage.
 
 ## Header contract
 
@@ -131,10 +134,29 @@ if (!checked.ok) console.error(checked.problems);
 
 `checked.ok` reports demonstrated validation or simulation failures.
 `checked.diagnostics` reports evidence that is intentionally non-fatal, such
-as a redacted commitment-mismatch record whose reveal is unavailable for
-independent recomputation or salt reuse across commitments. A verifier that
-claims full independent cryptographic verification must require both
-`checked.ok` and `checked.diagnostics.length === 0`.
+as a verified commitment mismatch, a redacted mismatch whose reveal is
+unavailable for independent recomputation, or salt reuse across commitments.
+Mismatch audit records must still occur before the successful reveal at the
+open tick and may not reuse a participant's rejection submission identity.
+Repeated identical bad reveals under fresh identities are permitted.
+
+The v1.1 `deadline` and `commit-mismatch` lanes are advisory host attestation,
+not authenticated third-party evidence. Their checks detect inconsistent
+records, implementation mistakes, corruption, and simple tampering, but a
+host can still fabricate, reattribute, or delete a plausible audit story.
+`checked.ok` means replay consistency; it does not prove that audit records
+are true. Leaderboard admission and other trust decisions must not depend on
+unauthenticated v1.1 audit records. [RFC-010](/rfcs/rfc-010-submission-signatures-and-interest)
+closes this in v1.2 with per-submission signatures and per-seat chains.
+
+Checkpoint digests are advisory reconciliation evidence. The portable
+verifier cannot reconstruct a host's seat-specific `viewFor` projection, so
+it preserves checkpoint records but does not treat their digest as an
+authentication primitive.
+
+To keep v1.2 additive under the strict schema, v1.1 reserves and round-trips
+the future header roster/policy fields and submission chain/signature fields.
+The v1.1 verifier deliberately assigns them no cryptographic meaning.
 
 The checker verifies global action numbering and level ordering, per-level seed
 policy, each recorded terminal result, and aggregate totals. Problems are

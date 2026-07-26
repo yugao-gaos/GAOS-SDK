@@ -25,6 +25,15 @@ export interface JsonObject { [key: string]: JsonValue }
 
 export interface ProtocolExtensions extends JsonObject {}
 
+/**
+ * Reserved for RFC-010. v1 accepts these slots but assigns them no
+ * authentication or chain semantics.
+ */
+export interface SubmissionIntegrityReservation {
+  prevChainHash?: string;
+  sig?: string;
+}
+
 export interface TickCursor {
   /** Stable identity of this revision, unique within a session. */
   tickId: string;
@@ -62,7 +71,8 @@ export type TickResult<TObservation = unknown> =
   | PendingEnvelope<TObservation>;
 
 /** One participant's command for a specific unresolved tick. */
-export interface CommandSubmission<TCommand = unknown> extends TickCursor {
+export interface CommandSubmission<TCommand = unknown>
+  extends TickCursor, SubmissionIntegrityReservation {
   protocol: typeof PROTOCOL_ID;
   protocolVersion: typeof PROTOCOL_VERSION;
   sessionId: string;
@@ -74,7 +84,8 @@ export interface CommandSubmission<TCommand = unknown> extends TickCursor {
   extensions?: ProtocolExtensions;
 }
 
-export interface CollectedIntent<TCommand = unknown> {
+export interface CollectedIntent<TCommand = unknown>
+  extends SubmissionIntegrityReservation {
   participantId: string;
   submissionId: string;
   command: TCommand;
@@ -373,13 +384,37 @@ export function validateIntentSubmission<TCommand>(
   }
 }
 
+function assertWellFormedUnicode(value: string, label: string): void {
+  for (let index = 0; index < value.length; index++) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!Number.isInteger(next) || next < 0xdc00 || next > 0xdfff) {
+        throw new TypeError(`${label} must not contain unpaired surrogates`);
+      }
+      index++;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      throw new TypeError(`${label} must not contain unpaired surrogates`);
+    }
+  }
+}
+
 /** Reject values whose JSON serialization is lossy, ambiguous, or unsafe. */
 export function assertJsonValue(value: unknown, label = 'value'): asserts value is JsonValue {
   const active = new WeakSet<object>();
   const visit = (candidate: unknown, path: string): void => {
-    if (candidate === null || typeof candidate === 'string' || typeof candidate === 'boolean') return;
+    if (candidate === null || typeof candidate === 'boolean') return;
+    if (typeof candidate === 'string') {
+      assertWellFormedUnicode(candidate, path);
+      return;
+    }
     if (typeof candidate === 'number') {
       if (!Number.isFinite(candidate)) throw new TypeError(`${path} must contain only finite numbers`);
+      if (Number.isInteger(candidate) && !Number.isSafeInteger(candidate)) {
+        throw new TypeError(
+          `${path} integer numbers must be within the JavaScript safe range`,
+        );
+      }
       return;
     }
     if (typeof candidate !== 'object') throw new TypeError(`${path} must contain only plain JSON values`);
@@ -408,6 +443,7 @@ export function assertJsonValue(value: unknown, label = 'value'): asserts value 
           throw new TypeError(`${path} must not contain symbol keys`);
         }
         for (const key of Object.keys(candidate)) {
+          assertWellFormedUnicode(key, `${path} object key`);
           const descriptor = Object.getOwnPropertyDescriptor(candidate, key)!;
           if (!Object.hasOwn(descriptor, 'value')) {
             throw new TypeError(`${path} must contain only data properties`);
@@ -432,13 +468,26 @@ export function assertJsonObject(value: unknown, label = 'value'): asserts value
   }
 }
 
+/** Compare strings lexicographically by Unicode scalar value, not UTF-16 units. */
+function compareUnicodeCodePoints(left: string, right: string): number {
+  const leftPoints = [...left];
+  const rightPoints = [...right];
+  const length = Math.min(leftPoints.length, rightPoints.length);
+  for (let index = 0; index < length; index++) {
+    const difference = leftPoints[index]!.codePointAt(0)!
+      - rightPoints[index]!.codePointAt(0)!;
+    if (difference !== 0) return difference;
+  }
+  return leftPoints.length - rightPoints.length;
+}
+
 /** Collision-free canonical JSON used for exact retry comparison. */
 export function canonicalJson(value: unknown): string {
   assertJsonValue(value);
   const encode = (candidate: JsonValue): string => {
     if (Array.isArray(candidate)) return `[${candidate.map(encode).join(',')}]`;
     if (candidate !== null && typeof candidate === 'object') {
-      return `{${Object.keys(candidate).sort().map((key) => (
+      return `{${Object.keys(candidate).sort(compareUnicodeCodePoints).map((key) => (
         `${JSON.stringify(key)}:${encode(candidate[key]!)}`
       )).join(',')}}`;
     }

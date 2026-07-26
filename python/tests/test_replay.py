@@ -104,6 +104,125 @@ def test_v11_grouped_resolution_round_trips_and_projects_actions():
 
 
 @pytest.mark.parametrize(
+    ("input_patch", "cause", "expected"),
+    [
+        (
+            {"wireId": "Action 3", "canonicalId": "Action 3"},
+            "complete",
+            "must be within Action 1..2",
+        ),
+        (
+            {"verifiedPayload": {"amount": 1}},
+            "complete",
+            "verifiedPayload requires reveal",
+        ),
+        ({}, "deadline", "deadline cause requires systemInput"),
+    ],
+)
+def test_v11_grouped_resolution_rejects_malformed_inputs(
+    input_patch, cause, expected
+):
+    legacy = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
+    header = {**legacy["header"], "formatVersion": GAOS_REPLAY_FORMAT_VERSION}
+    source = legacy["actions"][0]
+    replay_input = {
+        key: value
+        for key, value in source.items()
+        if key not in ("kind", "n", "levelIndex", "tick")
+    }
+    replay_input.update(input_patch)
+    resolution = {
+        "kind": "resolution",
+        "n": 0,
+        "levelIndex": 0,
+        "tick": 0,
+        "inputs": [replay_input],
+        "cause": cause,
+    }
+    jsonl = canonical_json(header) + "\n" + canonical_json(resolution) + "\n"
+
+    with pytest.raises(ReplayFormatError, match=expected):
+        parse_replay_jsonl(jsonl)
+
+
+def test_v11_records_and_actions_must_have_an_exact_projection():
+    artifact = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
+    artifact["header"]["formatVersion"] = GAOS_REPLAY_FORMAT_VERSION
+    artifact["records"] = []
+
+    problems = "\n".join(validate_replay_artifact(artifact))
+    assert "actions must exactly match the projection of records" in problems
+    with pytest.raises(ReplayFormatError, match="exactly match"):
+        serialize_replay_jsonl(artifact)
+
+
+def test_schema_rejects_v11_commitment_and_deadline_shape_errors():
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    validator = Draft202012Validator(schema)
+    legacy = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
+    artifact = {
+        "header": {
+            **legacy["header"],
+            "formatVersion": GAOS_REPLAY_FORMAT_VERSION,
+        },
+        "actions": [{
+            **legacy["actions"][0],
+            "verifiedPayload": {"amount": 1},
+        }],
+        "records": [{
+            "kind": "resolution",
+            "n": 0,
+            "levelIndex": 0,
+            "tick": 0,
+            "inputs": [],
+            "cause": "deadline",
+        }],
+    }
+
+    errors = list(validator.iter_errors(artifact))
+    assert errors
+    assert any(error.absolute_path for error in errors)
+
+    legacy_with_commitment = parse_replay_jsonl(
+        FIXTURE.read_text(encoding="utf-8")
+    )
+    legacy_with_commitment["actions"][0]["commit"] = {
+        "commitmentId": 0,
+        "scheme": "gaos.commit.sha256.v1",
+        "hash": "00" * 32,
+    }
+    assert list(validator.iter_errors(legacy_with_commitment))
+
+
+def test_rfc010_reservation_slots_round_trip_without_v11_semantics():
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    validator = Draft202012Validator(schema)
+    artifact = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
+    artifact["header"]["formatVersion"] = GAOS_REPLAY_FORMAT_VERSION
+    artifact["header"]["seats"] = [{
+        "id": "red",
+        "publicKey": "reserved-key",
+        "alg": "reserved-algorithm",
+    }]
+    artifact["header"]["signaturePolicy"] = {"scheme": "reserved", "N": 8}
+    artifact["actions"][0].update({
+        "submissionId": "reserved-submission",
+        "canonicalCommand": '{"move":1}',
+        "cursor": 0,
+        "prevChainHash": "reserved-chain-link",
+        "sig": "reserved-signature",
+    })
+
+    assert validate_replay_artifact(artifact) == []
+    validator.validate(artifact)
+    assert parse_replay_jsonl(serialize_replay_jsonl(artifact)) == artifact
+
+    artifact["header"]["formatVersion"] = GAOS_REPLAY_LEGACY_FORMAT_VERSION
+    assert validate_replay_artifact(artifact)
+    assert list(validator.iter_errors(artifact))
+
+
+@pytest.mark.parametrize(
     ("value", "expected"),
     [
         (0.0, "0"),
@@ -111,13 +230,46 @@ def test_v11_grouped_resolution_round_trips_and_projects_actions():
         (1.0, "1"),
         (1e-6, "0.000001"),
         (1e-7, "1e-7"),
-        (1e20, "100000000000000000000"),
-        (1e21, "1e+21"),
         (-1.25, "-1.25"),
     ],
 )
 def test_canonical_numbers_match_json_stringify(value, expected):
     assert canonical_json(value) == expected
+
+
+@pytest.mark.parametrize(
+    "literal",
+    [
+        "9007199254740993",
+        "1000000000000000000000",
+        "-9007199254740993",
+        "1e20",
+        "1e21",
+    ],
+)
+def test_rejects_integer_literals_outside_the_javascript_safe_range(literal):
+    value = json.loads('{"value":' + literal + "}")
+    with pytest.raises(TypeError, match="JavaScript safe range"):
+        canonical_json(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "\ud800",
+        "\udfff",
+        {"\ud800": True},
+    ],
+)
+def test_rejects_unpaired_surrogates(value):
+    with pytest.raises(TypeError, match="unpaired surrogates"):
+        canonical_json(value)
+
+
+def test_accepts_equivalent_scalar_and_surrogate_pair_strings():
+    scalar = "\U0001f600"
+    surrogate_pair = "\ud83d\ude00"
+    assert canonical_json(scalar) == canonical_json(surrogate_pair)
 
 
 def test_validation_detects_tampering_and_foreign_formats():
@@ -132,6 +284,86 @@ def test_validation_detects_tampering_and_foreign_formats():
         parse_replay_jsonl(foreign)
 
 
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    [
+        (lambda value: value.update({"foreign": True}), "artifact has unknown property foreign"),
+        (
+            lambda value: value["header"].update({"foreign": True}),
+            "header has unknown property foreign",
+        ),
+        (
+            lambda value: value["header"]["game"].update({"foreign": True}),
+            "header.game has unknown property foreign",
+        ),
+        (
+            lambda value: value["header"]["levels"][0].update({"foreign": True}),
+            "level 0 has unknown property foreign",
+        ),
+        (
+            lambda value: value["actions"][0].update({"foreign": True}),
+            "action 0 has unknown property foreign",
+        ),
+        (
+            lambda value: value["header"]["levels"][0]["result"].pop("stars"),
+            "result.stars must be a finite number or null",
+        ),
+        (
+            lambda value: value["actions"][0].update({"commit": None}),
+            "invalid commitment envelope",
+        ),
+        (
+            lambda value: value["header"].update({"visibility": None}),
+            "header.visibility must be full or seat:<id>",
+        ),
+    ],
+)
+def test_python_validator_matches_strict_unknown_and_null_semantics(
+    mutation, expected
+):
+    artifact = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
+    mutation(artifact)
+    assert expected in "\n".join(validate_replay_artifact(artifact))
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value["header"]["levels"][0].update({"index": False}),
+        lambda value: value["actions"][0].update({"n": False}),
+    ],
+)
+def test_python_rejects_boolean_sequence_numbers(mutation):
+    artifact = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
+    mutation(artifact)
+    assert validate_replay_artifact(artifact)
+
+
+def test_python_rejects_boolean_v11_record_sequence_number():
+    legacy = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
+    header = {**legacy["header"], "formatVersion": GAOS_REPLAY_FORMAT_VERSION}
+    replay_input = {
+        key: value
+        for key, value in legacy["actions"][0].items()
+        if key not in ("kind", "n", "levelIndex", "tick")
+    }
+    resolution = {
+        "kind": "resolution",
+        "n": 0,
+        "levelIndex": 0,
+        "tick": 0,
+        "inputs": [replay_input],
+        "cause": "complete",
+    }
+    artifact = parse_replay_jsonl(
+        canonical_json(header) + "\n" + canonical_json(resolution) + "\n"
+    )
+    artifact["records"][0]["n"] = False
+    assert "must declare sequence number 0" in "\n".join(
+        validate_replay_artifact(artifact)
+    )
+
+
 def test_rejects_blank_lines_and_non_finite_extension_values():
     with pytest.raises(ReplayFormatError, match="line 2 must not be blank"):
         parse_replay_jsonl('{"kind":"header"}\n\n{"kind":"action"}\n')
@@ -140,3 +372,15 @@ def test_rejects_blank_lines_and_non_finite_extension_values():
     artifact["header"]["extensions"] = {"invalid": float("nan")}
     with pytest.raises(ReplayFormatError, match="finite"):
         serialize_replay_jsonl(artifact)
+
+    artifact = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
+    artifact["header"]["levels"][0]["level"]["goal"] = 1e20
+    with pytest.raises(ReplayFormatError, match="JavaScript safe range"):
+        serialize_replay_jsonl(artifact)
+
+    surrogate_jsonl = FIXTURE.read_text(encoding="utf-8").replace(
+        '"sessionId":"run-42"',
+        '"sessionId":"\\ud800"',
+    )
+    with pytest.raises(ReplayFormatError, match="unpaired surrogates"):
+        parse_replay_jsonl(surrogate_jsonl)

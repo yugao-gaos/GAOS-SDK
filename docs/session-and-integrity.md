@@ -44,7 +44,8 @@ async function persistCommitPublish<TResult>(prepared: Prepared<TResult>) {
   kernel.commit(prepared);
 
   // Publication is downstream of durable state. A send failure is retried or
-  // repaired with snapshot(seat); it must never abort the committed state.
+  // repaired with snapshot(seat, lastTransitionRevision); it must never
+  // abort the committed state.
   await publishDeltas(prepared.deltas);
   return prepared.result;
 }
@@ -82,7 +83,7 @@ Crash recovery always follows the durable log:
 - after persistence but before in-memory commit, restart with
   `rehydrateKernel(options, transcript)`—the persisted transition wins; and
 - after commit but before delivery, rehydrate the same log and retransmit or
-  send `snapshot(seat)`.
+  send `snapshot(seat, lastTransitionRevision)`.
 
 `stateIsolation.discard` owns cleanup for an aborted or stale draft and is
 called exactly once. After a successful commit, `stateIsolation.retire` owns
@@ -96,17 +97,31 @@ canonical input group and replay invokes the reducer exactly once for that
 group.
 
 Every seat has an independent `viewRevision`. Resolution increments it even
-when the seat's redacted view is unchanged. `snapshot(seat)` is the reconnect
+when the seat's redacted view is unchanged. Every observation envelope also
+carries the durable `transitionRevision` watermark. `snapshot(seat,
+afterTransitionRevision)` is the reconnect
 path; v1 observation deltas are either a complete snapshot or an unchanged
 marker. Resolution deltas also carry `acknowledgements`, the applied
 `(participantId, submissionId)` identities in canonical reducer order.
 Host-derived inputs are excluded and reconnect snapshots carry an empty list.
+At every observable state, `viewRevision(seat) === cursor()` for every seat.
 
-Prediction clients process deltas in increasing `viewRevision` order, apply
-the authoritative body, remove exact acknowledged identities from their
-pending queue, and replay the remaining pending inputs in original local
-enqueue order. A revision gap requires retransmission or snapshot/resync; it
-must not be filled by guessing.
+Rejected inputs do not advance gameplay or `viewRevision`. They produce a
+rejection-only unchanged envelope per seat at the new `transitionRevision`,
+with the rejected `(participantId, submissionId)` and `commit_mismatch` code
+in `rejections`; `AdvanceSummary.rejections` exposes the same notices as a
+convenience. Publish `prepared.deltas` only after durable commit. Clients
+remove rejected identities just as they remove applied acknowledgements and
+persist the transition watermark. After delivery failure or restart,
+`snapshot(seat, lastTransitionRevision)` reconstructs missed rejection notices
+from the durable log.
+
+Prediction clients process envelopes in increasing `transitionRevision` order
+and newer resolution bodies in increasing `viewRevision` order. They apply
+the authoritative body, remove exact acknowledged or rejected identities
+from pending, and replay the remainder in original local enqueue order.
+A view-revision gap requires retransmission or snapshot/resync; it must not
+be filled by guessing.
 
 The v0.19 kernel bounds future tick targets, catch-up work, retained receipts,
 and extension bytes. A participation window admits exactly one unresolved
@@ -114,6 +129,11 @@ intent per seat, so there is no multi-entry per-seat buffer. The client-side
 `PredictionSession` class remains deferred to v0.20 so it can be extracted
 from a working TabletopLabs migration; its acknowledgement contract is stable
 in v0.19.
+
+Receipt retention bounds stored responses, not idempotency. Once a submission
+identity has been accepted, reusing it at any later cursor returns
+`unknown_submission` even after its receipt has been evicted or its command
+was rejected before gameplay. A corrected command uses a fresh submission ID.
 
 ## Multi-level runs
 
@@ -133,7 +153,8 @@ const artifact = finalizeRunReplay(levelTranscripts, {
 ```
 
 The input list must be non-empty and ordered. Transcript `i` must use
-`runLevelSeed(runSeed, i)`; all segments share their session, game/adapter,
+`runLevelSeed(runSeed, i)` and record that concrete seed with
+`seedPolicy: 'explicit'`; all segments share their session, game/adapter,
 and dmath declaration; and every non-final segment must be won. The projection
 assigns global action/record numbers and level indices, derives aggregate
 totals, and returns an ordinary `gaos.replay` v1.1 artifact for the existing
@@ -161,8 +182,8 @@ session replay and must be constructible before re-simulation begins.
 
 | Function | Accepted domain | Accuracy/boundary rule |
 | --- | --- | --- |
-| `sin`, `cos` | finite `|x| <= 2^30` | at most 1 ulp; preserve the signed-zero sine convention |
-| `atan2` | finite `x` and `y` | at most 3 ulp; IEEE signed-zero quadrants |
+| `sin`, `cos` | finite `|x| <= 2^30` | `|x| <= 2π`: <= 1 ulp bit-distance (evidence <= 1.5 ulp real error); full domain: <= 2 ulp bit-distance; preserve the signed-zero sine convention |
+| `atan2` | finite `x` and `y` | <= 3 ulp bit-distance (evidence <= 2.818 ulp real error); IEEE signed-zero quadrants |
 | `clamp` | finite values, `lo <= hi` | exact endpoint selection |
 | `roundTo` | integer decimals `[-15, 15]`, scaled magnitude `< 2^53` | deterministic binary64, half away from zero |
 
@@ -193,15 +214,21 @@ const reveal = { commitmentId: 0, salt: saltHex, payload: hiddenOrder };
 ```
 
 The session layer verifies a reveal before the payload reaches gameplay.
-Mismatches remain outside the reducer batch and become independently
-verifiable replay audit records. The package includes three complete
+Mismatches remain outside the reducer batch and become recomputable replay
+audit records. The package includes four complete
 preimage-and-hash vectors at
 `fixtures/commitment/gaos.commit.sha256.v1.vectors.json`.
-Replay recheck results expose non-fatal `diagnostics` for redacted mismatch
-records that cannot be independently rechecked and for salt reuse across
-distinct commitments. `ok: true` means no demonstrated replay failure; a
-consumer claiming independent cryptographic verification must additionally
-require `diagnostics.length === 0`.
+Replay recheck results expose non-fatal `diagnostics` for both recomputed
+mismatch records and redacted records that cannot be recomputed, plus salt
+reuse across distinct commitments. `ok: true` means no demonstrated replay
+inconsistency.
+
+In v1.1, deadline and commitment-mismatch records remain unauthenticated host
+attestation. Rechecking proves only that recorded values form a consistent
+story; it cannot prove authorship or prevent a host from fabricating,
+reattributing, or deleting audit records. Leaderboards and third parties must
+not treat this lane as evidence until RFC-010's v1.2 submission signatures
+and per-seat chains are implemented.
 
 Live reveal processing reports salt reuse through
 `prepared.result.warnings`. It remains non-fatal because session/seat/window
@@ -215,6 +242,22 @@ Once the reducer reports `won` or `failed`, `finalizeReplay(transcript,
 options)` projects it into `gaos.replay` v1.1. Deadline, extension, checkpoint,
 grouped-resolution, and commitment-mismatch records survive in their portable
 lanes.
+
+A deadline that encounters an already-pending commitment rejection is still
+auditable: the committed event order is `deadline`, `rejection`, then
+`checkpoint`. Ordinary advance rejection uses `rejection`, then `checkpoint`,
+so every rejection precedes its transition checkpoint. The forced deadline
+input is not recorded as applied when the pending rejection prevents reducer
+execution.
+
+Hosts may import `IntentCollectionError` and its `IntentErrorCode` union from
+the `./session` subpath alongside `SessionConflictError` and
+`SessionAdvanceError`; malformed protocol commands are normalized to that
+public ingest taxonomy.
+
+The strict v1.1 replay schema reserves the RFC-010 roster, signature-policy,
+canonical-command, cursor, chain-link, and signature slots. They round-trip
+today but have no v1.1 verification semantics.
 
 See [portable replay and verification](/mechanisms/replay) for the JSONL
 format and whole-run verifier.

@@ -41,5 +41,21 @@
     "payload": ["north", { "power": 2 }],
     "preimageHex": "0000001567616f732e636f6d6d69742e7368613235362e7631000000106172656e613a6d617463682d3230323600000009626c75652e7465616d00000000ffffffff001fffffffffffff00000020ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff000000155b226e6f727468222c7b22706f776572223a327d5d",
     "hash": "aceba8001afb3bd7d672c9a3db1c67e3068e0d0f596c5bf8c2f2ff22e65a9311"
+  },
+  {
+    "name": "non-bmp-key-order",
+    "binding": {
+      "sessionId": "unicode-order",
+      "seat": "gold",
+      "commitmentId": 9,
+      "windowRef": 13
+    },
+    "salt": "0123456789abcdeffedcba9876543210",
+    "payload": {
+      "😀": "astral",
+      "": "private"
+    },
+    "preimageHex": "0000001567616f732e636f6d6d69742e7368613235362e76310000000d756e69636f64652d6f7264657200000004676f6c640000000000000009000000000000000d000000100123456789abcdeffedcba9876543210000000217b22ee8080223a2270726976617465222c22f09f9880223a2261737472616c227d",
+    "hash": "85d605ea37bda3de2ebd83dd9afe495b951763fa79d84791f9bf503dbd57aacb"
   }
 ]
