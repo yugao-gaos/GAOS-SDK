@@ -1,10 +1,20 @@
 # RFC-008 — Commit–reveal envelope for player-authored secrets
 
-Status: **implemented (rev 4, v0.19.0, 2026-07-25)**
+Status: **implemented (rev 6, v0.19.0, 2026-07-25)**
 Target: rides the gaos.replay v1.1 format bump defined by RFC-006 §D1
 Breaking: no (new optional records; strict schema extended, not loosened)
 
-Current disposition (rev 4, 2026-07-25): §§1–7 are the sole normative text. Rev 4 makes mismatch audit records independently recomputable (attemptedReveal in the rejection event, matching-hash records fail replay, redacted artifacts state their limitation) and freezes windowRef to non-negative safe integers.
+Current disposition (rev 6, 2026-07-25): §§1–7 are the sole normative text.
+Rev 6 makes the v1.1 audit lane explicitly advisory pending RFC-010,
+reserves the additive signature/chain/roster slots, permits repeated bad
+reveals under fresh submission identities, and closes canonical safe-number
+and unpaired-surrogate parity across TypeScript and Python. Rev 5 pins
+object-key collation to Unicode code-point order, adds a
+non-BMP-key cross-language vector, and rejects mismatch audits that are late,
+duplicated, or reuse a rejection submission identity. Rev 4 makes mismatch
+audit records independently recomputable (attemptedReveal in the rejection
+event, matching-hash records fail replay, redacted artifacts state their
+limitation) and freezes windowRef to non-negative safe integers.
 Rev 3 pins the exact domain-tag bytes and full preimage rules, separates
 wire-hex encoding from hashed raw bytes with a dedicated pre-hash validator,
 integrates the commit_mismatch rejection event with RFC-006 SessionEvents and
@@ -41,9 +51,11 @@ consistently before and after the reveal.
 
 ## 2. Canonical bytes and scheme
 
-- `payloadBytes = UTF8(canonicalJson(payload))` — the SDK's **existing**
-  `canonicalJson` (sorted keys, no insignificant whitespace, non-finite
-  numbers rejected). **No NFC normalization** (rev 2): strings are committed
+- `payloadBytes = UTF8(canonicalJson(payload))` — the SDK's shared
+  `canonicalJson` (object keys sorted lexicographically by Unicode code point,
+  not UTF-16 code unit; no insignificant whitespace; non-finite and
+  non-JavaScript-safe integer numbers rejected). **No NFC normalization**
+  (rev 2): strings are committed
   as their exact JSON code points; differently-normalized strings are
   different payloads, consistent with the byte-identical goal, and the
   shared helper is not forked or changed. Unpaired surrogates are rejected.
@@ -131,18 +143,38 @@ A commitment is bound to `(sessionId, seat, commitmentId, windowRef)`:
   **survives `finalizeReplay` as a `gaos.replay` v1.1 audit record**.
   Replay verification of a rejection record: look up the commitment and
   binding context, re-canonicalize and hash `attemptedReveal`, confirm the
-  computed hash **differs** from the committed hash, then report
-  `commit_mismatch`; if the values actually match, the rejection record is
-  itself inconsistent and replay fails with a distinct verifier problem.
+  computed hash **differs** from the committed hash, then report a non-fatal
+  `verified commit_mismatch` diagnostic; if the values actually match, the
+  rejection record is itself inconsistent and replay fails with a distinct
+  verifier problem. A redacted record also remains a non-fatal diagnostic,
+  explicitly marked as not independently recheckable.
+  A mismatch record must occur at the still-open tick before that commitment
+  is successfully revealed. The verifier rejects participant-scoped reuse
+  of a mismatch `submissionId`; it deliberately permits the same bad reveal
+  under a fresh identity because that is valid client retry behavior.
   Seat-scoped projections may redact another seat's rejected payload under
   normal visibility policy — such artifacts must report the rejection as
   recorded-but-not-independently-recheckable; only a full artifact
   containing the attempted reveal can claim cryptographic re-verification.
   `commit_mismatch` is (rev 2 rename):
-  **cryptographic evidence that the reveal is inconsistent with the recorded
-  commitment** — not, by itself, proof of who cheated (client bugs, storage
-  corruption, or host tampering produce the same artifact). Products
-  classify it under their own trust policy.
+  **a cryptographically recomputable mismatch between two host-recorded
+  values** — not authentication that the seat authored the reveal, and not
+  proof of who cheated (client bugs, storage corruption, fabrication, or host
+  tampering produce the same artifact). Products classify it under their own
+  trust policy.
+- **v1.1 audit trust boundary (interim):** `commit-mismatch` and `deadline`
+  records are host attestation. Their consistency checks catch implementation
+  bugs, corruption, and unsophisticated tampering; they do not authenticate
+  authorship, prevent fabrication/deletion, or prove that the host's audit
+  story is true. `ok` means the replay and any present audit records are
+  internally consistent. A leaderboard or third-party trust decision MUST
+  NOT depend on unauthenticated v1.1 audit records. RFC-010 supplies
+  per-submission signatures and per-seat hash chains in v1.2.
+- **RFC-010 reservations:** v1.1 reserves, without assigning cryptographic
+  meaning, header `seats`/`signaturePolicy`, action and resolution-input
+  `submissionId`/`canonicalCommand`/`cursor`/`prevChainHash`/`sig`, and
+  mismatch `canonicalCommand`/`cursor`/`prevChainHash`/`sig`. The strict
+  schema accepts and round-trips these slots so v1.2 remains additive.
 - Pre-reveal observation: commitments appear in every seat's view as
   `{ commitmentId, seat, scheme }` — existence is public, content is not.
   Post-reveal, payload joins the view per normal partition policy.
@@ -174,8 +206,9 @@ A commitment is bound to `(sessionId, seat, commitmentId, windowRef)`:
 ## 6. Test plan
 
 - Canonical-bytes golden vectors (code-point preservation — deliberately no
-  normalization — plus unpaired-surrogate rejection, key order, nested
-  structures, framing; vectors publish complete preimages).
+  normalization — plus unpaired-surrogate rejection, Unicode code-point key
+  order including a non-BMP/BMP-private-use pair, nested structures, framing;
+  vectors publish complete preimages).
 - Full commit→reveal→verify round-trip; tamper matrix (wrong salt, wrong
   payload, wrong window, wrong seat, replayed commitment from another
   session) — each fails with the specific expected code.
@@ -190,7 +223,9 @@ A commitment is bound to `(sessionId, seat, commitmentId, windowRef)`:
 
 1. Should `commit_mismatch` terminate replay verification or be collected
    while verification continues (auditors may want the full list)?
-   Proposal: collect and continue; `ok = false` either way.
+   Resolved: collect and continue. A verified mismatch (or a redacted record
+   that cannot be independently checked) is a diagnostic and does not make
+   `ok` false; an internally inconsistent audit record is a problem and does.
 2. Group commitments (one hash over N seats' bundled secrets for team play):
    defer until a consumer exists.
 3. Expiry: may a product declare commitments void if unrevealed after K

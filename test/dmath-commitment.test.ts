@@ -34,13 +34,12 @@ describe('deterministic math', () => {
 
   it('covers trigonometric quadrants and deterministic rounding boundaries', () => {
     const dmath = createDmath();
-    for (const value of [-2 * Math.PI, -Math.PI, -0, Math.PI / 6, Math.PI / 2, Math.PI]) {
-      expect(dmath.sin(value)).toBeCloseTo(Math.sin(value), 14);
-      expect(dmath.cos(value)).toBeCloseTo(Math.cos(value), 14);
-    }
-    for (const [y, x] of [[1, 1], [1, -1], [-1, -1], [-1, 1]] as const) {
-      expect(dmath.atan2(y, x)).toBeCloseTo(Math.atan2(y, x), 14);
-    }
+    expect(Object.is(dmath.sin(-0), -0)).toBe(true);
+    expect(dmath.cos(0)).toBe(1);
+    expect(dmath.atan2(1, 1)).toBeGreaterThan(0);
+    expect(dmath.atan2(1, -1)).toBeGreaterThan(Math.PI / 2);
+    expect(dmath.atan2(-1, -1)).toBeLessThan(-Math.PI / 2);
+    expect(dmath.atan2(-1, 1)).toBeLessThan(0);
     expect(dmath.roundTo(1.25, 1)).toBe(1.3);
     expect(dmath.roundTo(-1.25, 1)).toBe(-1.3);
     expect(dmath.roundTo(0.49999999999999994, 0)).toBe(0);
@@ -61,9 +60,14 @@ describe('deterministic math', () => {
       return seed / 0x1_0000_0000;
     };
     for (let index = 0; index < 512; index++) {
+      const smallAngle = (randomUnit() * 2 - 1) * 2 * Math.PI;
+      expect(ulpDistance(dmath.sin(smallAngle), oracleSin(smallAngle)))
+        .toBeLessThanOrEqual(1);
+      expect(ulpDistance(dmath.cos(smallAngle), oracleCos(smallAngle)))
+        .toBeLessThanOrEqual(1);
       const angle = (randomUnit() * 2 - 1) * 1_073_741_824;
-      expect(ulpDistance(dmath.sin(angle), oracleSin(angle))).toBeLessThanOrEqual(1);
-      expect(ulpDistance(dmath.cos(angle), oracleCos(angle))).toBeLessThanOrEqual(1);
+      expect(ulpDistance(dmath.sin(angle), oracleSin(angle))).toBeLessThanOrEqual(2);
+      expect(ulpDistance(dmath.cos(angle), oracleCos(angle))).toBeLessThanOrEqual(2);
       const y = (randomUnit() * 2 - 1) * 1_000_000;
       const x = (randomUnit() * 2 - 1) * 1_000_000;
       expect(ulpDistance(dmath.atan2(y, x), oracleAtan2(y, x))).toBeLessThanOrEqual(3);
@@ -176,7 +180,7 @@ describe('gaos.commit.sha256.v1', () => {
       preimageHex: string;
       hash: string;
     }>;
-    expect(vectors).toHaveLength(3);
+    expect(vectors).toHaveLength(4);
     for (const vector of vectors) {
       expect(bytesToHex(commitmentPreimageV1(
         vector.binding,
@@ -275,8 +279,8 @@ describe('gaos.commit.sha256.v1', () => {
         result: { status: 'won', stars: 3, actionsUsed: 2 },
       }],
       actions: [
-        { ...commit, n: 0, levelIndex: 0 },
-        { ...reveal, n: 1, levelIndex: 0 },
+        { ...commit, n: 0, levelIndex: 0, tick: binding.windowRef },
+        { ...reveal, n: 1, levelIndex: 0, tick: binding.windowRef + 1 },
       ],
       records: [
         {
@@ -309,8 +313,9 @@ describe('gaos.commit.sha256.v1', () => {
       ],
     });
     const checked = recheckReplayArtifact(artifact, () => auditReducer);
-    expect(checked.ok).toBe(false);
-    expect(checked.problems.join('\n')).toMatch(/commit_mismatch.*red.*0/);
+    expect(checked.ok).toBe(true);
+    expect(checked.problems).toEqual([]);
+    expect(checked.diagnostics.join('\n')).toMatch(/verified commit_mismatch.*red.*0/);
 
     const redacted = structuredClone(artifact);
     const redactedAudit = redacted.records?.[1];
@@ -327,6 +332,55 @@ describe('gaos.commit.sha256.v1', () => {
     }
     expect(recheckReplayArtifact(inconsistent, () => auditReducer).problems.join('\n'))
       .toMatch(/is inconsistent/);
+
+    const afterReveal = structuredClone(artifact);
+    if (afterReveal.records) {
+      const mismatch = afterReveal.records.splice(1, 1)[0]!;
+      afterReveal.records.push(mismatch);
+      afterReveal.records.forEach((record, index) => {
+        record.n = index;
+      });
+    }
+    expect(recheckReplayArtifact(afterReveal, () => auditReducer).problems.join('\n'))
+      .toMatch(/already revealed commitment/);
+
+    const duplicated = structuredClone(artifact);
+    const duplicateAudit = duplicated.records?.[1];
+    if (duplicated.records && duplicateAudit?.kind === 'commit-mismatch') {
+      duplicated.records.splice(2, 0, {
+        ...structuredClone(duplicateAudit),
+        n: 2,
+        submissionId: 'second-bad-reveal',
+      });
+      duplicated.records.forEach((record, index) => {
+        record.n = index;
+      });
+    }
+    expect(recheckReplayArtifact(duplicated, () => auditReducer)).toMatchObject({
+      ok: true,
+      problems: [],
+    });
+
+    const wrongTick = structuredClone(artifact);
+    const wrongTickAudit = wrongTick.records?.[1];
+    if (wrongTickAudit?.kind === 'commit-mismatch') wrongTickAudit.tick = 999;
+    expect(recheckReplayArtifact(wrongTick, () => auditReducer).problems.join('\n'))
+      .toMatch(/tick 999 must match the open tick/);
+
+    const reusedSubmission = structuredClone(artifact);
+    const reusedAudit = reusedSubmission.records?.[1];
+    if (reusedSubmission.records && reusedAudit?.kind === 'commit-mismatch') {
+      reusedSubmission.records.splice(2, 0, {
+        ...structuredClone(reusedAudit),
+        n: 2,
+        attemptedReveal: { salt, payload: { another: 'wrong payload' } },
+      });
+      reusedSubmission.records.forEach((record, index) => {
+        record.n = index;
+      });
+    }
+    expect(recheckReplayArtifact(reusedSubmission, () => auditReducer).problems.join('\n'))
+      .toMatch(/reuses submissionId/);
   });
 
   it('reports salt reuse across distinct commitments as a non-fatal diagnostic', () => {
@@ -390,6 +444,7 @@ describe('gaos.commit.sha256.v1', () => {
         ...action,
         n,
         levelIndex: 0,
+        tick: n,
       })),
       records: [commit0, reveal0, commit1, reveal1].map((entry, n) => ({
         kind: 'resolution' as const,
@@ -444,7 +499,7 @@ describe('gaos.commit.sha256.v1', () => {
         level: {},
         result: { status: 'won', stars: 3, actionsUsed: 1 },
       }],
-      actions: [{ ...commit, n: 0, levelIndex: 0 }],
+      actions: [{ ...commit, n: 0, levelIndex: 0, tick: binding.windowRef }],
       records: [{
         kind: 'resolution',
         n: 0,

@@ -162,6 +162,44 @@ describe('portable GAOS replay JSONL', () => {
       .toContain('action 0 has unknown property extra');
   });
 
+  it('rejects inconsistent grouped records instead of discarding gameplay', () => {
+    const artifact = structuredClone(runArtifact());
+    artifact.header.formatVersion = '1.1';
+    artifact.records = [];
+
+    expect(validateReplayArtifact(artifact).join('\n'))
+      .toMatch(/actions must exactly match the projection of records/);
+    expect(() => serializeReplayJsonl(artifact))
+      .toThrow(/actions must exactly match the projection of records/);
+  });
+
+  it('preserves the unimplemented RFC-010 integrity reservation slots', () => {
+    const reserved = structuredClone(runArtifact());
+    reserved.header.seats = [{
+      id: 'red',
+      publicKey: 'reserved-key',
+      alg: 'reserved-algorithm',
+    }];
+    reserved.header.signaturePolicy = { scheme: 'reserved', N: 8 };
+    Object.assign(reserved.actions[0]!, {
+      submissionId: 'reserved-submission',
+      canonicalCommand: '{"move":1}',
+      cursor: 0,
+      prevChainHash: 'reserved-chain-link',
+      sig: 'reserved-signature',
+    });
+
+    expect(validateReplayArtifact(reserved)).toEqual([]);
+    const parsed = parseReplayJsonl(serializeReplayJsonl(reserved));
+    expect(parsed).toEqual(reserved);
+
+    const legacy = structuredClone(reserved);
+    legacy.header.formatVersion = '1.0';
+    expect(validateReplayArtifact(legacy).join('\n')).toMatch(
+      /integrity reservations require|v1\.1 fields require/,
+    );
+  });
+
   it('rejects v1.0 commitment fields and aborts before reducer resolution for unknown dmath', () => {
     const legacy = structuredClone(runArtifact());
     legacy.header.formatVersion = '1.0';
@@ -171,7 +209,7 @@ describe('portable GAOS replay JSONL', () => {
       hash: '00'.repeat(32),
     };
     expect(validateReplayArtifact(legacy).join('\n'))
-      .toMatch(/commitment fields require formatVersion 1.1/);
+      .toMatch(/v1\.1 fields require formatVersion 1.1/);
 
     const unsupported = structuredClone(runArtifact());
     unsupported.header.extensions = {
@@ -267,5 +305,13 @@ describe('portable GAOS replay JSONL', () => {
     const foreign = serializeReplayJsonl(artifact)
       .replace('"format":"gaos.replay"', '"format":"vendor.replay"');
     expect(() => parseReplayJsonl(foreign)).toThrow(/header\.format must be gaos\.replay/);
+
+    const unsafe = structuredClone(runArtifact());
+    unsafe.header.levels[0]!.level.goal = Number.MAX_SAFE_INTEGER + 1;
+    expect(() => serializeReplayJsonl(unsafe)).toThrow(/JavaScript safe range/);
+
+    const surrogate = structuredClone(runArtifact());
+    surrogate.header.sessionId = '\ud800';
+    expect(() => serializeReplayJsonl(surrogate)).toThrow(/unpaired surrogates/);
   });
 });
