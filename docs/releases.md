@@ -10,7 +10,9 @@ resolved implementation scope of
 [RFC-010](/rfcs/rfc-010-submission-signatures-and-interest), including the
 Arena and TabletopLabs migration returns. **Not released and not tagged.**
 Consumers mid-migration should stay on the `v0.19.0` tag until this ships and
-is announced (RFC-009 §4.3).
+is announced (RFC-009 §4.3). The tag gate includes fresh Arena and
+TabletopLabs repin checks plus production of a locally verified signed
+artifact; repository tests alone do not satisfy RFC-010 §C4 adoption.
 
 - `gaos.replay` v1.2 assigns cryptographic meaning to the reserved integrity
   slots: canonical Ed25519 submission envelopes, roster-bound per-seat
@@ -24,7 +26,8 @@ is announced (RFC-009 §4.3).
   `unverifiable`, while mismatches are `rejected`;
 - tick-bounded timeout policy uses
   `{ mode: 'ticks', windowTicks: N }` and fixes timeout position at
-  `windowRef + N`; wall-clock fairness remains outside the artifact;
+  `windowRef + N`; wall-clock fairness remains outside the artifact. Unsigned
+  sessions retain the v0.19 opaque timeout-policy reservation;
 - TypeScript uses async WebCrypto signing plus synchronous pure-JS
   verification; the zero-dependency Python package signs and verifies the same
   published complete-preimage vectors;
@@ -45,6 +48,11 @@ is announced (RFC-009 §4.3).
 - reducer legality runs before durable ingest, invalid views are typed/fail
   fast, action `payload` round-trips through replay, repair envelopes declare
   their origin, and play-all-level run composition is explicit;
+- generic infrastructure accepts the minimal `SessionView`; existing
+  action-oriented reducers keep `TickView`, while non-grid observations supply
+  replay counters through `replayMetrics` instead of manufacturing a HUD;
+- seat-local chooser/dialogue navigation is explicitly host/UI state, while
+  confirmation enters the deterministic kernel as an ordinary SDK action;
 - `awaitingSeats`, resolved duplicate receipts, `sessionHeaderFor`, and
   event-array rehydration remove loops reported by both production hosts.
 

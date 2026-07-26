@@ -6,7 +6,8 @@ database, network, timer, or deployment platform.
 
 Version 0.20 adds the migration-informed completion: pre-ingest legality,
 named interest scopes, bounded patch delivery, explicit repair envelopes,
-product action payloads, and host recovery/inspection helpers.
+product action payloads, generic non-grid session views, and host
+recovery/inspection helpers.
 
 ## Persist before publish
 
@@ -175,6 +176,33 @@ wedge a participation window. Reducer views must be canonically encodable:
 construction fails fast for a bad initial view, while later failures are
 classified as `SessionAdvanceError('invalid_view')`.
 
+Session, replay, lockstep, interest, and observation delivery require only
+`SessionView`: lifecycle plus optional participation/outcome metadata.
+`TickView extends SessionView` remains the action-discovery compatibility
+shape used by agents and solvers. A reducer whose observation has no
+`actions`, `hud`, `grid`, or `zones` extends `SessionView` directly and supplies
+the pure deterministic counter:
+
+```ts
+const reducer = {
+  // init, advance, view...
+  replayMetrics: (state) => ({ actionsUsed: state.acceptedCommands }),
+};
+```
+
+Existing `TickView` reducers need no change; when `replayMetrics` is absent,
+the SDK reads `view.hud.actionsUsed`. The explicit seam prevents products with
+ECS or other non-grid observations from manufacturing empty action lists or a
+fake HUD merely to use authoritative sessions and portable replay.
+
+Chooser focus, an open dialogue, highlighted targets, and cancellation are
+host/UI state. They must not mutate reducer state or advance `cursor` or
+`viewRevision`. Confirming a choice constructs a normal command and enters
+through `prepareIngest`; only its deterministic resolution changes simulation
+state. Any purported UI state that affects legality, RNG, turn order,
+authoritative observations, or later results is simulation input and must be
+recorded as an action.
+
 The kernel bounds future tick targets, catch-up work, retained receipts,
 and extension bytes. A participation window admits exactly one unresolved
 intent per seat, so there is no multi-entry per-seat buffer. The client-side
@@ -186,6 +214,9 @@ Receipt retention bounds stored responses, not idempotency. Once a submission
 identity has been accepted, reusing it at any later cursor returns
 `unknown_submission` even after its receipt has been evicted or its command
 was rejected before gameplay. A corrected command uses a fresh submission ID.
+The kernel therefore retains one idempotency key per accepted gameplay or
+interest submission for the session lifetime. Operators sizing long-running
+sessions must budget this independently of `receiptRetention`.
 
 ## Multi-level runs
 
@@ -321,6 +352,12 @@ A mismatch rejects the artifact; an unavailable function prevents a
 Before that tick, an incomplete policy-bound window remains open; at or past
 the deadline, `prepareAdvance` refuses to suppress the timeout and requires
 `prepareTimeout`. A complete window may still resolve early.
+
+The v0.19 unsigned reservation remains compatible: without a signing roster,
+`timeoutPolicy` is an opaque canonical JSON object and a non-empty
+`timeoutPolicyRef` is preserved without assigning positional semantics.
+Supplying `seatKeys` and `signaturePolicy` opts into the strict v1.2 policy
+shape above.
 
 Live reveal processing reports salt reuse through
 `prepared.result.warnings`. It remains non-fatal because session/seat/window

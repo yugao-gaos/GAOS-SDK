@@ -26,7 +26,9 @@ export type {
   Reducer,
   ReplayArtifact,
   ReplayGameRef,
+  ReplayMetrics,
   ReplaySeedPolicy,
+  SessionView,
   SubmittedAction,
   TickRate,
   TickView,
@@ -42,6 +44,7 @@ import {
   createCommitmentHash,
   createReplayArtifact,
   fnv1a,
+  replayMetricsFor,
   runLevelSeed,
   signatureBytesFromBase64,
   submissionRosterHashV1,
@@ -50,6 +53,7 @@ import {
   type Reducer,
   type ReplayArtifact,
   type ReplayGameRef,
+  type ReplayMetrics,
   type ReplayRecord,
   type ReplayResolutionInput,
   type ReplaySeedPolicy,
@@ -59,6 +63,7 @@ import {
   type SubmissionSeatKey,
   type SubmissionSignaturePolicy,
   type SubmittedAction,
+  type SessionView,
   type TickRate,
   type TickView,
   type TranscriptVisibility,
@@ -134,7 +139,7 @@ export interface SessionKernelOptions<
   TLevel,
   TState,
   TCommand extends JsonValue,
-  TView extends TickView<unknown, unknown>,
+  TView extends SessionView,
 > {
   sessionId: string;
   game: ReplayGameRef;
@@ -156,8 +161,11 @@ export interface SessionKernelOptions<
    * Ordering always uses tick/cursor/transitionRevision, never this clock.
    */
   hostTime: (() => number) | 'none';
-  /** Tick-bounded v1.2 policy. Turns mode intentionally has no positional proof. */
-  timeoutPolicy?: ReplayTickTimeoutPolicy;
+  /**
+   * Opaque v0.19 reservation in unsigned sessions. Signed v1.2 sessions
+   * assign tick-bounded semantics to `{ mode: 'ticks', windowTicks: N }`.
+   */
+  timeoutPolicy?: JsonObject | ReplayTickTimeoutPolicy;
   /** Pure, versioned adapter used to derive every timeout system action. */
   timeoutToAction?: {
     bivarianceHack(
@@ -190,7 +198,7 @@ export interface SessionHeader<TLevel = unknown> {
   cadence:
     | { mode: 'turns' }
     | { mode: 'ticks'; ticksPerSecond: number };
-  timeoutPolicy?: ReplayTickTimeoutPolicy;
+  timeoutPolicy?: JsonObject | ReplayTickTimeoutPolicy;
   seatKeys?: readonly SubmissionSeatKey[];
   signaturePolicy?: SubmissionSignaturePolicy;
   dmath?: {
@@ -410,7 +418,7 @@ export interface TimeoutInput {
   participantId?: string | null;
   /** `elapsed`, `disconnect`, or a product-defined non-empty reason. */
   reason: string;
-  /** Must be `header.timeoutPolicy` when the header declares a policy. */
+  /** Must be `header.timeoutPolicy` for a signed tick-bounded policy. */
   timeoutPolicyRef?: string;
 }
 
@@ -491,11 +499,11 @@ interface PreparedState<TState, TCommand extends JsonValue, TView> {
   noop: boolean;
 }
 
-export interface Prepared<TResult> {
+export interface Prepared<TResult, TView = TickView<unknown, unknown>> {
   readonly baseTransitionRevision: number;
   readonly nextTransitionRevision: number;
   readonly events: readonly SessionEvent[];
-  readonly deltas: readonly ObservationDelta[];
+  readonly deltas: readonly ObservationDelta<TView>[];
   readonly result: TResult;
   /** Opaque package-owned transition payload. */
   readonly [preparedTransition]: unknown;
@@ -552,17 +560,17 @@ export class SessionAdvanceError extends Error {
 }
 
 export interface SessionKernel<TCommand extends JsonValue, TView> {
-  prepareIngest(submission: CommandSubmission<TCommand>): Prepared<IngestReceipt>;
-  prepareAdvance(target?: number): Prepared<AdvanceSummary<TView>>;
+  prepareIngest(submission: CommandSubmission<TCommand>): Prepared<IngestReceipt, TView>;
+  prepareAdvance(target?: number): Prepared<AdvanceSummary<TView>, TView>;
   prepareTimeout(
     timeout: TimeoutInput,
     forcedInput?: SubmittedAction,
-  ): Prepared<AdvanceSummary<TView>>;
-  prepareExtension(lane: string, record: JsonObject): Prepared<void>;
-  prepareInterest(submission: InterestSubmission): Prepared<InterestReceipt>;
-  prepareSeatSignature(input: SeatSignatureInput): Prepared<void>;
-  commit(prepared: Prepared<unknown>): void;
-  abort(prepared: Prepared<unknown>): void;
+  ): Prepared<AdvanceSummary<TView>, TView>;
+  prepareExtension(lane: string, record: JsonObject): Prepared<void, TView>;
+  prepareInterest(submission: InterestSubmission): Prepared<InterestReceipt, TView>;
+  prepareSeatSignature(input: SeatSignatureInput): Prepared<void, TView>;
+  commit(prepared: Prepared<unknown, TView>): void;
+  abort(prepared: Prepared<unknown, TView>): void;
   observe(seat: string, scopeId?: string): TView;
   observeAll(): Readonly<Record<string, TView>>;
   awaitingSeats(): readonly string[];
@@ -597,6 +605,14 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function isReplayTickTimeoutPolicy(value: unknown): value is ReplayTickTimeoutPolicy {
+  return isObjectRecord(value)
+    && value.mode === 'ticks'
+    && Number.isSafeInteger(value.windowTicks)
+    && (value.windowTicks as number) > 0
+    && Object.keys(value).every((key) => key === 'mode' || key === 'windowTicks');
+}
+
 function deepFreeze<T>(value: T, maximumObjects = 100_000): T {
   if (value === null || typeof value !== 'object') return value;
   const pending: object[] = [value];
@@ -618,7 +634,7 @@ function deepFreeze<T>(value: T, maximumObjects = 100_000): T {
   return value;
 }
 
-function participantsForView<TView extends TickView<unknown, unknown>>(
+function participantsForView<TView extends SessionView>(
   view: TView,
   fallback: readonly string[],
 ): string[] {
@@ -706,7 +722,7 @@ export function sessionHeaderFor<
   TLevel,
   TState,
   TCommand extends JsonValue,
-  TView extends TickView<unknown, unknown>,
+  TView extends SessionView,
 >(
   options: SessionKernelOptions<TLevel, TState, TCommand, TView>,
 ): SessionHeader<TLevel> {
@@ -746,12 +762,13 @@ class SessionKernelImpl<
   TLevel,
   TState,
   TCommand extends JsonValue,
-  TView extends TickView<unknown, unknown>,
+  TView extends SessionView,
 > implements SessionKernel<TCommand, TView> {
   private readonly owner = {};
   private readonly isolation: SessionStateIsolation<TState>;
   private readonly limits: Required<SessionLimits>;
   private readonly header: SessionHeader<TLevel>;
+  private readonly tickTimeoutPolicy: ReplayTickTimeoutPolicy | undefined;
   private readonly observationCodec: Required<ObservationCodecV2Options> | 'v1';
   /** O(1) permanent idempotency index, rebuilt from durable accepted events. */
   private readonly historicalSubmissionKeys = new Set<string>();
@@ -781,26 +798,27 @@ class SessionKernelImpl<
     if (options.hostTime !== 'none' && typeof options.hostTime !== 'function') {
       throw new TypeError("hostTime must be a UTC epoch-millisecond provider or 'none'");
     }
+    this.tickTimeoutPolicy = undefined;
     if (options.timeoutPolicy !== undefined) {
-      if (!isObjectRecord(options.timeoutPolicy)
-        || options.timeoutPolicy.mode !== 'ticks'
-        || !Number.isSafeInteger(options.timeoutPolicy.windowTicks)
-        || options.timeoutPolicy.windowTicks <= 0
-        || Object.keys(options.timeoutPolicy).some(
-          (key) => key !== 'mode' && key !== 'windowTicks',
-        )) {
+      if (!isObjectRecord(options.timeoutPolicy)) {
+        throw new TypeError('timeoutPolicy must be an object');
+      }
+      canonicalJson(options.timeoutPolicy);
+      if (options.seatKeys !== undefined && !isReplayTickTimeoutPolicy(options.timeoutPolicy)) {
         throw new TypeError(
-          'timeoutPolicy must be { mode: "ticks", windowTicks: positiveInteger }',
+          'signed timeoutPolicy must be { mode: "ticks", windowTicks: positiveInteger }',
         );
       }
-      if (options.cadence.mode !== 'ticks') {
-        throw new TypeError('tick-bounded timeoutPolicy requires ticks cadence');
-      }
-      if (options.seatKeys === undefined) {
-        throw new TypeError('tick-bounded timeoutPolicy requires a v1.2 signing roster');
-      }
-      if (typeof options.timeoutToAction !== 'function') {
-        throw new TypeError('tick-bounded timeoutPolicy requires timeoutToAction');
+      if (options.seatKeys !== undefined) {
+        this.tickTimeoutPolicy = structuredClone(
+          options.timeoutPolicy,
+        ) as unknown as ReplayTickTimeoutPolicy;
+        if (options.cadence.mode !== 'ticks') {
+          throw new TypeError('tick-bounded timeoutPolicy requires ticks cadence');
+        }
+        if (typeof options.timeoutToAction !== 'function') {
+          throw new TypeError('tick-bounded timeoutPolicy requires timeoutToAction');
+        }
       }
     }
     if (options.timeoutToAction !== undefined && typeof options.timeoutToAction !== 'function') {
@@ -880,6 +898,15 @@ class SessionKernelImpl<
     }
     this.header = sessionHeaderFor(options);
     const initialView = options.reducer.view(initialState);
+    try {
+      replayMetricsFor(options.reducer, initialState, initialView);
+    } catch (error) {
+      throw new TypeError(
+        `reducer replay metrics are invalid (${error instanceof Error
+          ? error.message
+          : String(error)})`,
+      );
+    }
     const participants = this.validatedParticipantsForView(initialView);
     const views = new Map<string, TView>();
     const viewCanonical = new Map<string, string>();
@@ -932,6 +959,19 @@ class SessionKernelImpl<
     return this.options.reducer.viewFor
       ? this.options.reducer.viewFor(state, seat)
       : this.options.reducer.view(state);
+  }
+
+  private replayMetrics(state: TState, view: TView): ReplayMetrics {
+    try {
+      return replayMetricsFor(this.options.reducer, state, view);
+    } catch (error) {
+      throw new SessionAdvanceError(
+        'invalid_view',
+        `reducer replay metrics are invalid (${error instanceof Error
+          ? error.message
+          : String(error)})`,
+      );
+    }
   }
 
   private encodedObservation(
@@ -1053,7 +1093,7 @@ class SessionKernelImpl<
     deltas: ObservationDelta<TView>[],
     result: TResult,
     noop = false,
-  ): Prepared<TResult> {
+  ): Prepared<TResult, TView> {
     const base = this.live.transitionRevision;
     const nextRevision = noop ? base : base + 1;
     const events = rawEvents.map((raw, index): SessionEvent => {
@@ -1103,7 +1143,7 @@ class SessionKernelImpl<
   }
 
   private preparedState(
-    prepared: Prepared<unknown>,
+    prepared: Prepared<unknown, TView>,
     allowAborted = false,
   ): PreparedState<TState, TCommand, TView> {
     const value = prepared?.[preparedTransition] as
@@ -1121,7 +1161,7 @@ class SessionKernelImpl<
     return value;
   }
 
-  prepareIngest(submission: CommandSubmission<TCommand>): Prepared<IngestReceipt> {
+  prepareIngest(submission: CommandSubmission<TCommand>): Prepared<IngestReceipt, TView> {
     if (submission === null || typeof submission !== 'object' || Array.isArray(submission)) {
       throw new IntentCollectionError('invalid_submission', 'submission must be an object');
     }
@@ -1511,6 +1551,7 @@ class SessionKernelImpl<
     draft.cursor++;
     draft.tick++;
     const view = this.options.reducer.view(draft.reducerState);
+    const replayMetrics = this.replayMetrics(draft.reducerState, view);
     const deltas: ObservationDelta<TView>[] = [];
     for (const seat of this.options.seats) {
       const next = this.viewFor(draft.reducerState, seat);
@@ -1570,7 +1611,7 @@ class SessionKernelImpl<
         result: {
           status: view.status,
           stars: view.stars ?? null,
-          actionsUsed: view.hud.actionsUsed,
+          actionsUsed: replayMetrics.actionsUsed,
         },
       },
       deltas,
@@ -1651,7 +1692,7 @@ class SessionKernelImpl<
       : []);
   }
 
-  prepareAdvance(target?: number): Prepared<AdvanceSummary<TView>> {
+  prepareAdvance(target?: number): Prepared<AdvanceSummary<TView>, TView> {
     const draft = this.forkLive();
     const rawEvents: RawSessionEvent[] = [];
     const deltas: ObservationDelta<TView>[] = [];
@@ -1679,8 +1720,8 @@ class SessionKernelImpl<
         const ready = draft.window.participants.every(
           (seat) => Object.hasOwn(draft.window.intents, seat),
         );
-        if (this.header.timeoutPolicy !== undefined && !ready) {
-          const deadline = draft.tick + this.header.timeoutPolicy.windowTicks;
+        if (this.tickTimeoutPolicy !== undefined && !ready) {
+          const deadline = draft.tick + this.tickTimeoutPolicy.windowTicks;
           if (target >= deadline) {
             throw new SessionAdvanceError(
               'not_ready',
@@ -1732,7 +1773,7 @@ class SessionKernelImpl<
           resolutions++;
         }
         if (this.options.reducer.view(draft.reducerState).status !== 'playing') break;
-        if (this.header.timeoutPolicy !== undefined
+        if (this.tickTimeoutPolicy !== undefined
           && !draft.window.participants.every(
             (seat) => Object.hasOwn(draft.window.intents, seat),
           )) {
@@ -1764,7 +1805,7 @@ class SessionKernelImpl<
   prepareTimeout(
     timeout: TimeoutInput,
     forcedInput?: SubmittedAction,
-  ): Prepared<AdvanceSummary<TView>> {
+  ): Prepared<AdvanceSummary<TView>, TView> {
     if (!isObjectRecord(timeout)) {
       throw new TypeError('timeout must be an object');
     }
@@ -1779,13 +1820,8 @@ class SessionKernelImpl<
         || timeout.timeoutPolicyRef.length === 0)) {
       throw new TypeError('timeoutPolicyRef must be a non-empty string');
     }
-    const policy = this.header.timeoutPolicy;
+    const policy = this.tickTimeoutPolicy;
     if (policy === undefined) {
-      if (timeout.timeoutPolicyRef !== undefined) {
-        throw new SessionConflictError(
-          'timeoutPolicyRef requires a declared timeout policy',
-        );
-      }
       if (!Number.isSafeInteger(timeout.tick) || timeout.tick !== this.live.tick) {
         throw new SessionAdvanceError('stale_target', 'timeout tick must equal the open tick');
       }
@@ -1929,7 +1965,7 @@ class SessionKernelImpl<
     }
   }
 
-  prepareExtension(lane: string, record: JsonObject): Prepared<void> {
+  prepareExtension(lane: string, record: JsonObject): Prepared<void, TView> {
     if (this.options.reducer.view(this.live.reducerState).status !== 'playing') {
       throw new SessionAdvanceError('terminal', 'session is already terminal');
     }
@@ -1957,7 +1993,7 @@ class SessionKernelImpl<
     }
   }
 
-  prepareInterest(submission: InterestSubmission): Prepared<InterestReceipt> {
+  prepareInterest(submission: InterestSubmission): Prepared<InterestReceipt, TView> {
     if (this.options.interest === undefined) {
       throw new SessionConflictError('session has no interest policy');
     }
@@ -2111,7 +2147,7 @@ class SessionKernelImpl<
     }
   }
 
-  prepareSeatSignature(input: SeatSignatureInput): Prepared<void> {
+  prepareSeatSignature(input: SeatSignatureInput): Prepared<void, TView> {
     if (this.header.signaturePolicy === undefined) {
       throw new SessionConflictError('session has no RFC-010 signature policy');
     }
@@ -2143,7 +2179,7 @@ class SessionKernelImpl<
     }
   }
 
-  commit(prepared: Prepared<unknown>): void {
+  commit(prepared: Prepared<unknown, TView>): void {
     const state = this.preparedState(prepared);
     if (prepared.baseTransitionRevision !== this.live.transitionRevision) {
       state.completion = 'aborted';
@@ -2181,7 +2217,7 @@ class SessionKernelImpl<
     this.isolation.retire?.(previous);
   }
 
-  abort(prepared: Prepared<unknown>): void {
+  abort(prepared: Prepared<unknown, TView>): void {
     const state = this.preparedState(prepared, true);
     if (state.completion === 'aborted') return;
     state.completion = 'aborted';
@@ -2499,7 +2535,7 @@ export function createSessionKernel<
   TLevel,
   TState,
   TCommand extends JsonValue,
-  TView extends TickView<unknown, unknown>,
+  TView extends SessionView,
 >(
   options: SessionKernelOptions<TLevel, TState, TCommand, TView>,
 ): SessionKernel<TCommand, TView> {
@@ -2511,7 +2547,7 @@ export function rehydrateKernel<
   TLevel,
   TState,
   TCommand extends JsonValue,
-  TView extends TickView<unknown, unknown>,
+  TView extends SessionView,
 >(
   options: SessionKernelOptions<TLevel, TState, TCommand, TView>,
   transcript: SessionTranscript<TLevel> | readonly SessionEvent[],
@@ -2581,14 +2617,18 @@ function validateTimeoutAudit(
           || event.timeoutPolicyRef.length === 0)) {
         throw new TypeError('timeout audit event timeoutPolicyRef must be non-empty');
       }
-      if (header.timeoutPolicy === undefined) {
-        if (event.timeoutPolicyRef !== undefined || event.tick !== event.windowRef) {
+      const policy = header.seatKeys !== undefined
+        && isReplayTickTimeoutPolicy(header.timeoutPolicy)
+        ? header.timeoutPolicy
+        : undefined;
+      if (policy === undefined) {
+        if (event.tick !== event.windowRef) {
           throw new TypeError(
-            'timeout without a declared policy must identify the open tick',
+            'timeout without a tick-bounded policy must identify the open tick',
           );
         }
       } else if (event.timeoutPolicyRef !== GAOS_TIMEOUT_POLICY_REF
-        || event.tick !== event.windowRef + header.timeoutPolicy.windowTicks) {
+        || event.tick !== event.windowRef + policy.windowTicks) {
         throw new TypeError(
           'timeout must occur at the declared header timeout-policy position',
         );

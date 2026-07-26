@@ -42,7 +42,7 @@ export interface GridViewNamespace {
   actionTargeting?: Readonly<Record<string, { targetableCells: readonly Cell[] }>>;
 }
 
-/** Minimum observation surface used by the generic solver and replay checker. */
+/** Spatial observation surface used by the generic solver. */
 export type GridTargetingView =
   GridViewNamespace | Readonly<Record<string, GridViewNamespace>>;
 
@@ -84,18 +84,10 @@ export type Outcome =
   };
 
 /**
- * Observation produced after one deterministic simulation tick.
- *
- * A product may map one player turn to one tick. A real-time product may
- * advance the same contract at a fixed cadence such as 30 ticks/s.
+ * Minimum observation surface required by session, replay, and lockstep
+ * infrastructure. Products with non-grid observations extend this directly.
  */
-export interface TickView<
-  TGrid = GridTargetingView,
-  TZones = ZoneViews,
-> {
-  actions: readonly ActionDefinition[];
-  /** Semantic host controls, separate from hidden/state-filtered gameplay actions. */
-  systemActions?: readonly ActionDefinition[];
+export interface SessionView {
   status: 'playing' | 'won' | 'failed';
   stars?: number;
   /** Active player/agent seat. Absent retains the single-seat behavior. */
@@ -104,6 +96,29 @@ export interface TickView<
   participation?: Participation;
   /** Multi-seat result. `status` remains the required solo compatibility view. */
   outcome?: Outcome;
+}
+
+/** Product-owned replay counters that do not belong in an observation HUD. */
+export interface ReplayMetrics {
+  actionsUsed: number;
+}
+
+/**
+ * Observation produced after one deterministic simulation tick.
+ *
+ * A product may map one player turn to one tick. A real-time product may
+ * advance the same contract at a fixed cadence such as 30 ticks/s.
+ *
+ * This action-discovery shape remains the compatibility default. Products
+ * without actions, HUD, grids, or zones may extend `SessionView` instead.
+ */
+export interface TickView<
+  TGrid = GridTargetingView,
+  TZones = ZoneViews,
+> extends SessionView {
+  actions: readonly ActionDefinition[];
+  /** Semantic host controls, separate from hidden/state-filtered gameplay actions. */
+  systemActions?: readonly ActionDefinition[];
   hud: {
     actionsUsed: number;
     items?: ReadonlyArray<{ index: number }>;
@@ -124,12 +139,17 @@ export interface TickView<
 interface ReducerBase<
   TLevel,
   TState,
-  TView extends TickView<unknown, unknown> = TickView,
+  TView extends SessionView = TickView,
 > {
   init(level: TLevel, seed: number): TState;
   view(state: TState): TView;
   /** Optional per-seat observation. Absent means perfect information. */
   viewFor?(state: TState, seat: string): TView;
+  /**
+   * Pure replay counters for views without `hud.actionsUsed`.
+   * Existing `TickView` reducers inherit the HUD value when this is absent.
+   */
+  replayMetrics?(state: TState): ReplayMetrics;
   /** Reject an action before it is durably admitted to the participation window. */
   validateCommand?(state: TState, seat: string, action: SubmittedAction): void;
 }
@@ -144,7 +164,7 @@ interface ReducerBase<
 export interface TickReducer<
   TLevel,
   TState,
-  TView extends TickView<unknown, unknown> = TickView,
+  TView extends SessionView = TickView,
 > extends ReducerBase<TLevel, TState, TView> {
   advance(state: TState, inputs: readonly SubmittedAction[]): TState;
 }
@@ -153,7 +173,7 @@ export interface TickReducer<
 export interface ActionReducer<
   TLevel,
   TState,
-  TView extends TickView<unknown, unknown> = TickView,
+  TView extends SessionView = TickView,
 > extends ReducerBase<TLevel, TState, TView> {
   apply(state: TState, action: SubmittedAction): TState;
   /** Optional atomic batch resolver for simultaneous participation. */
@@ -164,7 +184,7 @@ export interface ActionReducer<
 export type Reducer<
   TLevel,
   TState,
-  TView extends TickView<unknown, unknown> = TickView,
+  TView extends SessionView = TickView,
 > =
   | TickReducer<TLevel, TState, TView>
   | ActionReducer<TLevel, TState, TView>;
@@ -173,7 +193,7 @@ export type Reducer<
 export function advanceTick<
   TLevel,
   TState,
-  TView extends TickView<unknown, unknown>,
+  TView extends SessionView,
 >(
   reducer: Reducer<TLevel, TState, TView>,
   state: TState,
@@ -190,6 +210,31 @@ export function advanceTick<
     );
   }
   throw new TypeError('multi-input ticks require TickReducer.advance or reducer.applyIntents');
+}
+
+/**
+ * Read and validate the deterministic replay counter for a reducer state.
+ * Action-discovery reducers retain the legacy `view.hud.actionsUsed` fallback.
+ */
+export function replayMetricsFor<
+  TLevel,
+  TState,
+  TView extends SessionView,
+>(
+  reducer: Reducer<TLevel, TState, TView>,
+  state: TState,
+  view: TView = reducer.view(state),
+): ReplayMetrics {
+  const actionsUsed = reducer.replayMetrics === undefined
+    ? (view as SessionView & { hud?: { actionsUsed?: unknown } }).hud?.actionsUsed
+    : reducer.replayMetrics(state).actionsUsed;
+  if (!Number.isSafeInteger(actionsUsed) || (actionsUsed as number) < 0) {
+    throw new TypeError(
+      'reducer replayMetrics().actionsUsed or view.hud.actionsUsed '
+      + 'must be a non-negative safe integer',
+    );
+  }
+  return { actionsUsed: actionsUsed as number };
 }
 
 /** @deprecated Renamed to `ActionDefinition`; this alias will be removed in v1.0. */

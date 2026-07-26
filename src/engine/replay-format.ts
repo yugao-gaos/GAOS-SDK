@@ -6,9 +6,10 @@ import {
 } from '../protocol.js';
 import {
   advanceTick,
+  replayMetricsFor,
   type Reducer,
+  type SessionView,
   type SubmittedAction,
-  type TickView,
 } from './contracts.js';
 import {
   COMMITMENT_SCHEME,
@@ -392,7 +393,7 @@ export interface ReplaySemanticAdapter<TLevel> {
 export type ReplayReducerResolver<
   TLevel,
   TState,
-  TView extends TickView<unknown, unknown>,
+  TView extends SessionView,
 > = (context: ReplayReducerContext<TLevel>) => Reducer<TLevel, TState, TView> | undefined;
 
 export interface ReplayArtifactRecheckOptions<TLevel, TState> {
@@ -2250,7 +2251,7 @@ interface RecordedCommitment {
 function recheckGroupedLevel<
   TLevel,
   TState,
-  TView extends TickView<unknown, unknown>,
+  TView extends SessionView,
 >(
   artifact: ReplayArtifact<TLevel>,
   level: ReplayLevelRecord<TLevel>,
@@ -2486,15 +2487,23 @@ function recheckGroupedLevel<
     }
   }
   const view = reducer.view(state);
+  let actionsUsed = -1;
+  try {
+    actionsUsed = replayMetricsFor(reducer, state, view).actionsUsed;
+  } catch (error) {
+    problems.push(
+      `replay metrics: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   if (view.status !== level.result.status) {
     problems.push(`status: recorded ${level.result.status}, replayed ${view.status}`);
   }
   if ((view.stars ?? null) !== level.result.stars) {
     problems.push(`stars: recorded ${level.result.stars}, replayed ${view.stars ?? null}`);
   }
-  if (view.hud.actionsUsed !== level.result.actionsUsed) {
+  if (actionsUsed >= 0 && actionsUsed !== level.result.actionsUsed) {
     problems.push(
-      `actionsUsed: recorded ${level.result.actionsUsed}, replayed ${view.hud.actionsUsed}`,
+      `actionsUsed: recorded ${level.result.actionsUsed}, replayed ${actionsUsed}`,
     );
   }
   return {
@@ -2504,7 +2513,7 @@ function recheckGroupedLevel<
     replayed: {
       status: view.status,
       stars: view.stars ?? null,
-      actionsUsed: view.hud.actionsUsed,
+      actionsUsed,
     },
   };
 }
@@ -2517,7 +2526,7 @@ function recheckGroupedLevel<
 export function recheckReplayArtifact<
   TLevel,
   TState,
-  TView extends TickView<unknown, unknown>,
+  TView extends SessionView,
 >(
   artifact: ReplayArtifact<TLevel>,
   resolveReducer: ReplayReducerResolver<TLevel, TState, TView>,

@@ -1,13 +1,25 @@
 # Implementation review — RFC-010 completion (`52fa4a1`)
 
+> **Post-review disposition (2026-07-26).** The implementation follow-up closes
+> the D5 end-to-end test gap, documents immutable roster/key lifecycle and the
+> lifetime idempotency index, preserves the v0.19 opaque timeout reservation,
+> and resolves E1/E4. E1 is the additive `SessionView`/`TickView` split plus
+> `replayMetrics`; Arena confirmed E4 chooser/dialogue navigation is UI-only
+> and confirmation produces a normal SDK action. The original review is kept
+> below as review history, but its unconditional “drop-in” and “ship now”
+> wording is superseded: exhaustive TypeScript consumers can still observe
+> widened unions, and RFC-010 §C4 still requires both product repins and signed
+> artifact adoption before tagging.
+
 Reviewed at `52fa4a1` against RFC-010 Parts A–E. Health: `tsc --noEmit` clean,
 vitest **277 passed / 3 skipped**, pytest **72 passed / 4 skipped**.
 
-**Verdict: ship v0.20.** Every item is implemented, the two things I expected
-to be wrong turned out to be right, and **v0.20 is a drop-in upgrade from
-v0.19.0** — no required option was added, `observationCodec` defaults to `'v1'`,
-and everything else is optional or additive on return types. One real finding
-remains (a test gap in D5) plus two open items; nothing blocks the release.
+**Verdict at that commit: ship the resolved v0.20 scope.** Every then-resolved
+implementation item was present, the two things I expected to be wrong turned
+out to be right, and the default runtime path remained compatible with
+v0.19.0—no required option was added and `observationCodec` defaults to `'v1'`.
+One real finding remained (a test gap in D5), while E1 and E4 were still
+explicit design holds.
 
 *Findings 1 and 3 were raised in the first pass and are withdrawn below, with
 the reasoning that was wrong left in place rather than deleted.*
@@ -49,7 +61,7 @@ three states are genuinely separable and the host no longer infers anything.
 
 ## Findings
 
-### 1 — WITHDRAWN · "No v0.19.x line" — v0.20 is a drop-in, so no patch line is needed
+### 1 — WITHDRAWN · "No v0.19.x line" — no maintained patch line is needed
 
 *This review originally raised the absence of a `v0.19.x` branch as a HIGH
 finding: D1/D2/D3/D5 were classified as baseline-line fixes, three of them
@@ -72,13 +84,16 @@ a consumer pinned at `v0.19.0`:
   cost.
 - v1.0/v1.1 artifacts still parse; the golden fixture is byte-untouched.
 
-**v0.20 is therefore a drop-in upgrade from v0.19.0**, and the freeze's purpose
-is satisfied by that fact rather than by a version number. A v0.19.1 would
-protect nobody from anything and would cost a maintained branch, a second
-cherry-pick target, and a narrowed `origin` union.
+The default runtime path is therefore compatible with v0.19.0, and a
+maintained patch line would add little value. The follow-up also restores the
+v0.19 behavior of unsigned opaque `timeoutPolicy` declarations and references.
+This does not prove zero source changes for every TypeScript consumer:
+`ObservationDelta.codec` and `SessionEvent` are widened unions, so exhaustive
+switches must be checked by the actual product builds.
 
-**Ship v0.20.** Consumers re-pin `#v0.19.0` → `#v0.20.0` and get the
-migration-blocking fixes with no code change on their side.
+Consumers re-pin `#v0.19.0` → the v0.20 release candidate and run their own
+typecheck/integration suites before the tag. No separate v0.19.x branch is
+required.
 
 *Lesson for RFC-009 §4.3: its patch-vs-v0.20 classification tacitly assumed
 v0.20 would be a reshaping release. It came out additive, so the two branches
@@ -86,7 +101,7 @@ of that rule collapsed into one. The rule should be restated in terms of the
 observable question — "does a pinned consumer have to change code?" — not in
 terms of which release the change lands in.*
 
-### 2 — MEDIUM · D5's test asserts the artifact *builds*, not that it is *correct*
+### 2 — RESOLVED · D5 now rechecks the artifact and aggregate totals
 
 `test/rfc010-completion.test.ts:410–458` keeps the ladder default
 (`.toThrow(/must be won/)`) and asserts the policy projects
@@ -104,9 +119,9 @@ its `actionsUsed` still counts, which is Arena's *total stars, then total
 turns* ranking. **If that aggregation were wrong for a failed non-final level,
 Arena's paid ranking would be silently wrong and this test would still pass.**
 
-**Fix:** recheck the produced artifact and assert `totalStars` /
-`totalActionsUsed` against hand-computed values for a run with a failed
-non-final level.
+The follow-up rechecks the produced artifact and asserts hand-computed
+`totalStars` / `totalActionsUsed` for two failed levels. It also asserts the
+independently replayed totals and statuses.
 
 ### 3 — WITHDRAWN · D1's `'interest'` union value
 
@@ -115,22 +130,18 @@ Part B, `origin: 'interest'` would be a union member that could never occur.
 With no v0.19.1, D1 and Part B ship together and the value is always reachable.
 No change needed.
 
-### 4 — LOW · §A3's open items are still open, with the code now shipped
+### 4 — RESOLVED · §A3 roster lifecycle is now a host obligation
 
-Unchanged from the previous review: key rotation mid-session, seat
-reassignment, and lost keys carry *proposals* in §A3 ("forbid in v1", "a
-reassignment is a new session") but nothing implements or documents them —
-confirmed by grep across `src/` and the trust docs. Part A is now built around
-a roster whose lifecycle rules are undecided. Either enforce the proposals or
-write them down as host obligations before calling Part A done.
+The trust documentation now fixes the v1 rule: the roster is immutable; key
+rotation or seat reassignment starts a new session; a lost private key cannot
+be replaced in-session; unsigned continuation is product policy and loses a
+complete trusted chain. Spectators need no key, while bots occupying seats do.
 
-### 5 — INFO · `historicalSubmissionKeys` grows for the session's lifetime
+### 5 — RESOLVED (documentation) · `historicalSubmissionKeys` grows for the session's lifetime
 
-An add-only unbounded `Set` (`:757`). This is the cost of the
-already-shipped "accepted submission IDs remain permanently non-reusable"
-property, not a regression, and it is load-bearing for finding-1-adjacent
-correctness (see the F7 note above). Worth one line in the host obligations
-doc so operators sizing long sessions know it is per-submission memory.
+The session guide now states that `receiptRetention` does not bound the
+lifetime idempotency index and that hosts must budget one retained key per
+accepted gameplay or interest submission.
 
 ### 6 — INFO · Commit hygiene
 
@@ -143,13 +154,8 @@ reviewer re-derives intent that the author already had.
 
 ## Recommendation
 
-**Release v0.20.** No patch line, no cherry-picks, no maintained branch. Both
-consumers re-pin `#v0.19.0` → `#v0.20.0` and get all four migration-blocking
-fixes with no code change on their side.
-
-Do finding 2 first — it is a short test and it covers the assertion D5's whole
-justification rests on. Findings 4 (roster lifecycle) and 5 (unbounded
-`historicalSubmissionKeys`) are documentation and can ride the same release.
-
-Nothing implemented needs reworking. The source is in good shape, and F7 is
-better than the RFC asked for.
+No patch line, cherry-picks, or maintained branch are needed. The repository
+implementation and documentation findings are closed. Before tagging, Arena
+and TabletopLabs must re-pin the release candidate, run their real integration
+suites, adopt client-side signing, and produce locally verified trusted
+artifacts as required by RFC-010 §C4.

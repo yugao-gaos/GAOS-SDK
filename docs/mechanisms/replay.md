@@ -291,7 +291,8 @@ After replay it compares:
 
 - status;
 - stars, normalizing absent values to `null`; and
-- `hud.actionsUsed`.
+- deterministic `actionsUsed`, supplied by `reducer.replayMetrics(state)` or,
+  for compatibility `TickView` reducers, by `view.hud.actionsUsed`.
 
 The returned `replayed` summary is available whether verification succeeds or
 fails.

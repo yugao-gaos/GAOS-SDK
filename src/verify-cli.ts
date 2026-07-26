@@ -6,7 +6,7 @@ import {
   recheckReplayArtifact,
   type ReplayArtifactRecheckOptions,
   type ReplayReducerResolver,
-  type TickView,
+  type SessionView,
 } from './engine/index.js';
 
 export interface VerifyCliIo {
@@ -16,8 +16,8 @@ export interface VerifyCliIo {
 }
 
 interface AdapterModule {
-  resolveReplayReducer?: ReplayReducerResolver<unknown, unknown, TickView>;
-  default?: ReplayReducerResolver<unknown, unknown, TickView>;
+  resolveReplayReducer?: ReplayReducerResolver<unknown, unknown, SessionView>;
+  default?: ReplayReducerResolver<unknown, unknown, SessionView>;
   semanticAdapterForLevel?: ReplayArtifactRecheckOptions<
     unknown,
     unknown

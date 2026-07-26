@@ -1,8 +1,8 @@
 # RFC-010 — Submission signatures, audit chains, and generic interest management
 
 Status: **Parts A and B plus the resolved D/E implementation scope are
-implemented for v0.20 development (2026-07-26); E1 and E4 remain explicit
-design holds** · Target: v0.20 · Breaking: no (additive; requires the baseline
+implemented for v0.20 development (2026-07-26); E1 and E4 are now resolved
+additively** · Target: v0.20 · Breaking: no (additive; requires the baseline
 field reservations) ·
 Depends on: RFC-006, RFC-008, and **baseline T2 closed**
 
@@ -92,12 +92,12 @@ policy and stays out of the SDK, exactly as authentication does in RFC-006 §2.
   signs the roster with a service key; a third party may pin it; a casual
   host may publish it unsigned). The SDK reports *what the roster says* and
   whether submissions match it — never who the seats "really are".
-- Open items to specify: key rotation mid-session (proposal: forbid in v1;
-  a rotation is a new session), lost keys, spectators (no key needed — they
-  submit nothing), **agents/bots** (an evaluation driver is a seat and needs
-  a key, which makes benchmark runs signable — a mission win worth calling
-  out), seat reassignment (proposal: a reassignment is a roster change and
-  therefore a new session in v1).
+- The v1 roster is immutable. Key rotation or seat reassignment starts a new
+  session with a new roster and chain genesis. A lost private key cannot be
+  replaced in-session; product policy may reject further input or accept an
+  unsigned continuation, which loses a complete trusted chain. Spectators
+  need no key because they submit nothing. **Agents/bots** occupying seats do
+  need keys, making benchmark runs signable.
 
 ## A4. Scheme
 
@@ -1273,9 +1273,23 @@ The consumer explicitly did not ask for a baseline change here, citing RFC-009's
 own reasoning that a moving contract under two in-flight migrations doubles
 everyone's work. That restraint is correct and worth naming.
 
-**Disposition: hold for a second data point.** One consumer satisfying a
-contract vacuously is a smell; two is a shape problem. Revisit if Arena reports
-friction in the same place.
+**Disposition (resolved 2026-07-26): split infrastructure from action
+discovery without changing the compatibility default.** `SessionView` is the
+minimum lifecycle/participation surface used by sessions, replay, lockstep,
+interest, and observation codecs. `TickView extends SessionView` retains
+`actions`, `hud`, `grid`, `zones`, and `targetChoices` for existing reducers,
+agents, and solvers.
+
+Replay exposed one deeper coupling: `actionsUsed` was read directly from
+`view.hud`. Reducers whose observations do not have a HUD now provide the pure
+`replayMetrics(state)` seam; existing `TickView` reducers fall back to
+`view.hud.actionsUsed`. TabletopLabs can therefore expose its ECS world
+directly without fake action or HUD fields, while every existing reducer
+continues to typecheck unchanged.
+
+This remains additive because reducer generics still default to `TickView`,
+and action-enumerating APIs continue to require it. Only infrastructure that
+does not inspect action-discovery fields accepts `SessionView`.
 
 ## E2 — Snapshot cost measured; §3.3 resolves for the patch codec
 
@@ -1481,6 +1495,19 @@ candidate directions, unresolved and stated as such:
 anything.** The answer determines whether v0.20 needs a new transition class or
 whether this is host-side presentation state that never belonged in the kernel.
 
+**Disposition (Arena answer, 2026-07-26): option 2.** Opening, navigating, and
+cancelling a chooser or dialogue are pure UI state and must not mutate
+simulation state. Confirming an option produces an ordinary SDK action; that
+action enters through `prepareIngest` and changes state only during the
+resulting deterministic reducer resolution.
+
+No new kernel transition class is needed. UI activity advances neither
+`cursor` nor `viewRevision`, so the equality invariant remains intact. Hosts
+must not let unconfirmed chooser state affect legality, RNG, turn order,
+authoritative observations, or any later reducer result. If a future product
+needs such an effect, it is simulation input and must be represented as a
+recorded action rather than reclassified as seat-local control.
+
 ## E5 — Durable event size, joined to E2
 
 *Source: Arena (F3). Same family as E2, measured on a different axis — Arena
@@ -1572,8 +1599,8 @@ cause — the kernel holds the answer and makes the host re-derive it.*
 | D3 `./session` re-exports | TTL | packaging | v0.19.x |
 | D5 `advancePolicy` for non-ladder runs | Arena | blocks migration | v0.19.x |
 | **E3 post-commit wedge (legality seam + view classification)** | Arena | contract gap | **v0.20 — highest value** |
-| E4 seat-local state transitions | Arena | design input | v0.20, question first |
-| E1 `TickView` shape | TTL | shape smell | v0.20, hold for 2nd voice |
+| E4 seat-local state transitions | Arena | design input | v0.20, resolved host-side |
+| E1 `TickView` shape | TTL | shape smell | v0.20, additive split |
 | E2 + E5 representation cost | both | measured | v0.20, patch codec + docs |
 | E6 host ergonomics ×4 | Arena | papercuts | v0.20, small |
 
@@ -1582,9 +1609,10 @@ E5's storage guidance, and E6 are implemented on the v0.20 development line.
 The reproducible `npm run observations:benchmark` synthetic check changes one
 entity in 50/200/500-entity views and currently measures about
 31×/124×/315× fewer canonical bytes at 0.8/2.2/5.6 ms encoding after warm-up.
-E1 still lacks the RFC's required second consumer signal. E4 remains a
-question for Arena—whether chooser/dialogue state affects simulation—and no
-new state-changing transition class is invented until that answer exists.
+E1 is implemented as the additive `SessionView`/`TickView` split with an
+explicit `replayMetrics` seam for non-HUD observations. Arena resolved E4:
+unconfirmed chooser/dialogue state is presentation-only, while confirmation
+enters the kernel as an ordinary action. No new transition class is needed.
 
 **If only one item is taken from either migration, take E3.** Both consumers
 independently hit the same class — a failure discovered after durable commit

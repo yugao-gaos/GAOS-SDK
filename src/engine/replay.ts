@@ -1,8 +1,9 @@
 import {
   advanceTick,
+  replayMetricsFor,
   type Reducer,
+  type SessionView,
   type SubmittedAction,
-  type TickView,
 } from './contracts.js';
 import type { LocationRef } from './locations.js';
 import type { JsonValue } from '../protocol.js';
@@ -54,7 +55,7 @@ export interface RecheckOptions<TState> {
 }
 
 /** Re-simulate a transcript and compare its deterministic recorded outcome. */
-export function recheckTranscript<TLevel, TState, TView extends TickView<unknown, unknown>>(
+export function recheckTranscript<TLevel, TState, TView extends SessionView>(
   reducer: Reducer<TLevel, TState, TView>,
   header: TranscriptHeader<TLevel>,
   actions: TranscriptAction[],
@@ -221,6 +222,14 @@ export function recheckTranscript<TLevel, TState, TView extends TickView<unknown
   }
 
   const view = reducer.view(state);
+  let actionsUsed = -1;
+  try {
+    actionsUsed = replayMetricsFor(reducer, state, view).actionsUsed;
+  } catch (error) {
+    problems.push(
+      `replay metrics: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   if (replayError) problems.push(replayError);
   if (view.status !== header.status) {
     problems.push(`status: recorded ${header.status}, replayed ${view.status}`);
@@ -228,8 +237,8 @@ export function recheckTranscript<TLevel, TState, TView extends TickView<unknown
   if ((view.stars ?? null) !== header.stars) {
     problems.push(`stars: recorded ${header.stars}, replayed ${view.stars ?? null}`);
   }
-  if (view.hud.actionsUsed !== header.actionsUsed) {
-    problems.push(`actionsUsed: recorded ${header.actionsUsed}, replayed ${view.hud.actionsUsed}`);
+  if (actionsUsed >= 0 && actionsUsed !== header.actionsUsed) {
+    problems.push(`actionsUsed: recorded ${header.actionsUsed}, replayed ${actionsUsed}`);
   }
 
   return {
@@ -239,7 +248,7 @@ export function recheckTranscript<TLevel, TState, TView extends TickView<unknown
     replayed: {
       status: view.status,
       stars: view.stars ?? null,
-      actionsUsed: view.hud.actionsUsed,
+      actionsUsed,
     },
   };
 }

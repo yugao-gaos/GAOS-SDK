@@ -10,8 +10,9 @@ Portable replay now adds roster-bound Ed25519 submission chains and explicit
 
 ## v0.20.0 — signed portable evidence
 
-Implementation completed July 26, 2026 after Arena and TabletopLabs returned
-their v0.19 integration findings; release remains untagged.
+Implementation candidate completed July 26, 2026 after Arena and TabletopLabs
+returned their v0.19 integration findings; release remains untagged pending
+consumer repin and signed-artifact adoption checks.
 
 - `gaos.replay` v1.2 validates and verifies
   `gaos.submission.ed25519.v1`, with canonical command/cursor/time material for
@@ -40,6 +41,12 @@ their v0.19 integration findings; release remains untagged.
   repair origins, opaque product action payloads, pre-ingest legality, typed
   view failures, play-all-level runs, and host recovery helpers incorporate
   the two product migrations' concrete findings.
+- `SessionView` separates generic lifecycle observations from the
+  action/grid-shaped `TickView`; non-HUD reducers report deterministic replay
+  counters through `replayMetrics`, while existing reducers remain unchanged.
+- Arena chooser and dialogue navigation is classified as host/UI state.
+  Confirmed choices become normal SDK actions, so no seat-local state-changing
+  kernel transition or revision exception is introduced.
 
 [Trust and verification →](/trust-and-verification) ·
 [Portable replay →](/mechanisms/replay)

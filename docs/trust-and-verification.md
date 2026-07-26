@@ -66,6 +66,15 @@ therefore breaks the existing chains. Binding a key to an account or person is
 still product policy; the SDK proves possession of the listed key, not a
 real-world identity.
 
+The roster is immutable for the life of a v1 session. Key rotation or seat
+reassignment starts a new session with a new roster and new chain genesis;
+hosts must not rewrite an existing header. A lost private key cannot be
+recovered or replaced inside the session. The host may reject further input or
+accept an unsigned continuation according to product policy, but the resulting
+artifact cannot retain a complete trusted chain for that seat. Spectators do
+not submit and therefore need no seat key; an agent or bot occupying a seat
+does.
+
 Commit and reveal submissions always require direct signatures. Ordinary
 high-rate submissions may advance the chain without a direct signature, with a
 signed chain head required within the seat's declared `N`. A

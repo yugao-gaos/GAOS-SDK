@@ -10,6 +10,7 @@ import {
   SUBMISSION_SIGNATURE_ALGORITHM,
   exportSubmissionPublicKey,
   generateSubmissionKeyPair,
+  recheckReplayArtifact,
   recheckReplaySignatures,
   runLevelSeed,
   signSubmissionV1,
@@ -17,6 +18,7 @@ import {
   submissionGenesisHashV1,
   submissionRosterHashV1,
   type ReplayGameRef,
+  type SessionView,
   type TickReducer,
   type TickView,
 } from '../src/engine/index.js';
@@ -43,6 +45,9 @@ interface View extends TickView {
   entities: ReadonlyArray<{ id: string; value: number }>;
   catalog: Readonly<Record<string, string>>;
   private?: { owner: string; value: string };
+}
+interface EcsView extends SessionView {
+  world: ReadonlyArray<{ entityId: string; value: number }>;
 }
 type Command = { amount: number };
 
@@ -131,6 +136,98 @@ async function signedOptions() {
 describe('RFC-010 completed migration-informed scope', () => {
   it('re-exports the session construction surface at runtime', () => {
     expect(createTickRate(20).ticksPerSecond).toBe(20);
+  });
+
+  it('supports non-grid session views through explicit replay metrics', () => {
+    const ecsReducer: TickReducer<Level, State, EcsView> = {
+      init: () => ({ total: 0, actionsUsed: 0 }),
+      advance: (state, inputs) => ({
+        total: state.total + inputs.length,
+        actionsUsed: state.actionsUsed + inputs.length,
+      }),
+      replayMetrics: (state) => ({ actionsUsed: state.actionsUsed }),
+      view: (state) => ({
+        status: state.total > 0 ? 'won' : 'playing',
+        ...(state.total > 0 ? { stars: 2 } : {}),
+        world: [{ entityId: 'piece-1', value: state.total }],
+      }),
+    };
+    const options: SessionKernelOptions<Level, State, Command, EcsView> = {
+      sessionId: 'rfc010-ecs-view',
+      game,
+      levelId: 'ecs',
+      reducer: ecsReducer,
+      level: { goal: 1 },
+      seed: 11,
+      seedPolicy: 'explicit',
+      seats: ['alpha'],
+      cadence: { mode: 'turns' },
+      hostTime: 'none',
+      commandToAction: (command) => ({
+        id: 'Action 1',
+        payload: structuredClone(command),
+      }),
+    };
+    const kernel = createSessionKernel(options);
+    expect(kernel.observe('alpha')).toEqual({
+      status: 'playing',
+      world: [{ entityId: 'piece-1', value: 0 }],
+    });
+    expect(kernel.observe('alpha')).not.toHaveProperty('actions');
+    expect(kernel.observe('alpha')).not.toHaveProperty('hud');
+
+    const ingest = kernel.prepareIngest({
+      protocol: PROTOCOL_ID,
+      protocolVersion: PROTOCOL_VERSION,
+      sessionId: options.sessionId,
+      tickId: makeTickId(options.sessionId, 0),
+      revision: 0,
+      participantId: 'alpha',
+      submissionId: 'ecs-command',
+      command: { amount: 1 },
+    });
+    kernel.commit(ingest);
+    const advance = kernel.prepareAdvance();
+    expect(advance.events.find((event) => event.kind === 'resolution'))
+      .toMatchObject({ result: { status: 'won', stars: 2, actionsUsed: 1 } });
+    kernel.commit(advance);
+
+    const artifact = finalizeReplay(kernel.liveTranscript(), { perm: [0] });
+    const checked = recheckReplayArtifact(artifact, () => ecsReducer);
+    expect(checked.ok).toBe(true);
+    expect(checked.replayed).toEqual({
+      statuses: ['won'],
+      totalStars: 2,
+      totalActionsUsed: 1,
+    });
+  });
+
+  it('preserves the v0.19 opaque timeout reservation for unsigned sessions', async () => {
+    const { options } = await signedOptions();
+    const legacy = createSessionKernel({
+      ...options,
+      interest: undefined,
+      seatKeys: undefined,
+      signaturePolicy: undefined,
+      observationCodec: 'v1',
+      timeoutPolicy: { policy: 'product.timeout.v0', graceMs: 2_000 },
+    });
+    expect(legacy.sessionHeader().timeoutPolicy).toEqual({
+      policy: 'product.timeout.v0',
+      graceMs: 2_000,
+    });
+    const timeout = legacy.prepareTimeout({
+      timeoutId: 'legacy-timeout',
+      tick: 0,
+      participantId: 'alpha',
+      reason: 'elapsed',
+      timeoutPolicyRef: 'product.timeout.v0',
+    }, {
+      id: 'Action 1',
+      payload: { amount: 1 },
+    });
+    expect(timeout.events.find((event) => event.kind === 'timeout'))
+      .toMatchObject({ timeoutPolicyRef: 'product.timeout.v0' });
   });
 
   it('escapes JSON Pointer paths, replaces arrays atomically, and blocks prototype paths', () => {
@@ -450,10 +547,22 @@ describe('RFC-010 completed migration-informed scope', () => {
       seed: 0,
       perm: [0],
     })).toThrow(/must be won/);
-    expect(finalizeRunReplay(transcripts, {
+    const artifact = finalizeRunReplay(transcripts, {
       seed: 0,
       perm: [0],
       advancePolicy: 'play-all-levels',
-    }).header.levels).toHaveLength(2);
+    });
+    expect(artifact.header.levels).toHaveLength(2);
+    expect(artifact.header.totals).toEqual({
+      totalStars: 0,
+      totalActionsUsed: 2,
+    });
+    const checked = recheckReplayArtifact(artifact, () => failedReducer);
+    expect(checked.ok).toBe(true);
+    expect(checked.replayed).toEqual({
+      statuses: ['failed', 'failed'],
+      totalStars: 0,
+      totalActionsUsed: 2,
+    });
   });
 });
