@@ -10,9 +10,9 @@ session guide contains the normative host sequence and
 crash/ownership rules; v1.1 audit records are explicitly advisory host
 attestation with additive RFC-010 integrity slots reserved; and N1–N5 plus
 their evidence suites are closed. The final freeze also adopts the
-`timeout` API/wire vocabulary, advisory session `hostTime`, and additive
-RFC-010 `seatKeys`, `clientTime`, timeout-policy, and periodic-signature
-reservations.
+`timeout` API/wire vocabulary, an explicit host clock-or-`'none'` policy with
+optional advisory session `hostTime`, and additive RFC-010 `seatKeys`,
+`clientTime`, timeout-policy, and periodic-signature reservations.
 
 ## 1. Problem
 

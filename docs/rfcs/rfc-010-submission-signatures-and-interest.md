@@ -172,6 +172,11 @@ Three constraints ship with it:
    Document that it leaks behavioural signal — thinking time, time zone,
    activity hours — since mandatory means products cannot opt out.
 
+`clientTime` and an optional host-provided `hostTime` use the same UTC epoch.
+They are therefore mutually checkable for clock-skew diagnostics and weak
+network-delay bounds, strengthening §A9c.4 without turning either clock into
+an authority. Neither value is used to order the durable transcript.
+
 Agents and bots sign with a `clientTime` like anyone else. It carries no
 fairness meaning for a batch evaluation, but a uniform rule beats an
 exception.
@@ -812,3 +817,9 @@ will otherwise trip over it during migration.
 Projection is opt-in through `FinalizeOptions` and off by default: the host
 already owns its clock and can sidecar timestamps in its own storage, so the
 artifact should carry them only when a consumer explicitly wants pacing data.
+
+The kernel itself never reads a clock. `SessionKernelOptions.hostTime` is a
+required explicit choice: `() => Date.now()` supplies UTC epoch milliseconds,
+while `'none'` omits the field. `performance.now()` is not an epoch clock.
+Ordering remains `tick`/`cursor`/`transitionRevision`; `hostTime` may move
+backwards after clock correction and MUST NOT be used for sorting.

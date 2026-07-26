@@ -82,8 +82,13 @@ export interface SessionKernelOptions<
     | { mode: 'turns' }
     | { mode: 'ticks'; rate: TickRate };
   commandToAction(command: TCommand, context: CommandContext): SubmittedAction;
-  /** Host UTC-millisecond clock used only to annotate durable session events. */
-  hostTime?: () => number;
+  /**
+   * Required host timestamp policy. A provider returns UTC epoch
+   * milliseconds (`Date.now()` is suitable; `performance.now()` is not).
+   * Use `'none'` for byte-reproducible transcripts with no timestamp field.
+   * Ordering always uses tick/cursor/transitionRevision, never this clock.
+   */
+  hostTime: (() => number) | 'none';
   /** Reserved timeout-policy declaration; v0.19 assigns no policy semantics. */
   timeoutPolicy?: JsonObject;
   dmath?: Dmath;
@@ -115,7 +120,7 @@ interface SessionEventBase {
   eventId: string;
   transitionRevision: number;
   /** Advisory host UTC milliseconds; never reducer input or authentication evidence. */
-  hostTime: number;
+  hostTime?: number;
 }
 
 export interface CanonicalInput extends SubmissionIntegrityReservation {
@@ -433,6 +438,10 @@ function actionCopy(action: SubmittedAction): SubmittedAction {
   return structuredClone(action);
 }
 
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 function deepFreeze<T>(value: T, maximumObjects = 100_000): T {
   if (value === null || typeof value !== 'object') return value;
   const pending: object[] = [value];
@@ -514,6 +523,9 @@ class SessionKernelImpl<
     }
     if (options.cadence.mode === 'ticks' && !('advance' in options.reducer)) {
       throw new TypeError('ticks cadence requires TickReducer.advance');
+    }
+    if (options.hostTime !== 'none' && typeof options.hostTime !== 'function') {
+      throw new TypeError("hostTime must be a UTC epoch-millisecond provider or 'none'");
     }
     if (options.timeoutPolicy !== undefined
       && (options.timeoutPolicy === null
@@ -599,7 +611,7 @@ class SessionKernelImpl<
       nextCommitmentIds: new Map(),
       seenSalts: new Map(),
     };
-    if (transcript) this.rehydrate(transcript);
+    if (transcript !== undefined) this.rehydrate(transcript);
   }
 
   private viewFor(state: TState, seat: string): TView {
@@ -666,15 +678,19 @@ class SessionKernelImpl<
     const base = this.live.transitionRevision;
     const nextRevision = noop ? base : base + 1;
     const events = rawEvents.map((raw, index): SessionEvent => {
-      const hostTime = this.options.hostTime?.() ?? Date.now();
-      if (!Number.isSafeInteger(hostTime) || hostTime < 0) {
-        throw new RangeError('hostTime must be non-negative UTC milliseconds');
+      let hostTime: number | undefined;
+      if (this.options.hostTime !== 'none') {
+        const providedHostTime = this.options.hostTime();
+        if (!Number.isSafeInteger(providedHostTime) || providedHostTime < 0) {
+          throw new RangeError('hostTime must be non-negative UTC epoch milliseconds');
+        }
+        hostTime = providedHostTime;
       }
       return {
         ...structuredClone(raw),
         eventId: eventId(this.options.sessionId, nextRevision, index),
         transitionRevision: nextRevision,
-        hostTime,
+        ...(hostTime === undefined ? {} : { hostTime }),
       } as SessionEvent;
     });
     if (!noop) {
@@ -1268,6 +1284,12 @@ class SessionKernelImpl<
     timeout: TimeoutInput,
     forcedInput: SubmittedAction,
   ): Prepared<AdvanceSummary<TView>> {
+    if (!isObjectRecord(timeout)) {
+      throw new TypeError('timeout must be an object');
+    }
+    if (!isObjectRecord(forcedInput)) {
+      throw new TypeError('forcedInput must be an object');
+    }
     if (typeof timeout.timeoutId !== 'string' || timeout.timeoutId.length === 0) {
       throw new TypeError('timeoutId must be a non-empty string');
     }
@@ -1377,6 +1399,9 @@ class SessionKernelImpl<
     }
     if (typeof lane !== 'string' || lane.length === 0) {
       throw new TypeError('lane must be a non-empty string');
+    }
+    if (!isObjectRecord(record)) {
+      throw new TypeError('extension record must be a JSON object');
     }
     const canonical = canonicalJson(record);
     if (new TextEncoder().encode(canonical).length > this.limits.maxExtensionBytes) {
@@ -1507,6 +1532,9 @@ class SessionKernelImpl<
   }
 
   private rehydrate(transcript: SessionTranscript<TLevel>): void {
+    if (!isObjectRecord(transcript)) {
+      throw new TypeError('transcript must be an object');
+    }
     if (canonicalJson(transcript.header) !== canonicalJson(this.header)) {
       throw new TypeError('transcript header does not match kernel options');
     }
@@ -1514,8 +1542,11 @@ class SessionKernelImpl<
     validateTimeoutAudit(transcript.header, events);
     let previousTransitionRevision = 0;
     for (const event of events) {
-      if (!Number.isSafeInteger(event.hostTime) || event.hostTime < 0) {
-        throw new TypeError('session event hostTime must be non-negative UTC milliseconds');
+      if (event.hostTime !== undefined
+        && (!Number.isSafeInteger(event.hostTime) || event.hostTime < 0)) {
+        throw new TypeError(
+          'session event hostTime must be non-negative UTC epoch milliseconds',
+        );
       }
       if (event.transitionRevision < previousTransitionRevision) {
         throw new TypeError('transcript transition revisions must be monotonic');
@@ -1773,6 +1804,12 @@ export function finalizeReplay<TLevel>(
   transcript: SessionTranscript<TLevel>,
   options: FinalizeOptions,
 ): ReplayArtifact<TLevel> {
+  if (!isObjectRecord(transcript)) {
+    throw new TypeError('transcript must be an object');
+  }
+  if (!isObjectRecord(options)) {
+    throw new TypeError('finalize options must be an object');
+  }
   validateTimeoutAudit(transcript.header, transcript.events);
   const resolutions = transcript.events.filter(
     (event): event is Extract<SessionEvent, { kind: 'resolution' }> => event.kind === 'resolution',
@@ -1794,7 +1831,9 @@ export function finalizeReplay<TLevel>(
         tick: event.tick,
         inputs: event.inputs.map((input) => replayInput(input, options.perm)),
         cause: event.cause,
-        ...(options.includeHostTime ? { hostTime: event.hostTime } : {}),
+        ...(options.includeHostTime && event.hostTime !== undefined
+          ? { hostTime: event.hostTime }
+          : {}),
         ...(event.cause === 'timeout' && systemInput
           ? { systemInput: replayInput(systemInput, options.perm) }
           : {}),
@@ -1812,7 +1851,9 @@ export function finalizeReplay<TLevel>(
         ...(event.timeoutPolicyRef === undefined
           ? {}
           : { timeoutPolicyRef: event.timeoutPolicyRef }),
-        ...(options.includeHostTime ? { hostTime: event.hostTime } : {}),
+        ...(options.includeHostTime && event.hostTime !== undefined
+          ? { hostTime: event.hostTime }
+          : {}),
       });
     } else if (event.kind === 'extension') {
       records.push({
@@ -1821,7 +1862,9 @@ export function finalizeReplay<TLevel>(
         levelIndex: 0,
         lane: event.lane,
         record: structuredClone(event.record),
-        ...(options.includeHostTime ? { hostTime: event.hostTime } : {}),
+        ...(options.includeHostTime && event.hostTime !== undefined
+          ? { hostTime: event.hostTime }
+          : {}),
       });
     } else if (event.kind === 'checkpoint') {
       records.push({
@@ -1830,7 +1873,9 @@ export function finalizeReplay<TLevel>(
         levelIndex: 0,
         tick: event.tick,
         digest: event.digest,
-        ...(options.includeHostTime ? { hostTime: event.hostTime } : {}),
+        ...(options.includeHostTime && event.hostTime !== undefined
+          ? { hostTime: event.hostTime }
+          : {}),
       });
     } else if (event.kind === 'rejection') {
       records.push({
@@ -1847,7 +1892,9 @@ export function finalizeReplay<TLevel>(
           ? {}
           : { prevChainHash: event.prevChainHash }),
         ...(event.sig === undefined ? {} : { sig: event.sig }),
-        ...(options.includeHostTime ? { hostTime: event.hostTime } : {}),
+        ...(options.includeHostTime && event.hostTime !== undefined
+          ? { hostTime: event.hostTime }
+          : {}),
         ...(options.visibility && options.visibility !== 'full'
           ? {}
           : { attemptedReveal: structuredClone(event.attemptedReveal) }),
@@ -1864,7 +1911,7 @@ export function finalizeReplay<TLevel>(
       ? {}
       : { dmath: structuredClone(transcript.header.dmath) as unknown as JsonValue }),
   };
-  return createReplayArtifact({
+  return createReplayArtifact<TLevel>({
     sessionId: transcript.header.sessionId,
     game: transcript.header.game,
     seed: transcript.header.seed,
@@ -1908,6 +1955,12 @@ export function finalizeRunReplay<TLevel>(
   transcripts: readonly SessionTranscript<TLevel>[],
   options: FinalizeRunOptions,
 ): ReplayArtifact<TLevel> {
+  if (!Array.isArray(transcripts as unknown)) {
+    throw new TypeError('transcripts must be an array');
+  }
+  if (!isObjectRecord(options)) {
+    throw new TypeError('finalize options must be an object');
+  }
   if (transcripts.length === 0) {
     throw new RangeError('a run replay requires at least one transcript');
   }
@@ -1987,7 +2040,7 @@ export function finalizeRunReplay<TLevel>(
       ? {}
       : { dmath: structuredClone(first.header.dmath) as unknown as JsonValue }),
   };
-  return createReplayArtifact({
+  return createReplayArtifact<TLevel>({
     sessionId: first.header.sessionId,
     game: first.header.game,
     seed: options.seed,

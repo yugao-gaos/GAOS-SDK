@@ -949,8 +949,12 @@ def validate_replay_artifact(value: Any) -> list[str]:
                             f"timeout {index} windowRef must be a non-negative safe integer"
                         )
                     participant_id = record.get("participantId")
-                    if participant_id is not None and (
-                        not isinstance(participant_id, str) or not participant_id
+                    if "participantId" not in record or (
+                        participant_id is not None
+                        and (
+                            not isinstance(participant_id, str)
+                            or not participant_id
+                        )
                     ):
                         problems.append(
                             f"timeout {index} participantId must be null or a non-empty string"

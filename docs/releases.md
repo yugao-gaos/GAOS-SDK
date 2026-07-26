@@ -40,8 +40,12 @@ This release adds the optional authoritative session and integrity layer:
   leaderboard trust signal; strict-schema slots are reserved for RFC-010's
   additive v1.2 `seatKeys`, `clientTime`, periodic signature, policy,
   signature, and chain fields;
-- session events carry advisory `hostTime`; replay projection is opt-in and
-  verification ignores it;
+- session construction requires an explicit
+  `hostTime: (() => number) | 'none'` choice. Clocked events carry advisory
+  UTC epoch milliseconds; `'none'` keeps timestamp-free transcripts valid.
+  Replay projection is opt-in and verification ignores it;
+- `abort()` is idempotent after an explicit or automatic abort; it still
+  rejects committed and foreign prepared transitions;
 - session `AdvanceSummary` adds non-fatal `warnings`, currently used to
   surface live commitment-salt reuse.
 
@@ -52,6 +56,9 @@ crash recovery, and reducer-state ownership callbacks.
 Migration note: `finalizeRunReplay` requires each source level transcript to
 record its already-derived level seed with `seedPolicy: 'explicit'`.
 Transcripts using `gaos.run-level-seed.v1` directly are rejected.
+Hosts migrating kernel construction must also choose a `hostTime` policy.
+Existing timestamp-free persisted events remain rehydratable with
+`hostTime: 'none'`.
 
 See [sessions and integrity](/session-and-integrity).
 
