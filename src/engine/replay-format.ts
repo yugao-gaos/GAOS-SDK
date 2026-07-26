@@ -215,6 +215,23 @@ export interface ReplayExtension {
   hostTime?: number;
 }
 
+export interface ReplayInterest {
+  kind: 'interest';
+  n: number;
+  levelIndex: number;
+  tick: number;
+  cursor: number;
+  participantId: string;
+  submissionId: string;
+  scopeId: string;
+  declaration: JsonValue;
+  canonicalCommand: string;
+  clientTime?: number;
+  prevChainHash?: string;
+  sig?: string;
+  hostTime?: number;
+}
+
 export interface ReplayCheckpoint {
   kind: 'checkpoint';
   n: number;
@@ -270,6 +287,7 @@ export type ReplayRecord =
   | ReplayResolution
   | ReplayTimeout
   | ReplayExtension
+  | ReplayInterest
   | ReplayCheckpoint
   | ReplayCommitMismatchAudit
   | ReplaySeatSignatureReservation;
@@ -944,6 +962,7 @@ export function validateReplayArtifact(value: unknown): string[] {
         'levelIndex',
         'wireId',
         'canonicalId',
+        'payload',
         'x',
         'y',
         'index',
@@ -1153,6 +1172,7 @@ export function validateReplayArtifact(value: unknown): string[] {
           ...(actionRecord ? ['kind', 'n', 'levelIndex', 'tick'] : []),
           'wireId',
           'canonicalId',
+          'payload',
           'x',
           'y',
           'index',
@@ -1299,6 +1319,7 @@ export function validateReplayArtifact(value: unknown): string[] {
           'resolution',
           'timeout',
           'extension',
+          'interest',
           'checkpoint',
           'commit-mismatch',
           'seat-signature',
@@ -1314,6 +1335,7 @@ export function validateReplayArtifact(value: unknown): string[] {
             ...common,
             'wireId',
             'canonicalId',
+            'payload',
             'x',
             'y',
             'index',
@@ -1344,6 +1366,19 @@ export function validateReplayArtifact(value: unknown): string[] {
             'timeoutPolicyRef',
           ],
           extension: [...common, 'lane', 'record'],
+          interest: [
+            ...common,
+            'tick',
+            'cursor',
+            'participantId',
+            'submissionId',
+            'scopeId',
+            'declaration',
+            'canonicalCommand',
+            'clientTime',
+            'prevChainHash',
+            'sig',
+          ],
           checkpoint: [...common, 'tick', 'digest'],
           'commit-mismatch': [
             ...common,
@@ -1473,6 +1508,41 @@ export function validateReplayArtifact(value: unknown): string[] {
           }
           if (!isRecord(record['record'])) {
             problems.push(`extension ${index} record must be an object`);
+          }
+        } else if (kind === 'interest') {
+          if (header['formatVersion'] !== GAOS_REPLAY_FORMAT_VERSION) {
+            problems.push(`interest ${index} requires formatVersion ${GAOS_REPLAY_FORMAT_VERSION}`);
+          }
+          validateV12IntegrityFields(record, `interest ${index}`, problems);
+          if (record['clientTime'] === undefined
+            || record['prevChainHash'] === undefined
+            || record['sig'] === undefined) {
+            problems.push(`interest ${index} requires clientTime, prevChainHash, and sig`);
+          }
+          if (!validNonNegativeInteger(record['tick'])
+            || !validNonNegativeInteger(record['cursor'])) {
+            problems.push(`interest ${index} tick and cursor must be non-negative safe integers`);
+          }
+          for (const field of ['participantId', 'submissionId', 'scopeId'] as const) {
+            if (typeof record[field] !== 'string' || record[field].length === 0) {
+              problems.push(`interest ${index} ${field} must be a non-empty string`);
+            }
+          }
+          if (!Object.hasOwn(record, 'declaration')) {
+            problems.push(`interest ${index} declaration is required`);
+          } else {
+            try {
+              const expected = canonicalJson({
+                kind: 'interest',
+                scopeId: record['scopeId'] as string,
+                declaration: record['declaration'] as JsonValue,
+              });
+              if (record['canonicalCommand'] !== expected) {
+                problems.push(`interest ${index} canonicalCommand does not match declaration`);
+              }
+            } catch {
+              problems.push(`interest ${index} declaration must contain plain JSON`);
+            }
           }
         } else if (kind === 'checkpoint') {
           if (!validNonNegativeInteger(record['tick'])) {
@@ -1627,9 +1697,13 @@ interface ReplaySubmissionForSignature {
   seat: string;
   levelIndex: number;
   tick: number;
-  value: ReplayResolutionInput | ReplayAction | ReplayCommitMismatchAudit;
+  value:
+    | ReplayResolutionInput
+    | ReplayAction
+    | ReplayCommitMismatchAudit
+    | ReplayInterest;
   label: string;
-  alwaysRequiresSignature: boolean;
+  requiredTier?: 1 | 2;
 }
 
 function signatureSubmissions(artifact: ReplayArtifact<unknown>): Array<
@@ -1653,7 +1727,9 @@ function signatureSubmissions(artifact: ReplayArtifact<unknown>): Array<
             tick: record.tick,
             value: input,
             label: `resolution ${record.n} input ${inputIndex}`,
-            alwaysRequiresSignature: input.commit !== undefined || input.reveal !== undefined,
+            ...(input.commit !== undefined || input.reveal !== undefined
+              ? { requiredTier: 1 as const }
+              : {}),
           },
         });
       }
@@ -1668,7 +1744,9 @@ function signatureSubmissions(artifact: ReplayArtifact<unknown>): Array<
           tick: record.tick ?? 0,
           value: record,
           label: `action ${record.n}`,
-          alwaysRequiresSignature: record.commit !== undefined || record.reveal !== undefined,
+          ...(record.commit !== undefined || record.reveal !== undefined
+            ? { requiredTier: 1 as const }
+            : {}),
         },
       });
     } else if (record.kind === 'commit-mismatch') {
@@ -1680,7 +1758,19 @@ function signatureSubmissions(artifact: ReplayArtifact<unknown>): Array<
           tick: record.tick,
           value: record,
           label: `commit-mismatch ${record.n}`,
-          alwaysRequiresSignature: true,
+          requiredTier: 1,
+        },
+      });
+    } else if (record.kind === 'interest') {
+      result.push({
+        kind: 'submission',
+        submission: {
+          seat: record.participantId,
+          levelIndex: record.levelIndex,
+          tick: record.tick,
+          value: record,
+          label: `interest ${record.n}`,
+          requiredTier: 2,
         },
       });
     } else if (record.kind === 'seat-signature') {
@@ -1872,9 +1962,11 @@ export function recheckReplaySignatures(
     const preimage = submissionPreimageV1(envelope);
     check.chainHead = submissionChainHashV1(envelope);
     if (value.sig === undefined) {
-      if (submission.alwaysRequiresSignature) {
+      if (submission.requiredTier !== undefined) {
         check.policySatisfied = false;
-        problems.push(`${submission.label} requires a tier-1 signature`);
+        problems.push(
+          `${submission.label} requires a tier-${submission.requiredTier} signature`,
+        );
       }
       continue;
     }
@@ -1951,6 +2043,7 @@ export function recheckReplaySignatures(
 function replaySubmittedAction(input: ReplayResolutionInput): SubmittedAction {
   return {
     id: input.canonicalId,
+    ...(input.payload === undefined ? {} : { payload: input.payload }),
     ...(input.x === undefined ? {} : { x: input.x }),
     ...(input.y === undefined ? {} : { y: input.y }),
     ...(input.index === undefined ? {} : { index: input.index }),

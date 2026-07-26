@@ -5,6 +5,7 @@ import {
   type TickView,
 } from './contracts.js';
 import type { LocationRef } from './locations.js';
+import type { JsonValue } from '../protocol.js';
 import { locationKey } from './locations.js';
 import { applyCanonicalActions } from './lockstep.js';
 
@@ -27,6 +28,7 @@ export interface TranscriptAction {
   n: number;
   wireId: string;
   canonicalId: string;
+  payload?: JsonValue;
   x?: number;
   y?: number;
   index?: number;
@@ -196,6 +198,7 @@ export function recheckTranscript<TLevel, TState, TView extends TickView<unknown
     if (!valid) continue;
     const submitted: SubmittedAction = {
       id: action.canonicalId,
+      ...(action.payload !== undefined ? { payload: structuredClone(action.payload) } : {}),
       ...(action.x !== undefined ? { x: action.x } : {}),
       ...(action.y !== undefined ? { y: action.y } : {}),
       ...(action.index !== undefined ? { index: action.index } : {}),

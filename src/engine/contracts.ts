@@ -16,6 +16,8 @@ export interface ActionDefinition {
 
 export interface SubmittedAction {
   id: string;
+  /** Opaque product payload. The SDK never interprets it; replay round-trips it. */
+  payload?: JsonValue;
   x?: number;
   y?: number;
   index?: number;
@@ -128,6 +130,8 @@ interface ReducerBase<
   view(state: TState): TView;
   /** Optional per-seat observation. Absent means perfect information. */
   viewFor?(state: TState, seat: string): TView;
+  /** Reject an action before it is durably admitted to the participation window. */
+  validateCommand?(state: TState, seat: string, action: SubmittedAction): void;
 }
 
 /**

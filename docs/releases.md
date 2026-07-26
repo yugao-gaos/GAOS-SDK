@@ -5,9 +5,10 @@ For the public chronological changelog, see the
 
 ## v0.20.0 (unreleased)
 
-In development on `main` (`package.json` reads `0.20.0-dev`). Adds portable,
-third-party-verifiable signature evidence — [RFC-010](/rfcs/rfc-010-submission-signatures-and-interest)
-Part A — on top of the v0.19.0 session layer. **Not released and not tagged.**
+In development on `main` (`package.json` reads `0.20.0-dev`). Completes the
+resolved implementation scope of
+[RFC-010](/rfcs/rfc-010-submission-signatures-and-interest), including the
+Arena and TabletopLabs migration returns. **Not released and not tagged.**
 Consumers mid-migration should stay on the `v0.19.0` tag until this ships and
 is announced (RFC-009 §4.3).
 
@@ -36,6 +37,16 @@ is announced (RFC-009 §4.3).
 - the session hot path caches canonical seat views, reuses their bytes for
   unchanged checks and digests, snapshots each view once, and clones the heavy
   prepared-delta graph once while preserving distinct published array shells.
+- client-declared interest is ordered per `(seat, scopeId)`, structurally
+  constrained inside the partitioned view, tier-2 signed, replayed, and
+  delivered with omission metadata;
+- observation codec v2 emits safe bounded JSON patches with mandatory snapshot
+  fallback and digest-checked reconstruction;
+- reducer legality runs before durable ingest, invalid views are typed/fail
+  fast, action `payload` round-trips through replay, repair envelopes declare
+  their origin, and play-all-level run composition is explicit;
+- `awaitingSeats`, resolved duplicate receipts, `sessionHeaderFor`, and
+  event-array rehydration remove loops reported by both production hosts.
 
 ## v0.19.0
 

@@ -1,8 +1,9 @@
 # RFC-010 — Submission signatures, audit chains, and generic interest management
 
-Status: **Part A implemented for v0.20 development (2026-07-26); Part B
-migration-gated** · Target: v0.20 · Breaking: no (additive; requires the
-baseline field reservations) ·
+Status: **Parts A and B plus the resolved D/E implementation scope are
+implemented for v0.20 development (2026-07-26); E1 and E4 remain explicit
+design holds** · Target: v0.20 · Breaking: no (additive; requires the baseline
+field reservations) ·
 Depends on: RFC-006, RFC-008, and **baseline T2 closed**
 
 **This is the v0.20 document.** Parts A–C are the designed scope: signatures
@@ -1575,6 +1576,15 @@ cause — the kernel holds the answer and makes the host re-derive it.*
 | E1 `TickView` shape | TTL | shape smell | v0.20, hold for 2nd voice |
 | E2 + E5 representation cost | both | measured | v0.20, patch codec + docs |
 | E6 host ergonomics ×4 | Arena | papercuts | v0.20, small |
+
+Implementation note (2026-07-26): D1–D3/D5, E2's bounded patch codec, E3,
+E5's storage guidance, and E6 are implemented on the v0.20 development line.
+The reproducible `npm run observations:benchmark` synthetic check changes one
+entity in 50/200/500-entity views and currently measures about
+31×/124×/315× fewer canonical bytes at 0.8/2.2/5.6 ms encoding after warm-up.
+E1 still lacks the RFC's required second consumer signal. E4 remains a
+question for Arena—whether chooser/dialogue state affects simulation—and no
+new state-changing transition class is invented until that answer exists.
 
 **If only one item is taken from either migration, take E3.** Both consumers
 independently hit the same class — a failure discovered after durable commit

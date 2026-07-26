@@ -10,7 +10,8 @@ Portable replay now adds roster-bound Ed25519 submission chains and explicit
 
 ## v0.20.0 — signed portable evidence
 
-Implementation started July 26, 2026; release remains migration-gated.
+Implementation completed July 26, 2026 after Arena and TabletopLabs returned
+their v0.19 integration findings; release remains untagged.
 
 - `gaos.replay` v1.2 validates and verifies
   `gaos.submission.ed25519.v1`, with canonical command/cursor/time material for
@@ -32,6 +33,13 @@ Implementation started July 26, 2026; release remains migration-gated.
 - The session hot path reuses canonical seat-view bytes and one cloned delta
   graph, removing the pre-pin serialization duplication without changing the
   wire contract.
+- Tier-2-signed `(seat, scopeId)` interest declarations narrow partitioned
+  views without widening visibility, survive replay, and emit independently
+  reconstructible delivery streams.
+- Observation codec v2 uses bounded safe JSON patches with snapshot fallback;
+  repair origins, opaque product action payloads, pre-ingest legality, typed
+  view failures, play-all-level runs, and host recovery helpers incorporate
+  the two product migrations' concrete findings.
 
 [Trust and verification →](/trust-and-verification) ·
 [Portable replay →](/mechanisms/replay)

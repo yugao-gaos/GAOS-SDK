@@ -247,6 +247,7 @@ def _validate_resolution_input(
     allowed = {
         "wireId",
         "canonicalId",
+        "payload",
         "x",
         "y",
         "index",
@@ -726,6 +727,7 @@ def validate_replay_artifact(value: Any) -> list[str]:
                     "levelIndex",
                     "wireId",
                     "canonicalId",
+                    "payload",
                     "x",
                     "y",
                     "index",
@@ -916,6 +918,7 @@ def validate_replay_artifact(value: Any) -> list[str]:
                 "resolution",
                 "timeout",
                 "extension",
+                "interest",
                 "checkpoint",
                 "commit-mismatch",
                 "seat-signature",
@@ -925,6 +928,8 @@ def validate_replay_artifact(value: Any) -> list[str]:
                 "action": common | {
                     "wireId",
                     "canonicalId",
+                    "payload",
+                    "payload",
                     "x",
                     "y",
                     "index",
@@ -953,6 +958,18 @@ def validate_replay_artifact(value: Any) -> list[str]:
                     "timeoutPolicyRef",
                 },
                 "extension": common | {"lane", "record"},
+                "interest": common | {
+                    "tick",
+                    "cursor",
+                    "participantId",
+                    "submissionId",
+                    "scopeId",
+                    "declaration",
+                    "canonicalCommand",
+                    "clientTime",
+                    "prevChainHash",
+                    "sig",
+                },
                 "checkpoint": common | {"tick", "digest"},
                 "commit-mismatch": common | {
                     "tick",
@@ -1176,6 +1193,53 @@ def validate_replay_artifact(value: Any) -> list[str]:
                         )
                     if not isinstance(record.get("record"), dict):
                         problems.append(f"extension {index} record must be an object")
+                elif kind == "interest":
+                    if header.get("formatVersion") != GAOS_REPLAY_FORMAT_VERSION:
+                        problems.append(
+                            f"interest {index} requires formatVersion "
+                            f"{GAOS_REPLAY_FORMAT_VERSION}"
+                        )
+                    problems.extend(_validate_v12_integrity_fields(
+                        record,
+                        f"interest {index}",
+                    ))
+                    if any(
+                        field not in record
+                        for field in ("clientTime", "prevChainHash", "sig")
+                    ):
+                        problems.append(
+                            f"interest {index} requires clientTime, "
+                            "prevChainHash, and sig"
+                        )
+                    for field in ("tick", "cursor"):
+                        if not _valid_non_negative_integer(record.get(field)):
+                            problems.append(
+                                f"interest {index} {field} must be a "
+                                "non-negative safe integer"
+                            )
+                    for field in ("participantId", "submissionId", "scopeId"):
+                        if not isinstance(record.get(field), str) or not record[field]:
+                            problems.append(
+                                f"interest {index} {field} must be a non-empty string"
+                            )
+                    if "declaration" not in record:
+                        problems.append(f"interest {index} declaration is required")
+                    else:
+                        try:
+                            expected = canonical_json({
+                                "kind": "interest",
+                                "scopeId": record.get("scopeId"),
+                                "declaration": record["declaration"],
+                            })
+                            if record.get("canonicalCommand") != expected:
+                                problems.append(
+                                    f"interest {index} canonicalCommand does not "
+                                    "match declaration"
+                                )
+                        except (TypeError, ValueError):
+                            problems.append(
+                                f"interest {index} declaration must contain plain JSON"
+                            )
                 elif kind == "checkpoint":
                     if not _valid_non_negative_integer(record.get("tick")):
                         problems.append(
@@ -1451,7 +1515,7 @@ def recheck_replay_signatures(artifact: dict[str, Any]) -> dict[str, Any]:
             "N": key["signingTier"]["N"],
         }
 
-    items: list[tuple[str, dict[str, Any], int, int, str, bool]] = []
+    items: list[tuple[str, dict[str, Any], int, int, str, int | None]] = []
     for record in artifact.get("records", artifact.get("actions", [])):
         kind = record.get("kind")
         if kind == "resolution":
@@ -1466,7 +1530,7 @@ def recheck_replay_signatures(artifact: dict[str, Any]) -> dict[str, Any]:
                         record["levelIndex"],
                         record["tick"],
                         f"resolution {record['n']} input {input_index}",
-                        "commit" in replay_input or "reveal" in replay_input,
+                        1 if "commit" in replay_input or "reveal" in replay_input else None,
                     ))
         elif (
             kind == "action"
@@ -1479,7 +1543,7 @@ def recheck_replay_signatures(artifact: dict[str, Any]) -> dict[str, Any]:
                 record["levelIndex"],
                 record.get("tick", 0),
                 f"action {record['n']}",
-                "commit" in record or "reveal" in record,
+                1 if "commit" in record or "reveal" in record else None,
             ))
         elif kind == "commit-mismatch":
             items.append((
@@ -1488,7 +1552,16 @@ def recheck_replay_signatures(artifact: dict[str, Any]) -> dict[str, Any]:
                 record["levelIndex"],
                 record["tick"],
                 f"commit-mismatch {record['n']}",
-                True,
+                1,
+            ))
+        elif kind == "interest":
+            items.append((
+                "submission",
+                record,
+                record["levelIndex"],
+                record["tick"],
+                f"interest {record['n']}",
+                2,
             ))
         elif kind == "seat-signature":
             items.append((
@@ -1497,7 +1570,7 @@ def recheck_replay_signatures(artifact: dict[str, Any]) -> dict[str, Any]:
                 record["levelIndex"],
                 record["tick"],
                 f"seat-signature {record['n']}",
-                False,
+                None,
             ))
 
     for order, (
@@ -1506,11 +1579,12 @@ def recheck_replay_signatures(artifact: dict[str, Any]) -> dict[str, Any]:
         level_index,
         tick,
         label,
-        always_required,
+        required_tier,
     ) in enumerate(items):
         seat = (
             value.get("participantId")
-            if kind == "periodic" or value.get("kind") == "commit-mismatch"
+            if kind == "periodic"
+            or value.get("kind") in {"commit-mismatch", "interest"}
             else value.get("seat")
         )
         check = checks.get(seat)
@@ -1610,9 +1684,11 @@ def recheck_replay_signatures(artifact: dict[str, Any]) -> dict[str, Any]:
         preimage = submission_preimage_v1(envelope)
         check["chainHead"] = submission_chain_hash_v1(envelope)
         if "sig" not in value:
-            if always_required:
+            if required_tier is not None:
                 check["policySatisfied"] = False
-                problems.append(f"{label} requires a tier-1 signature")
+                problems.append(
+                    f"{label} requires a tier-{required_tier} signature"
+                )
             continue
         if not verify_ed25519_base64(
             key["publicKey"],

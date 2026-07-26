@@ -59,6 +59,7 @@
     "dmath:browsers": "npm run build && node scripts/check-dmath-browsers.mjs",
     "dmath:workerd": "npm run build && node scripts/check-dmath-workerd.mjs",
     "signatures:benchmark": "npm run build && node scripts/benchmark-signatures.mjs",
+    "observations:benchmark": "npm run build && node scripts/benchmark-observation-codec.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "prepare": "npm run build",

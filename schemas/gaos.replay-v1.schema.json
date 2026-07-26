@@ -165,14 +165,51 @@
                       },
                       "systemInput": { "$ref": "#/$defs/integrityV12" }
                     }
-                  }
-                },
-                {
-                  "if": {
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "header": {
+            "properties": {
+              "formatVersion": { "const": "1.1" }
+            },
+            "required": ["formatVersion"]
+          }
+        },
+        "required": ["header"]
+      },
+      "then": {
+        "properties": {
+          "records": {
+            "items": {
+              "not": {
+                "properties": { "kind": { "const": "interest" } },
+                "required": ["kind"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
                     "properties": { "kind": { "const": "commit-mismatch" } },
                     "required": ["kind"]
                   },
                   "then": { "$ref": "#/$defs/integrityV12" }
+                },
+                {
+                  "if": {
+                    "properties": { "kind": { "const": "interest" } },
+                    "required": ["kind"]
+                  },
+                  "then": {
+                    "allOf": [
+                      { "$ref": "#/$defs/integrityV12" },
+                      { "required": ["clientTime", "prevChainHash", "sig"] }
+                    ]
+                  }
                 },
                 {
                   "if": {
@@ -459,6 +496,7 @@
           "type": "string",
           "pattern": "^Action [1-9][0-9]*$"
         },
+        "payload": true,
         "x": { "type": "integer" },
         "y": { "type": "integer" },
         "index": { "type": "integer" },
@@ -527,6 +565,7 @@
       "properties": {
         "wireId": { "type": "string", "pattern": "^Action [1-9][0-9]*$" },
         "canonicalId": { "type": "string", "pattern": "^Action [1-9][0-9]*$" },
+        "payload": true,
         "x": { "type": "integer" },
         "y": { "type": "integer" },
         "index": { "type": "integer" },
@@ -615,6 +654,38 @@
         ,"hostTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
       }
     },
+    "interest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "n",
+        "levelIndex",
+        "tick",
+        "cursor",
+        "participantId",
+        "submissionId",
+        "scopeId",
+        "declaration",
+        "canonicalCommand"
+      ],
+      "properties": {
+        "kind": { "const": "interest" },
+        "n": { "type": "integer", "minimum": 0 },
+        "levelIndex": { "type": "integer", "minimum": 0 },
+        "tick": { "$ref": "#/$defs/nonNegativeSafeInteger" },
+        "cursor": { "$ref": "#/$defs/nonNegativeSafeInteger" },
+        "participantId": { "type": "string", "minLength": 1 },
+        "submissionId": { "type": "string", "minLength": 1 },
+        "scopeId": { "type": "string", "minLength": 1 },
+        "declaration": true,
+        "canonicalCommand": { "type": "string", "minLength": 1 },
+        "clientTime": { "$ref": "#/$defs/nonNegativeSafeInteger" },
+        "prevChainHash": { "$ref": "#/$defs/hashBase64" },
+        "sig": { "$ref": "#/$defs/signatureBase64" },
+        "hostTime": { "$ref": "#/$defs/nonNegativeSafeInteger" }
+      }
+    },
     "checkpoint": {
       "type": "object",
       "additionalProperties": false,
@@ -700,6 +771,7 @@
         { "$ref": "#/$defs/resolution" },
         { "$ref": "#/$defs/timeout" },
         { "$ref": "#/$defs/extension" },
+        { "$ref": "#/$defs/interest" },
         { "$ref": "#/$defs/checkpoint" },
         { "$ref": "#/$defs/commitMismatch" },
         { "$ref": "#/$defs/seatSignature" }

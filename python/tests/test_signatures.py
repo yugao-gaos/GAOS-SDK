@@ -149,6 +149,7 @@ def test_signed_v12_artifact_rechecks_cross_runtime_vectors() -> None:
         replay_input = {
             "wireId": "Action 1",
             "canonicalId": "Action 1",
+            "payload": {"vector": index},
             "seat": envelope["seat"],
             "submissionId": envelope["submissionId"],
             "canonicalCommand": canonical_json(envelope["command"]),
@@ -259,3 +260,93 @@ def test_signed_v12_artifact_rechecks_cross_runtime_vectors() -> None:
     tampered = json.loads(json.dumps(artifact))
     tampered["records"][1]["inputs"][0]["canonicalCommand"] = '{"other":1}'
     assert recheck_replay_signatures(tampered)["state"] == "partial"
+
+
+def test_signed_interest_record_is_tier_two_chain_material() -> None:
+    seed = bytes.fromhex(
+        "9d61b19deffd5a60ba844af492ec2cc4"
+        "4449c5697b326919703bac031cae7f60"
+    )
+    public_key = signature_bytes_to_base64(ed25519_public_key_from_seed(seed))
+    roster = [{
+        "id": "alpha",
+        "publicKey": public_key,
+        "alg": SUBMISSION_SIGNATURE_ALGORITHM,
+        "signingTier": {"N": 10},
+    }]
+    declaration = {"entityIds": ["entity-3"]}
+    command = {
+        "kind": "interest",
+        "scopeId": "phone",
+        "declaration": declaration,
+    }
+    envelope = {
+        "sessionId": "interest-session",
+        "seat": "alpha",
+        "submissionId": "interest-1",
+        "cursor": 0,
+        "tick": 0,
+        "clientTime": 1,
+        "command": command,
+        "prevChainHash": submission_genesis_hash_v1(
+            "interest-session",
+            "alpha",
+            submission_roster_hash_v1(roster),
+        ),
+    }
+    artifact = {
+        "header": {
+            "kind": "header",
+            "format": "gaos.replay",
+            "formatVersion": GAOS_REPLAY_FORMAT_VERSION,
+            "sessionId": "interest-session",
+            "game": {
+                "id": "interest",
+                "version": "1",
+                "adapter": {"id": "interest", "version": "1"},
+            },
+            "seed": 1,
+            "seedPolicy": "explicit",
+            "perm": [],
+            "levels": [{
+                "index": 0,
+                "id": "one",
+                "seed": 1,
+                "level": {},
+                "result": {"status": "won", "stars": 0, "actionsUsed": 0},
+            }],
+            "totals": {"totalStars": 0, "totalActionsUsed": 0},
+            "seatKeys": roster,
+            "signaturePolicy": {"scheme": SUBMISSION_SIGNATURE_SCHEME},
+        },
+        "actions": [],
+        "records": [{
+            "kind": "interest",
+            "n": 0,
+            "levelIndex": 0,
+            "tick": 0,
+            "cursor": 0,
+            "participantId": "alpha",
+            "submissionId": "interest-1",
+            "scopeId": "phone",
+            "declaration": declaration,
+            "canonicalCommand": canonical_json(command),
+            "clientTime": 1,
+            "prevChainHash": envelope["prevChainHash"],
+            "sig": sign_submission_v1(seed, envelope),
+        }],
+    }
+    assert validate_replay_artifact(artifact) == []
+    schema = json.loads((
+        Path(__file__).parents[2]
+        / "schemas"
+        / "gaos.replay-v1.schema.json"
+    ).read_text(encoding="utf-8"))
+    Draft202012Validator(schema).validate(artifact)
+    assert recheck_replay_signatures(artifact)["state"] == "signed"
+    stripped = json.loads(json.dumps(artifact))
+    stripped["records"][0].pop("sig")
+    assert any(
+        "requires clientTime, prevChainHash, and sig" in problem
+        for problem in validate_replay_artifact(stripped)
+    )

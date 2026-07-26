@@ -11,6 +11,8 @@ The first line is a `ReplayHeader`. A v1.0 stream follows it with individual
 `resolution`, `timeout`, `extension`, `checkpoint`, and `commit-mismatch`
 records. A v1.2 stream uses the same grouped shape and assigns cryptographic
 meaning to the reserved roster, submission-chain, and `seat-signature` fields.
+It also records signed tier-2 `interest` declarations. Product actions may
+carry an opaque JSON `payload`, which survives projection and recheck.
 
 ```jsonl
 {"format":"gaos.replay","formatVersion":"1.0","game":{"adapter":{"id":"creator/demo/reducer","version":"commit:abc123"},"id":"creator/demo","version":"1.0.0"},"kind":"header","levels":[{"id":"intro","index":0,"level":{"goal":3},"result":{"actionsUsed":2,"stars":3,"status":"won"},"seed":2654435731}],"perm":[0,1],"seed":42,"seedPolicy":"gaos.run-level-seed.v1","sessionId":"run-42","totals":{"totalActionsUsed":2,"totalStars":3}}

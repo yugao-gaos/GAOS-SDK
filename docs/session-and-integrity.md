@@ -1,8 +1,12 @@
 # Authoritative sessions and integrity
 
-Version 0.19 adds the optional `./session` entry point for hosts that need a
+Version 0.19 added the optional `./session` entry point for hosts that need a
 deterministic, authoritative match loop without coupling game rules to a
 database, network, timer, or deployment platform.
+
+Version 0.20 adds the migration-informed completion: pre-ingest legality,
+named interest scopes, bounded patch delivery, explicit repair envelopes,
+product action payloads, and host recovery/inspection helpers.
 
 ## Persist before publish
 
@@ -98,12 +102,20 @@ idempotency receipts after a crash. A resolution records the complete
 canonical input group and replay invokes the reducer exactly once for that
 group.
 
+Hosts may store events without duplicating the derived header:
+`sessionHeaderFor(options)` constructs it without running `reducer.init`, and
+`rehydrateKernel(options, events)` accepts the durable event array directly.
+`awaitingSeats()` reports the current participation gap. Duplicate ingest
+receipts include `resolved`, so hosts do not infer lifecycle state from receipt
+retention or cursor arithmetic.
+
 Every seat has an independent `viewRevision`. Resolution increments it even
 when the seat's redacted view is unchanged. Every observation envelope also
 carries the durable `transitionRevision` watermark. `snapshot(seat,
-afterTransitionRevision)` is the reconnect
-path; v1 observation deltas are either a complete snapshot or an unchanged
-marker. Resolution deltas also carry `acknowledgements`, the applied
+afterTransitionRevision)` is the reconnect path. `origin: 'snapshot'`
+distinguishes repair from ordinary resolution; absence remains readable as
+`resolution` for compatibility. Resolution deltas also carry
+`acknowledgements`, the applied
 `(participantId, submissionId)` identities in canonical reducer order.
 Host-derived inputs are excluded and reconnect snapshots carry an empty list.
 At every observable state, `viewRevision(seat) === cursor()` for every seat.
@@ -125,11 +137,49 @@ from pending, and replay the remainder in original local enqueue order.
 A view-revision gap requires retransmission or snapshot/resync; it must not
 be filled by guessing.
 
-The v0.19 kernel bounds future tick targets, catch-up work, retained receipts,
+### Patch delivery and interest scopes
+
+`observationCodec: { version: 'v2' }` emits deterministic, bounded JSON
+patches when they are smaller than a snapshot. Arrays are replaced atomically;
+JSON Pointer escaping is normative; prototype-bearing paths are rejected.
+Operation and byte bounds fall back to a complete snapshot. Clients reconstruct
+with `applyObservationDelta`, which checks `viewDigest`.
+
+An interest policy receives the already partitioned seat view and may only
+remove structure. The kernel checks that invariant before publishing:
+
+```ts
+const kernel = createSessionKernel({
+  // ...
+  seatKeys,
+  signaturePolicy: { scheme: 'gaos.submission.ed25519.v1' },
+  interest: {
+    narrowView: (partitionedView, { declaration }) =>
+      selectInterest(partitionedView, declaration),
+  },
+});
+
+const prepared = kernel.prepareInterest(signedScopeSubmission);
+```
+
+Scopes are named by `(seat, scopeId)`; the compatibility default is one scope
+named by the seat. A scope change is a signed tier-2 durable transition that
+does not reach the reducer or advance the gameplay cursor. Its delta carries
+the declaration, scope id, and a snapshot at the current `viewRevision`.
+Subsequent resolutions emit one stream per scope. `observe` and `snapshot`
+accept an optional scope id.
+
+Reducers may implement `validateCommand(state, seat, action)`. It runs before
+an intent is persisted; a throw becomes `IntentCollectionError` and cannot
+wedge a participation window. Reducer views must be canonically encodable:
+construction fails fast for a bad initial view, while later failures are
+classified as `SessionAdvanceError('invalid_view')`.
+
+The kernel bounds future tick targets, catch-up work, retained receipts,
 and extension bytes. A participation window admits exactly one unresolved
 intent per seat, so there is no multi-entry per-seat buffer. The client-side
-`PredictionSession` extraction remains migration-informed and starts only
-after TabletopLabs supplies real traffic; its acknowledgement contract is
+`PredictionSession` extraction now has TabletopLabs' migration evidence but
+remains a separate follow-on from RFC-010; its acknowledgement contract is
 already stable.
 
 Receipt retention bounds stored responses, not idempotency. Once a submission
@@ -151,16 +201,41 @@ const artifact = finalizeRunReplay(levelTranscripts, {
   seed: runSeed,
   perm,
   visibility: 'full',
+  advancePolicy: 'play-all-levels',
 });
 ```
 
 The input list must be non-empty and ordered. Transcript `i` must use
 `runLevelSeed(runSeed, i)` and record that concrete seed with
 `seedPolicy: 'explicit'`; all segments share their session, game/adapter,
-and dmath declaration; and every non-final segment must be won. The projection
+and dmath declaration. The default `win-to-advance` policy requires every
+non-final segment to be won; `play-all-levels` permits scored runs that
+continue after losses. The projection
 assigns global action/record numbers and level indices, derives aggregate
 totals, and returns an unsigned `gaos.replay` v1.1 artifact, or v1.2 when the
 shared session header declares a signing roster and policy.
+
+`SubmittedAction.payload` carries arbitrary JSON product input through the
+live transcript and portable replay without borrowing commitment verification
+fields.
+
+Each level kernel deliberately starts its cursor at zero. A host exposing one
+monotonic run revision keeps a `revisionBase`: add it to outbound cursor/view
+revisions and subtract it from inbound revisions before constructing the local
+submission. Validate the translated `tickId` rather than silently repairing a
+mismatch. After a level, advance the base by that episode's final cursor.
+This translation is transport state; portable replay retains per-level ticks
+and assigns the ordered `levelIndex`.
+
+### Durable event sizing
+
+`SessionEvent` is the durable representation, not a compact in-memory trace.
+The Arena migration measured roughly 815 bytes per simple turn before storage
+framing. Hosts with per-value limits must append or chunk events rather than
+store an unbounded transcript as one value. Repeated event ids, canonical
+commands, and consumed identities are intentionally self-describing evidence;
+transport compression or a product-owned compact index may reduce storage, but
+recovery must reproduce the exact event stream.
 
 ## Deterministic math
 

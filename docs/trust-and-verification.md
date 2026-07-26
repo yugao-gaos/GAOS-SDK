@@ -70,7 +70,9 @@ Commit and reveal submissions always require direct signatures. Ordinary
 high-rate submissions may advance the chain without a direct signature, with a
 signed chain head required within the seat's declared `N`. A
 `seat-signature` record carries that periodic attestation without becoming a
-gameplay input. Multi-level runs sign an outstanding chain head before the
+gameplay input. Interest declarations always require a direct tier-2
+signature: this proves which `(seat, scopeId)` delivery scope the client asked
+for without treating the scope as reducer input. Multi-level runs sign an outstanding chain head before the
 level boundary, where the tick counter may reset. `clientTime` is mandatory in chained material, recorded as UTC
 milliseconds, and never trusted as a clock authority.
 

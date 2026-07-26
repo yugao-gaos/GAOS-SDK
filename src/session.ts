@@ -4,6 +4,7 @@ import {
   canonicalJson,
   collectIntent,
   createIntentWindow,
+  isParticipantId,
   IntentCollectionError,
   type CollectedIntent,
   type CommandSubmission,
@@ -13,7 +14,24 @@ import {
   type SubmissionIntegrityReservation,
 } from './protocol.js';
 export { IntentCollectionError };
-export type { IntentErrorCode } from './protocol.js';
+export { createTickRate } from './engine/index.js';
+export type {
+  CommandSubmission,
+  IntentErrorCode,
+  JsonObject,
+  JsonValue,
+} from './protocol.js';
+export type {
+  Dmath,
+  Reducer,
+  ReplayArtifact,
+  ReplayGameRef,
+  ReplaySeedPolicy,
+  SubmittedAction,
+  TickRate,
+  TickView,
+  TranscriptVisibility,
+} from './engine/index.js';
 import {
   COMMITMENT_SCHEME,
   GAOS_REPLAY_DERIVED_SEEDS,
@@ -45,6 +63,15 @@ import {
   type TickView,
   type TranscriptVisibility,
 } from './engine/index.js';
+import {
+  applyJsonPatch,
+  createJsonPatch,
+  createValidatedJsonPatch,
+  isJsonProjection,
+  type JsonPatchOperation,
+} from './observation-codec.js';
+export { applyJsonPatch, createJsonPatch, isJsonProjection };
+export type { JsonPatchOperation };
 
 export interface SessionLimits {
   /** Maximum distance a tick target may be ahead of the open tick. */
@@ -63,12 +90,44 @@ export interface SessionStateIsolation<TState> {
   retire?(previous: TState): void;
 }
 
+export interface ObservationCodecV2Options {
+  version: 'v2';
+  maxOperations?: number;
+  maxBytes?: number;
+}
+
 export interface CommandContext {
   readonly sessionId: string;
   readonly participantId: string;
   readonly submissionId: string;
   readonly cursor: number;
   readonly tick: number;
+}
+
+export interface InterestContext {
+  readonly sessionId: string;
+  readonly participantId: string;
+  readonly scopeId: string;
+  readonly cursor: number;
+  readonly tick: number;
+  readonly declaration: JsonValue;
+}
+
+export interface InterestPolicy<TView> {
+  narrowView(view: TView, context: InterestContext): TView;
+  maxScopesPerSeat?: number;
+}
+
+export interface InterestSubmission extends SubmissionIntegrityReservation {
+  protocol: typeof PROTOCOL_ID;
+  protocolVersion: typeof PROTOCOL_VERSION;
+  sessionId: string;
+  tickId: string;
+  revision: number;
+  participantId: string;
+  submissionId: string;
+  scopeId: string;
+  declaration: JsonValue;
 }
 
 export interface SessionKernelOptions<
@@ -113,6 +172,10 @@ export interface SessionKernelOptions<
   dmath?: Dmath;
   limits?: SessionLimits;
   stateIsolation?: SessionStateIsolation<TState>;
+  /** Snapshot-only v1 by default; v2 emits bounded patches with snapshot fallback. */
+  observationCodec?: 'v1' | ObservationCodecV2Options;
+  /** Product projection applied only after the seat's partitioned view exists. */
+  interest?: InterestPolicy<TView>;
 }
 
 export interface SessionHeader<TLevel = unknown> {
@@ -200,6 +263,19 @@ export type SessionEvent =
     record: JsonObject;
   })
   | (SessionEventBase & {
+    kind: 'interest';
+    tick: number;
+    cursor: number;
+    participantId: string;
+    submissionId: string;
+    scopeId: string;
+    declaration: JsonValue;
+    canonicalCommand: string;
+    clientTime?: number;
+    prevChainHash?: string;
+    sig?: string;
+  })
+  | (SessionEventBase & {
     kind: 'seat-signature';
     tick: number;
     participantId: string;
@@ -246,11 +322,17 @@ export interface SessionTranscript<TLevel = unknown> {
 
 export interface ObservationDelta<TView = TickView<unknown, unknown>> {
   seat: string;
+  /** Named delivery scope. Defaults to the seat id for compatibility. */
+  scopeId?: string;
+  /** Scope declaration that makes omission distinguishable from no change. */
+  interest?: { declaration: JsonValue };
   /** Durable transition watermark used to resume rejection delivery. */
   transitionRevision: number;
   viewRevision: number;
   tick: number;
-  codec: 'v1';
+  codec: 'v1' | 'v2';
+  /** How this envelope was produced. Absent is read as `resolution`. */
+  origin?: 'resolution' | 'snapshot' | 'interest';
   /**
    * Applied user inputs in canonical reducer order for this view revision.
    * A reconnect snapshot applies no new input and therefore carries `[]`.
@@ -260,6 +342,7 @@ export interface ObservationDelta<TView = TickView<unknown, unknown>> {
   rejections: readonly ObservationRejectionNotice[];
   body:
     | { kind: 'snapshot'; view: TView }
+    | { kind: 'patch'; operations: readonly JsonPatchOperation[] }
     | { kind: 'unchanged' };
   /** Diagnostic only; not authentication or anti-cheat evidence. */
   viewDigest: number;
@@ -278,6 +361,17 @@ export interface IngestReceipt {
   tick: number;
   submittedParticipants: readonly string[];
   awaitingParticipants: readonly string[];
+  /** True when the accepted window has already resolved. */
+  resolved: boolean;
+}
+
+export interface InterestReceipt {
+  status: 'accepted' | 'duplicate';
+  participantId: string;
+  submissionId: string;
+  scopeId: string;
+  cursor: number;
+  tick: number;
 }
 
 export interface AdvanceSummary<TView> {
@@ -339,6 +433,8 @@ export interface FinalizeOptions {
 export interface FinalizeRunOptions extends FinalizeOptions {
   /** Authoritative run seed used to derive every ordered level seed. */
   seed: number;
+  /** Whether a run stops on loss or deliberately plays every pinned level. */
+  advancePolicy?: 'win-to-advance' | 'play-all-levels';
 }
 
 const preparedTransition: unique symbol = Symbol('gaos.prepared-transition');
@@ -359,6 +455,15 @@ interface LiveCommitment {
   revealed: boolean;
 }
 
+interface InterestScopeState<TView> {
+  participantId: string;
+  scopeId: string;
+  declared: boolean;
+  declaration: JsonValue;
+  view: TView;
+  canonical: string;
+}
+
 interface KernelState<TState, TCommand extends JsonValue, TView> {
   reducerState: TState;
   window: IntentWindow<TCommand>;
@@ -375,6 +480,7 @@ interface KernelState<TState, TCommand extends JsonValue, TView> {
   commitments: Map<string, LiveCommitment>;
   nextCommitmentIds: Map<string, number>;
   seenSalts: Map<string, string>;
+  interestScopes: Map<string, InterestScopeState<TView>>;
 }
 
 interface PreparedState<TState, TCommand extends JsonValue, TView> {
@@ -432,7 +538,12 @@ export class SessionConflictError extends Error {
 
 export class SessionAdvanceError extends Error {
   constructor(
-    public readonly code: 'not_ready' | 'stale_target' | 'invalid_target' | 'terminal',
+    public readonly code:
+      | 'not_ready'
+      | 'stale_target'
+      | 'invalid_target'
+      | 'invalid_view'
+      | 'terminal',
     message: string,
   ) {
     super(message);
@@ -448,15 +559,21 @@ export interface SessionKernel<TCommand extends JsonValue, TView> {
     forcedInput?: SubmittedAction,
   ): Prepared<AdvanceSummary<TView>>;
   prepareExtension(lane: string, record: JsonObject): Prepared<void>;
+  prepareInterest(submission: InterestSubmission): Prepared<InterestReceipt>;
   prepareSeatSignature(input: SeatSignatureInput): Prepared<void>;
   commit(prepared: Prepared<unknown>): void;
   abort(prepared: Prepared<unknown>): void;
-  observe(seat: string): TView;
+  observe(seat: string, scopeId?: string): TView;
   observeAll(): Readonly<Record<string, TView>>;
+  awaitingSeats(): readonly string[];
   cursor(): number;
   tick(): number;
   viewRevision(seat: string): number;
-  snapshot(seat: string, afterTransitionRevision?: number): ObservationDelta<TView>;
+  snapshot(
+    seat: string,
+    afterTransitionRevision?: number,
+    scopeId?: string,
+  ): ObservationDelta<TView>;
   sessionHeader(): SessionHeader;
   liveTranscript(): SessionTranscript;
   digest(): number;
@@ -519,6 +636,10 @@ function receiptKey(participantId: string, submissionId: string): string {
   return `${participantId}\u0000${submissionId}`;
 }
 
+function interestScopeKey(participantId: string, scopeId: string): string {
+  return `${participantId}\u0000${scopeId}`;
+}
+
 function commitmentKey(seat: string, commitmentId: number): string {
   return `${seat}\u0000${commitmentId}`;
 }
@@ -528,7 +649,45 @@ function eventId(sessionId: string, transitionRevision: number, index: number): 
 }
 
 function viewDigest(view: unknown): number {
-  return fnv1a(canonicalJson(view));
+  return fnv1a(canonicalSessionView(view));
+}
+
+/** Reconstruct and digest-check one v1/v2 observation envelope. */
+export function applyObservationDelta<TView>(
+  previous: TView | undefined,
+  delta: ObservationDelta<TView>,
+): TView {
+  let next: TView;
+  if (delta.body.kind === 'snapshot') {
+    next = structuredClone(delta.body.view);
+  } else if (delta.body.kind === 'unchanged') {
+    if (previous === undefined) throw new TypeError('unchanged delta requires a prior view');
+    next = structuredClone(previous);
+  } else {
+    if (delta.codec !== 'v2') throw new TypeError('patch body requires codec v2');
+    if (previous === undefined) throw new TypeError('patch delta requires a prior view');
+    next = applyJsonPatch(
+      previous as unknown as JsonValue,
+      delta.body.operations,
+    ) as unknown as TView;
+  }
+  if (viewDigest(next) !== delta.viewDigest) {
+    throw new SessionAdvanceError('invalid_view', 'observation delta digest mismatch');
+  }
+  return next;
+}
+
+function canonicalSessionView(view: unknown): string {
+  try {
+    return canonicalJson(view);
+  } catch (error) {
+    throw new SessionAdvanceError(
+      'invalid_view',
+      `reducer view must be canonically encodable (${error instanceof Error
+        ? error.message
+        : String(error)})`,
+    );
+  }
 }
 
 function compareUnicodeCodePoints(left: string, right: string): number {
@@ -542,6 +701,47 @@ function compareUnicodeCodePoints(left: string, right: string): number {
   return leftPoints.length - rightPoints.length;
 }
 
+/** Derive the durable session header without initializing reducer state. */
+export function sessionHeaderFor<
+  TLevel,
+  TState,
+  TCommand extends JsonValue,
+  TView extends TickView<unknown, unknown>,
+>(
+  options: SessionKernelOptions<TLevel, TState, TCommand, TView>,
+): SessionHeader<TLevel> {
+  return {
+    sessionId: options.sessionId,
+    game: structuredClone(options.game),
+    levelId: options.levelId,
+    ...(options.levelVersion === undefined ? {} : { levelVersion: options.levelVersion }),
+    level: structuredClone(options.level),
+    seed: options.seed,
+    seedPolicy: options.seedPolicy,
+    seats: [...options.seats],
+    cadence: options.cadence.mode === 'turns'
+      ? { mode: 'turns' }
+      : { mode: 'ticks', ticksPerSecond: options.cadence.rate.ticksPerSecond },
+    ...(options.timeoutPolicy === undefined
+      ? {}
+      : { timeoutPolicy: structuredClone(options.timeoutPolicy) }),
+    ...(options.seatKeys === undefined
+      ? {}
+      : { seatKeys: structuredClone(options.seatKeys) }),
+    ...(options.signaturePolicy === undefined
+      ? {}
+      : { signaturePolicy: structuredClone(options.signaturePolicy) }),
+    ...(options.dmath === undefined
+      ? {}
+      : {
+        dmath: {
+          algorithm: options.dmath.algorithm,
+          backend: options.dmath.backend,
+        },
+      }),
+  };
+}
+
 class SessionKernelImpl<
   TLevel,
   TState,
@@ -552,8 +752,10 @@ class SessionKernelImpl<
   private readonly isolation: SessionStateIsolation<TState>;
   private readonly limits: Required<SessionLimits>;
   private readonly header: SessionHeader<TLevel>;
+  private readonly observationCodec: Required<ObservationCodecV2Options> | 'v1';
   /** O(1) permanent idempotency index, rebuilt from durable accepted events. */
   private readonly historicalSubmissionKeys = new Set<string>();
+  private readonly historicalInterestCommands = new Map<string, string>();
   private readonly draftForks = new WeakMap<
     KernelState<TState, TCommand, TView>,
     TState
@@ -604,6 +806,19 @@ class SessionKernelImpl<
     if (options.timeoutToAction !== undefined && typeof options.timeoutToAction !== 'function') {
       throw new TypeError('timeoutToAction must be a function');
     }
+    if (options.interest !== undefined) {
+      if (!isObjectRecord(options.interest)
+        || typeof options.interest.narrowView !== 'function') {
+        throw new TypeError('interest must supply narrowView');
+      }
+      const maximum = options.interest.maxScopesPerSeat ?? 8;
+      if (!Number.isSafeInteger(maximum) || maximum <= 0) {
+        throw new RangeError('interest.maxScopesPerSeat must be a positive safe integer');
+      }
+      if (options.seatKeys === undefined) {
+        throw new TypeError('interest declarations require the RFC-010 signing roster');
+      }
+    }
     if ((options.seatKeys === undefined) !== (options.signaturePolicy === undefined)) {
       throw new TypeError('seatKeys and signaturePolicy must be supplied together');
     }
@@ -632,6 +847,21 @@ class SessionKernelImpl<
         throw new RangeError(`${key} has an invalid bound`);
       }
     }
+    if (options.observationCodec === undefined || options.observationCodec === 'v1') {
+      this.observationCodec = 'v1';
+    } else {
+      if (!isObjectRecord(options.observationCodec)
+        || options.observationCodec.version !== 'v2') {
+        throw new TypeError('observationCodec must be v1 or a v2 options object');
+      }
+      const maxOperations = options.observationCodec.maxOperations ?? 2_048;
+      const maxBytes = options.observationCodec.maxBytes ?? 65_536;
+      if (!Number.isSafeInteger(maxOperations) || maxOperations <= 0
+        || !Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+        throw new RangeError('v2 observation codec bounds must be positive safe integers');
+      }
+      this.observationCodec = { version: 'v2', maxOperations, maxBytes };
+    }
     this.isolation = options.stateIsolation ?? {
       fork: (state: TState): TState => structuredClone(state),
     };
@@ -648,46 +878,34 @@ class SessionKernelImpl<
         + ` (${error instanceof Error ? error.message : String(error)})`,
       );
     }
-    this.header = {
-      sessionId: options.sessionId,
-      game: structuredClone(options.game),
-      levelId: options.levelId,
-      ...(options.levelVersion === undefined ? {} : { levelVersion: options.levelVersion }),
-      level: structuredClone(options.level),
-      seed: options.seed,
-      seedPolicy: options.seedPolicy,
-      seats: [...options.seats],
-      cadence: options.cadence.mode === 'turns'
-        ? { mode: 'turns' }
-        : { mode: 'ticks', ticksPerSecond: options.cadence.rate.ticksPerSecond },
-      ...(options.timeoutPolicy === undefined
-        ? {}
-        : { timeoutPolicy: structuredClone(options.timeoutPolicy) }),
-      ...(options.seatKeys === undefined
-        ? {}
-        : { seatKeys: structuredClone(options.seatKeys) }),
-      ...(options.signaturePolicy === undefined
-        ? {}
-        : { signaturePolicy: structuredClone(options.signaturePolicy) }),
-      ...(options.dmath === undefined
-        ? {}
-        : {
-          dmath: {
-            algorithm: options.dmath.algorithm,
-            backend: options.dmath.backend,
-          },
-        }),
-    };
+    this.header = sessionHeaderFor(options);
     const initialView = options.reducer.view(initialState);
     const participants = this.validatedParticipantsForView(initialView);
     const views = new Map<string, TView>();
     const viewCanonical = new Map<string, string>();
     const revisions = new Map<string, number>();
+    const interestScopes = new Map<string, InterestScopeState<TView>>();
     for (const seat of options.seats) {
       const seatView = this.viewFor(initialState, seat);
       views.set(seat, seatView);
-      viewCanonical.set(seat, canonicalJson(seatView));
+      let canonical: string;
+      try {
+        canonical = canonicalSessionView(seatView);
+        viewCanonical.set(seat, canonical);
+      } catch (error) {
+        throw new TypeError(
+          error instanceof Error ? error.message : 'reducer view must be canonically encodable',
+        );
+      }
       revisions.set(seat, 0);
+      interestScopes.set(interestScopeKey(seat, seat), {
+        participantId: seat,
+        scopeId: seat,
+        declared: false,
+        declaration: null,
+        view: structuredClone(seatView),
+        canonical,
+      });
     }
     this.live = {
       reducerState: initialState,
@@ -704,6 +922,7 @@ class SessionKernelImpl<
       commitments: new Map(),
       nextCommitmentIds: new Map(),
       seenSalts: new Map(),
+      interestScopes,
     };
     if (transcript !== undefined) this.rehydrate(transcript);
   }
@@ -713,6 +932,70 @@ class SessionKernelImpl<
     return this.options.reducer.viewFor
       ? this.options.reducer.viewFor(state, seat)
       : this.options.reducer.view(state);
+  }
+
+  private encodedObservation(
+    previous: TView,
+    next: TView,
+    unchanged: boolean,
+  ): Pick<ObservationDelta<TView>, 'codec' | 'body'> {
+    if (unchanged) {
+      return {
+        codec: this.observationCodec === 'v1' ? 'v1' : 'v2',
+        body: { kind: 'unchanged' },
+      };
+    }
+    const snapshot = structuredClone(next);
+    if (this.observationCodec === 'v1') {
+      return { codec: 'v1', body: { kind: 'snapshot', view: snapshot } };
+    }
+    try {
+      const operations = createValidatedJsonPatch(
+        previous as unknown as JsonValue,
+        next as unknown as JsonValue,
+      );
+      const patchBytes = new TextEncoder().encode(canonicalJson(
+        operations as unknown as JsonValue,
+      )).length;
+      const snapshotBytes = new TextEncoder().encode(canonicalSessionView(next)).length;
+      if (operations.length <= this.observationCodec.maxOperations
+        && patchBytes < Math.min(snapshotBytes, this.observationCodec.maxBytes)) {
+        return { codec: 'v2', body: { kind: 'patch', operations } };
+      }
+    } catch {
+      // Unsafe pointer keys or a non-beneficial representation use the
+      // mandatory snapshot fallback.
+    }
+    return { codec: 'v2', body: { kind: 'snapshot', view: snapshot } };
+  }
+
+  private scopedView(
+    fullView: TView,
+    scope: Pick<InterestScopeState<TView>, 'participantId' | 'scopeId' | 'declaration'>,
+    cursor: number,
+    tick: number,
+  ): { view: TView; canonical: string } {
+    const view = ('declared' in scope && !scope.declared) || this.options.interest === undefined
+      ? structuredClone(fullView)
+      : this.options.interest.narrowView(structuredClone(fullView), {
+        sessionId: this.options.sessionId,
+        participantId: scope.participantId,
+        scopeId: scope.scopeId,
+        cursor,
+        tick,
+        declaration: structuredClone(scope.declaration),
+      });
+    const canonical = canonicalSessionView(view);
+    if (!isJsonProjection(
+      fullView as unknown as JsonValue,
+      view as unknown as JsonValue,
+    )) {
+      throw new SessionAdvanceError(
+        'invalid_view',
+        `interest scope ${scope.scopeId} widened or altered the partitioned view`,
+      );
+    }
+    return { view: structuredClone(view), canonical };
   }
 
   private validatedParticipantsForView(view: TView): string[] {
@@ -741,6 +1024,7 @@ class SessionKernelImpl<
       commitments: cloneMapValues(this.live.commitments),
       nextCommitmentIds: new Map(this.live.nextCommitmentIds),
       seenSalts: new Map(this.live.seenSalts),
+      interestScopes: cloneMapValues(this.live.interestScopes),
     };
     this.draftForks.set(draft, reducerState);
     return draft;
@@ -905,7 +1189,11 @@ class SessionKernelImpl<
           draft,
           [],
           [],
-          { ...existing.receipt, status: 'duplicate' },
+          {
+            ...existing.receipt,
+            status: 'duplicate',
+            resolved: existing.cursor < this.live.cursor,
+          },
           true,
         );
       } catch (error) {
@@ -979,6 +1267,25 @@ class SessionKernelImpl<
         );
       }
     }
+    if (this.options.reducer.validateCommand) {
+      const validationState = this.isolation.fork(this.live.reducerState);
+      try {
+        this.options.reducer.validateCommand(
+          validationState,
+          submission.participantId,
+          structuredClone(preview),
+        );
+      } catch (error) {
+        throw new IntentCollectionError(
+          'invalid_submission',
+          `command rejected by reducer (${error instanceof Error
+            ? error.message
+            : String(error)})`,
+        );
+      } finally {
+        this.isolation.discard?.(validationState);
+      }
+    }
     const collected = collectIntent(this.live.window, submission);
     const draft = this.forkLive();
     draft.window = structuredClone(collected.window);
@@ -996,6 +1303,7 @@ class SessionKernelImpl<
       tick: draft.tick,
       submittedParticipants,
       awaitingParticipants,
+      resolved: false,
     };
     draft.receipts.set(key, {
       canonicalCommand,
@@ -1207,27 +1515,37 @@ class SessionKernelImpl<
     for (const seat of this.options.seats) {
       const next = this.viewFor(draft.reducerState, seat);
       const revision = (draft.viewRevisions.get(seat) ?? 0) + 1;
-      const canonicalNext = canonicalJson(next);
-      const nextDigest = fnv1a(canonicalNext);
-      const unchanged = draft.viewCanonical.get(seat) === canonicalNext;
+      const canonicalNext = canonicalSessionView(next);
       const nextSnapshot = structuredClone(next);
-      const delta: ObservationDelta<TView> = {
-        seat,
-        transitionRevision: draft.transitionRevision + 1,
-        viewRevision: revision,
-        tick: draft.tick,
-        codec: 'v1',
-        acknowledgements: structuredClone(acknowledgements),
-        rejections: [],
-        body: unchanged
-          ? { kind: 'unchanged' }
-          : { kind: 'snapshot', view: nextSnapshot },
-        viewDigest: nextDigest,
-      };
       draft.views.set(seat, nextSnapshot);
       draft.viewCanonical.set(seat, canonicalNext);
       draft.viewRevisions.set(seat, revision);
-      deltas.push(delta);
+      const scopes = [...draft.interestScopes.values()].filter(
+        (scope) => scope.participantId === seat,
+      );
+      for (const scope of scopes) {
+        const scoped = this.scopedView(nextSnapshot, scope, draft.cursor, draft.tick);
+        const unchanged = scope.canonical === scoped.canonical;
+        const encoded = this.encodedObservation(scope.view, scoped.view, unchanged);
+        deltas.push({
+          seat,
+          scopeId: scope.scopeId,
+          ...(scope.declared
+            ? { interest: { declaration: structuredClone(scope.declaration) } }
+            : {}),
+          transitionRevision: draft.transitionRevision + 1,
+          viewRevision: revision,
+          tick: draft.tick,
+          codec: encoded.codec,
+          origin: 'resolution',
+          acknowledgements: structuredClone(acknowledgements),
+          rejections: [],
+          body: encoded.body,
+          viewDigest: fnv1a(scoped.canonical),
+        });
+        scope.view = scoped.view;
+        scope.canonical = scoped.canonical;
+      }
     }
     draft.window = createIntentWindow(
       this.options.sessionId,
@@ -1287,14 +1605,19 @@ class SessionKernelImpl<
     >,
   ): ObservationDelta<TView>[] {
     const transitionRevision = draft.transitionRevision + 1;
-    return this.options.seats.map((seat) => {
-      const view = draft.views.get(seat)!;
+    return [...draft.interestScopes.values()].map((scope) => {
+      const seat = scope.participantId;
       return {
         seat,
+        scopeId: scope.scopeId,
+        ...(scope.declared
+          ? { interest: { declaration: structuredClone(scope.declaration) } }
+          : {}),
         transitionRevision,
         viewRevision: draft.viewRevisions.get(seat)!,
         tick: draft.tick,
-        codec: 'v1',
+        codec: this.observationCodec === 'v1' ? 'v1' : 'v2',
+        origin: 'resolution',
         acknowledgements: [],
         rejections: [{
           seat,
@@ -1305,7 +1628,7 @@ class SessionKernelImpl<
           code: rejection.code,
         }],
         body: { kind: 'unchanged' },
-        viewDigest: viewDigest(view),
+        viewDigest: fnv1a(scope.canonical),
       };
     });
   }
@@ -1634,6 +1957,160 @@ class SessionKernelImpl<
     }
   }
 
+  prepareInterest(submission: InterestSubmission): Prepared<InterestReceipt> {
+    if (this.options.interest === undefined) {
+      throw new SessionConflictError('session has no interest policy');
+    }
+    if (!isObjectRecord(submission)) throw new TypeError('interest submission must be an object');
+    if (submission.protocol !== PROTOCOL_ID || submission.protocolVersion !== PROTOCOL_VERSION) {
+      throw new IntentCollectionError('invalid_protocol', `expected ${PROTOCOL_ID} ${PROTOCOL_VERSION}`);
+    }
+    if (submission.sessionId !== this.options.sessionId) {
+      throw new IntentCollectionError('wrong_session', 'submission session does not match endpoint');
+    }
+    if (!this.options.seats.includes(submission.participantId)) {
+      throw new IntentCollectionError('unknown_participant', 'interest names an unknown seat');
+    }
+    if (!isParticipantId(submission.scopeId)) {
+      throw new IntentCollectionError(
+        'invalid_submission',
+        'scopeId must match the portable seat-id pattern',
+      );
+    }
+    if (typeof submission.submissionId !== 'string' || !submission.submissionId.trim()) {
+      throw new IntentCollectionError('invalid_submission', 'submissionId is required');
+    }
+    if (submission.revision !== this.live.cursor || submission.tickId !== this.live.window.tickId) {
+      throw new IntentCollectionError('stale_tick', 'interest cursor does not match the open window');
+    }
+    let canonicalCommand: string;
+    try {
+      canonicalCommand = canonicalJson({
+        kind: 'interest',
+        scopeId: submission.scopeId,
+        declaration: submission.declaration,
+      });
+    } catch (error) {
+      throw new IntentCollectionError(
+        'invalid_submission',
+        error instanceof Error ? error.message : 'interest declaration must be JSON',
+      );
+    }
+    const key = receiptKey(submission.participantId, submission.submissionId);
+    const prior = this.historicalInterestCommands.get(key);
+    const receipt: InterestReceipt = {
+      status: prior === undefined ? 'accepted' : 'duplicate',
+      participantId: submission.participantId,
+      submissionId: submission.submissionId,
+      scopeId: submission.scopeId,
+      cursor: this.live.cursor,
+      tick: this.live.tick,
+    };
+    if (prior !== undefined) {
+      if (prior !== canonicalCommand) {
+        throw new SessionConflictError('interest submission id was reused with different content');
+      }
+      const draft = this.forkLive();
+      try {
+        return this.makePrepared(draft, [], [], receipt, true);
+      } catch (error) {
+        this.discardDraft(draft);
+        throw error;
+      }
+    }
+    if (this.historicalSubmissionKeys.has(key)) {
+      throw new SessionConflictError('submission id was already used by a gameplay command');
+    }
+    if (this.header.signaturePolicy !== undefined) {
+      if (submission.clientTime === undefined
+        || submission.prevChainHash === undefined
+        || submission.sig === undefined) {
+        throw new IntentCollectionError(
+          'invalid_submission',
+          'interest changes require a tier-2 signature in signed sessions',
+        );
+      }
+      if (!Number.isSafeInteger(submission.clientTime) || submission.clientTime < 0) {
+        throw new IntentCollectionError(
+          'invalid_submission',
+          'clientTime must be a non-negative safe integer',
+        );
+      }
+      try {
+        signatureBytesFromBase64(submission.prevChainHash, 'prevChainHash', 32);
+        signatureBytesFromBase64(submission.sig, 'sig', 64);
+      } catch (error) {
+        throw new IntentCollectionError(
+          'invalid_submission',
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
+    const existingScope = this.live.interestScopes.get(
+      interestScopeKey(submission.participantId, submission.scopeId),
+    );
+    if (existingScope === undefined) {
+      const count = [...this.live.interestScopes.values()].filter(
+        (scope) => scope.participantId === submission.participantId,
+      ).length;
+      if (count >= (this.options.interest.maxScopesPerSeat ?? 8)) {
+        throw new SessionConflictError('interest scope limit reached for seat');
+      }
+    }
+    const fullView = this.live.views.get(submission.participantId)!;
+    const nextScope = this.scopedView(fullView, {
+      participantId: submission.participantId,
+      scopeId: submission.scopeId,
+      declaration: submission.declaration,
+    }, this.live.cursor, this.live.tick);
+    const draft = this.forkLive();
+    try {
+      draft.interestScopes.set(
+        interestScopeKey(submission.participantId, submission.scopeId),
+        {
+          participantId: submission.participantId,
+          scopeId: submission.scopeId,
+          declared: true,
+          declaration: structuredClone(submission.declaration),
+          view: structuredClone(nextScope.view),
+          canonical: nextScope.canonical,
+        },
+      );
+      const delta: ObservationDelta<TView> = {
+        seat: submission.participantId,
+        scopeId: submission.scopeId,
+        interest: { declaration: structuredClone(submission.declaration) },
+        transitionRevision: draft.transitionRevision + 1,
+        viewRevision: draft.viewRevisions.get(submission.participantId)!,
+        tick: draft.tick,
+        codec: this.observationCodec === 'v1' ? 'v1' : 'v2',
+        origin: 'interest',
+        acknowledgements: [],
+        rejections: [],
+        body: { kind: 'snapshot', view: structuredClone(nextScope.view) },
+        viewDigest: fnv1a(nextScope.canonical),
+      };
+      return this.makePrepared(draft, [{
+        kind: 'interest',
+        tick: draft.tick,
+        cursor: draft.cursor,
+        participantId: submission.participantId,
+        submissionId: submission.submissionId,
+        scopeId: submission.scopeId,
+        declaration: structuredClone(submission.declaration),
+        canonicalCommand,
+        ...(submission.clientTime === undefined ? {} : { clientTime: submission.clientTime }),
+        ...(submission.prevChainHash === undefined
+          ? {}
+          : { prevChainHash: submission.prevChainHash }),
+        ...(submission.sig === undefined ? {} : { sig: submission.sig }),
+      }], [delta], receipt);
+    } catch (error) {
+      this.discardDraft(draft);
+      throw error;
+    }
+  }
+
   prepareSeatSignature(input: SeatSignatureInput): Prepared<void> {
     if (this.header.signaturePolicy === undefined) {
       throw new SessionConflictError('session has no RFC-010 signature policy');
@@ -1685,10 +2162,16 @@ class SessionKernelImpl<
     const previous = this.live.reducerState;
     this.live = state.next;
     for (const event of prepared.events) {
-      if (event.kind === 'intent-accepted') {
+      if (event.kind === 'intent-accepted' || event.kind === 'interest') {
         this.historicalSubmissionKeys.add(
           receiptKey(event.participantId, event.submissionId),
         );
+        if (event.kind === 'interest') {
+          this.historicalInterestCommands.set(
+            receiptKey(event.participantId, event.submissionId),
+            event.canonicalCommand,
+          );
+        }
       }
     }
     state.completion = 'committed';
@@ -1705,15 +2188,21 @@ class SessionKernelImpl<
     for (const draft of state.drafts) this.isolation.discard?.(draft);
   }
 
-  observe(seat: string): TView {
-    const view = this.live.views.get(seat);
-    if (view === undefined) throw new RangeError(`unknown seat ${seat}`);
-    return structuredClone(view);
+  observe(seat: string, scopeId = seat): TView {
+    const scope = this.live.interestScopes.get(interestScopeKey(seat, scopeId));
+    if (scope === undefined) throw new RangeError(`unknown interest scope ${seat}/${scopeId}`);
+    return structuredClone(scope.view);
   }
 
   observeAll(): Readonly<Record<string, TView>> {
     return Object.freeze(Object.fromEntries(
       this.options.seats.map((seat) => [seat, this.observe(seat)]),
+    ));
+  }
+
+  awaitingSeats(): readonly string[] {
+    return Object.freeze(this.live.window.participants.filter(
+      (seat) => !Object.hasOwn(this.live.window.intents, seat),
     ));
   }
 
@@ -1731,19 +2220,30 @@ class SessionKernelImpl<
     return revision;
   }
 
-  snapshot(seat: string, afterTransitionRevision = 0): ObservationDelta<TView> {
+  snapshot(
+    seat: string,
+    afterTransitionRevision = 0,
+    scopeId = seat,
+  ): ObservationDelta<TView> {
     if (!Number.isSafeInteger(afterTransitionRevision)
       || afterTransitionRevision < 0
       || afterTransitionRevision > this.live.transitionRevision) {
       throw new RangeError('afterTransitionRevision must identify committed session history');
     }
-    const view = this.observe(seat);
+    const scope = this.live.interestScopes.get(interestScopeKey(seat, scopeId));
+    if (scope === undefined) throw new RangeError(`unknown interest scope ${seat}/${scopeId}`);
+    const view = structuredClone(scope.view);
     return {
       seat,
+      scopeId,
+      ...(scope.declared
+        ? { interest: { declaration: structuredClone(scope.declaration) } }
+        : {}),
       transitionRevision: this.live.transitionRevision,
       viewRevision: this.viewRevision(seat),
       tick: this.live.tick,
-      codec: 'v1',
+      codec: this.observationCodec === 'v1' ? 'v1' : 'v2',
+      origin: 'snapshot',
       acknowledgements: [],
       rejections: this.rejectionNoticesSince(seat, afterTransitionRevision),
       body: { kind: 'snapshot', view },
@@ -1832,6 +2332,7 @@ class SessionKernelImpl<
           tick: event.tick,
           submittedParticipants,
           awaitingParticipants,
+          resolved: event.revision < this.live.cursor,
         };
         this.live.receipts.set(receiptKey(event.participantId, event.submissionId), {
           canonicalCommand: event.canonicalCommand,
@@ -1839,6 +2340,47 @@ class SessionKernelImpl<
           receipt,
           cursor: event.revision,
         });
+      } else if (event.kind === 'interest') {
+        if (this.options.interest === undefined) {
+          throw new TypeError('transcript contains interest but options have no interest policy');
+        }
+        if (!this.options.seats.includes(event.participantId)
+          || !isParticipantId(event.scopeId)
+          || !Number.isSafeInteger(event.cursor)
+          || event.cursor !== this.live.cursor) {
+          throw new TypeError('transcript contains an invalid interest event');
+        }
+        const expectedCanonical = canonicalJson({
+          kind: 'interest',
+          scopeId: event.scopeId,
+          declaration: event.declaration,
+        });
+        if (event.canonicalCommand !== expectedCanonical) {
+          throw new TypeError('interest canonicalCommand does not match its declaration');
+        }
+        const key = receiptKey(event.participantId, event.submissionId);
+        if (this.historicalSubmissionKeys.has(key)) {
+          throw new TypeError('transcript reuses an interest submission id');
+        }
+        this.historicalSubmissionKeys.add(key);
+        this.historicalInterestCommands.set(key, expectedCanonical);
+        const scoped = this.scopedView(
+          this.live.views.get(event.participantId)!,
+          event,
+          this.live.cursor,
+          this.live.tick,
+        );
+        this.live.interestScopes.set(
+          interestScopeKey(event.participantId, event.scopeId),
+          {
+            participantId: event.participantId,
+            scopeId: event.scopeId,
+            declared: true,
+            declaration: structuredClone(event.declaration),
+            view: scoped.view,
+            canonical: scoped.canonical,
+          },
+        );
       } else if (event.kind === 'resolution') {
         for (const { participantId, action } of event.inputs) {
           if (!participantId) continue;
@@ -1903,8 +2445,20 @@ class SessionKernelImpl<
         for (const seat of this.options.seats) {
           const seatView = this.viewFor(this.live.reducerState, seat);
           this.live.views.set(seat, seatView);
-          this.live.viewCanonical.set(seat, canonicalJson(seatView));
+          const canonical = canonicalSessionView(seatView);
+          this.live.viewCanonical.set(seat, canonical);
           this.live.viewRevisions.set(seat, (this.live.viewRevisions.get(seat) ?? 0) + 1);
+          for (const scope of this.live.interestScopes.values()) {
+            if (scope.participantId !== seat) continue;
+            const scoped = this.scopedView(
+              seatView,
+              scope,
+              this.live.cursor,
+              this.live.tick,
+            );
+            scope.view = scoped.view;
+            scope.canonical = scoped.canonical;
+          }
         }
         this.evictReceipts(this.live);
       } else if (event.kind === 'rejection') {
@@ -1960,12 +2514,17 @@ export function rehydrateKernel<
   TView extends TickView<unknown, unknown>,
 >(
   options: SessionKernelOptions<TLevel, TState, TCommand, TView>,
-  transcript: SessionTranscript<TLevel>,
+  transcript: SessionTranscript<TLevel> | readonly SessionEvent[],
 ): SessionKernel<TCommand, TView> {
-  if (!isObjectRecord(transcript)) {
-    throw new TypeError('transcript must be an object');
+  if (!Array.isArray(transcript) && !isObjectRecord(transcript)) {
+    throw new TypeError('transcript must be an object or an event array');
   }
-  return new SessionKernelImpl(options, transcript);
+  return new SessionKernelImpl(
+    options,
+    Array.isArray(transcript)
+      ? { header: sessionHeaderFor(options), events: transcript }
+      : transcript as SessionTranscript<TLevel>,
+  );
 }
 
 function replayInput(input: CanonicalInput, perm: readonly number[]): ReplayResolutionInput {
@@ -1976,6 +2535,7 @@ function replayInput(input: CanonicalInput, perm: readonly number[]): ReplayReso
   return {
     wireId: wireIndex < 0 ? action.id : `Action ${wireIndex + 1}`,
     canonicalId: action.id,
+    ...(action.payload === undefined ? {} : { payload: structuredClone(action.payload) }),
     ...(action.x === undefined ? {} : { x: action.x }),
     ...(action.y === undefined ? {} : { y: action.y }),
     ...(action.index === undefined ? {} : { index: action.index }),
@@ -2139,6 +2699,27 @@ export function finalizeReplay<TLevel>(
         levelIndex: 0,
         lane: event.lane,
         record: structuredClone(event.record),
+        ...(options.includeHostTime && event.hostTime !== undefined
+          ? { hostTime: event.hostTime }
+          : {}),
+      });
+    } else if (event.kind === 'interest') {
+      records.push({
+        kind: 'interest',
+        n: records.length,
+        levelIndex: 0,
+        tick: event.tick,
+        cursor: event.cursor,
+        participantId: event.participantId,
+        submissionId: event.submissionId,
+        scopeId: event.scopeId,
+        declaration: structuredClone(event.declaration),
+        canonicalCommand: event.canonicalCommand,
+        ...(event.clientTime === undefined ? {} : { clientTime: event.clientTime }),
+        ...(event.prevChainHash === undefined
+          ? {}
+          : { prevChainHash: event.prevChainHash }),
+        ...(event.sig === undefined ? {} : { sig: event.sig }),
         ...(options.includeHostTime && event.hostTime !== undefined
           ? { hostTime: event.hostTime }
           : {}),
@@ -2320,7 +2901,9 @@ export function finalizeRunReplay<TLevel>(
         : { includeHostTime: options.includeHostTime }),
     });
     const level = segment.header.levels[0]!;
-    if (levelIndex < transcripts.length - 1 && level.result.status !== 'won') {
+    if (levelIndex < transcripts.length - 1
+      && (options.advancePolicy ?? 'win-to-advance') === 'win-to-advance'
+      && level.result.status !== 'won') {
       throw new TypeError(`run transcript ${levelIndex} must be won before another level`);
     }
     levels.push({
