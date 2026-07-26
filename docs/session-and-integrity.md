@@ -167,6 +167,96 @@ every `patch`, `snapshot`, or `unchanged` body with `applyObservationDelta`,
 which checks `viewDigest`. The snapshot-only v1 negotiation path was removed
 before release.
 
+### Tuning observation delivery — what each option costs and buys
+
+Every option above is product-owned; the SDK picks defaults that suit a small
+table and gets out of the way. The defaults are **not** right for every shape,
+and the trade they make is always the same one: **CPU against bandwidth.**
+
+| Option | Default | Raise / enable it to | Cost of doing so |
+|---|---|---|---|
+| `patchStrategy` | `'adaptive'` | `'never'` gives predictable, lower CPU and no diff walk | Full snapshot bytes every changed tick; lean on transport compression |
+| `minReduction` | `4` | Higher = patch only on a decisive win, less wasted diffing | More snapshots, more bytes |
+| `patchBackoffTicks` | `8` | Higher = give up on patching faster after a loss | Slower to notice the view became patch-friendly again |
+| `maxPatchBackoffTicks` | `32` | Higher = stay backed off longer | Longer to recover after a transient burst of churn |
+| `maxOperations` | `2048` | Lower = abandon expensive walks sooner | Large-but-genuine patches degrade to snapshots |
+| `maxBytes` | `65536` | Lower = reject large patches earlier | Same |
+
+#### Measured effects
+
+Synthetic table, one desktop, 20 Hz, 4 seats, uncompressed unless stated.
+Reproduce with `npm run observations:benchmark`. Treat these as *shape*, not as
+your numbers — run it against your own views. Per-run variance is roughly
+±20 %, so read ratios rather than absolute milliseconds.
+
+"Budget" is the share of one 20 Hz tick (50 ms) spent encoding for all four
+seats.
+
+| entities | changed/tick | snapshot budget | adaptive budget | egress: snapshot → adaptive |
+|---|---|---|---|---|
+| 50 | 1–5 | ~4.5 % | ~11.7 % | 0.288 → 0.007 MiB/s |
+| 50 | 20–all | ~4.6 % | **~4.8 %** (backed off) | 0.288 → 0.043 MiB/s |
+| 200 | 1–20 | ~16 % | ~32 % | 1.157 → 0.007–0.015 MiB/s |
+| 200 | all | ~15.5 % | **~16.2 %** (backed off) | 1.158 → 0.132 MiB/s |
+| 500 | 1–20 | ~39 % | **70–77 %** | 2.930 → 0.007–0.015 MiB/s |
+| 500 | all | ~39 % | **~41 %** (backed off) | 2.931 → 0.293 MiB/s |
+
+Three things this table is saying:
+
+1. **The circuit breaker does its job.** Wherever patches stop paying
+   (`changed = all`), adaptive converges to within ~5 % of snapshot CPU. You do
+   not need to tune anything for the wholesale-churn case.
+2. **Patching is close to free on small tables and expensive on large ones.**
+   At 50 entities the whole delivery path is noise. At 500 it is the dominant
+   per-tick cost.
+3. **The expensive cells are the ones where patching is *winning*.** At 500
+   entities with 1–20 changes the patch is a 200–400× bandwidth win, and it
+   costs ~2× the CPU. Backoff never fires there, because nothing is going
+   wrong — see the caveat below.
+
+#### Choosing
+
+- **Small tables (tens of entities):** keep the defaults. Both paths are
+  negligible and adaptive is a large bandwidth win for no meaningful cost.
+- **Medium (~200):** keep the defaults. Roughly 2× CPU for roughly 100×
+  bandwidth is a good trade at 16 % → 32 % of budget.
+- **Large (500+) and CPU-bound:** consider `patchStrategy: 'never'` plus
+  transport compression. Adaptive sits at 70–77 % of a 20 Hz budget *on a fast
+  desktop*, and a constrained isolate is materially slower. Snapshot-only with
+  zlib level 1 costs ~39 % of budget and still delivers 2.93 → 0.293 MiB/s.
+- **Large and bandwidth-bound:** stay adaptive. Two orders of magnitude of
+  egress is worth 2× encode CPU if egress is what you are paying for.
+
+Measure before choosing. The crossover depends on your view shape, and a rich
+ECS component set moves it.
+
+#### Caveat: backoff is byte-aware, not CPU-aware
+
+The circuit breaker reacts to a patch **losing on bytes**. A patch that wins
+decisively on bytes never backs off, however much CPU it costs — which is why
+the 500-entity / few-changes cells stay at 70–77 % of budget rather than
+converging like the `all`-changed cells do.
+
+This is deliberate: paying ~2× CPU for ~300× bandwidth is usually right, and
+the opposite bargain (7 % fewer bytes for 5× the CPU) is what `minReduction`
+already prevents. But nothing weighs the two automatically, so **a large table
+with light per-tick churn is the one shape you must decide for yourself.** For
+that shape, `patchStrategy: 'never'` plus compression is often the better
+default, and no amount of backoff tuning will discover that for you.
+
+#### Transport compression
+
+Not an SDK concern — it belongs to your WebSocket stack — but it interacts
+directly with the choice above, so measure it before adding a codec. In the
+synthetic benchmark zlib level 1 takes a 500-entity snapshot from 38,420 to
+3,839 bytes for ~0.10 ms/seat, while level 6 reaches 3,361 bytes for ~0.57
+ms/seat: **12 % more compression for roughly 5× the CPU.** Since CPU is the
+binding constraint in every large-table case above, **prefer level 1**. These
+synchronous zlib numbers expose the trade; they are not a substitute for
+measuring your actual stack, which may compress on another thread or reuse a
+context across messages (both of which improve on these figures).
+
+
 Cached seat and scope views are derived immutable values. Prepared drafts share
 them copy-on-write and replace references after a resolution, avoiding
 full-graph clones. This is internal only: `observe`, `snapshot`, interest

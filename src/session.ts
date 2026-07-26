@@ -95,6 +95,18 @@ export interface SessionStateIsolation<TState> {
   retire?(previous: TState): void;
 }
 
+/**
+ * Observation delivery tuning. Every option trades **CPU against bandwidth**;
+ * the defaults suit a small table. See the "Tuning observation delivery"
+ * section of the sessions and integrity guide for measured effects, and run
+ * `npm run observations:benchmark` against your own views before changing any
+ * of them.
+ *
+ * The one shape the defaults do not decide well is a **large table with light
+ * per-tick churn**: patches win hugely on bytes there and never trigger
+ * backoff, so they hold ~2× the encode CPU indefinitely. A CPU-bound host at
+ * that shape usually wants `patchStrategy: 'never'` plus transport compression.
+ */
 export interface ObservationCodecV2Options {
   version: 'v2';
   /**
@@ -113,7 +125,16 @@ export interface ObservationCodecV2Options {
    * below `patchBackoffTicks`.
    */
   maxPatchBackoffTicks?: number;
+  /**
+   * Abandon the diff once it exceeds this many operations. Default 2048.
+   * Lower it to cap the cost of walks that were never going to pay; the
+   * penalty is that large-but-genuine patches degrade to snapshots.
+   */
   maxOperations?: number;
+  /**
+   * Reject a patch whose canonical form exceeds this many bytes. Default
+   * 65536. Same trade as `maxOperations`, measured in bytes rather than ops.
+   */
   maxBytes?: number;
   /**
    * Minimum snapshot:patch size ratio required to ship a patch. Default 4.
