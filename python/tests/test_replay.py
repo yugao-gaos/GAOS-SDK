@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import json
 import struct
@@ -116,7 +117,7 @@ def test_v11_grouped_resolution_round_trips_and_projects_actions():
             "complete",
             "verifiedPayload requires reveal",
         ),
-        ({}, "deadline", "deadline cause requires systemInput"),
+        ({}, "timeout", "timeout cause requires systemInput"),
     ],
 )
 def test_v11_grouped_resolution_rejects_malformed_inputs(
@@ -156,7 +157,7 @@ def test_v11_records_and_actions_must_have_an_exact_projection():
         serialize_replay_jsonl(artifact)
 
 
-def test_schema_rejects_v11_commitment_and_deadline_shape_errors():
+def test_schema_rejects_v11_commitment_and_timeout_shape_errors():
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
     validator = Draft202012Validator(schema)
     legacy = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
@@ -175,7 +176,7 @@ def test_schema_rejects_v11_commitment_and_deadline_shape_errors():
             "levelIndex": 0,
             "tick": 0,
             "inputs": [],
-            "cause": "deadline",
+            "cause": "timeout",
         }],
     }
 
@@ -199,16 +200,18 @@ def test_rfc010_reservation_slots_round_trip_without_v11_semantics():
     validator = Draft202012Validator(schema)
     artifact = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
     artifact["header"]["formatVersion"] = GAOS_REPLAY_FORMAT_VERSION
-    artifact["header"]["seats"] = [{
+    artifact["header"]["seatKeys"] = [{
         "id": "red",
         "publicKey": "reserved-key",
         "alg": "reserved-algorithm",
     }]
     artifact["header"]["signaturePolicy"] = {"scheme": "reserved", "N": 8}
+    artifact["header"]["timeoutPolicy"] = {"mode": "ticks", "maximum": 90}
     artifact["actions"][0].update({
         "submissionId": "reserved-submission",
         "canonicalCommand": '{"move":1}',
         "cursor": 0,
+        "clientTime": 1_785_032_000_000,
         "prevChainHash": "reserved-chain-link",
         "sig": "reserved-signature",
     })
@@ -217,9 +220,65 @@ def test_rfc010_reservation_slots_round_trip_without_v11_semantics():
     validator.validate(artifact)
     assert parse_replay_jsonl(serialize_replay_jsonl(artifact)) == artifact
 
+    periodic = copy.deepcopy(artifact)
+    periodic["actions"] = []
+    periodic["records"] = [{
+        "kind": "seat-signature",
+        "n": 0,
+        "levelIndex": 0,
+        "tick": 12,
+        "participantId": "red",
+        "clientTime": 1_785_032_000_000,
+        "prevChainHash": "reserved-chain-link",
+        "sig": "reserved-periodic-signature",
+        "hostTime": 1_785_032_000_100,
+    }]
+    assert validate_replay_artifact(periodic) == []
+    validator.validate(periodic)
+    assert parse_replay_jsonl(serialize_replay_jsonl(periodic)) == periodic
+
     artifact["header"]["formatVersion"] = GAOS_REPLAY_LEGACY_FORMAT_VERSION
     assert validate_replay_artifact(artifact)
     assert list(validator.iter_errors(artifact))
+
+
+def test_python_validator_matches_json_integer_numbers_and_reports_safely():
+    artifact = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
+    artifact["header"]["formatVersion"] = GAOS_REPLAY_FORMAT_VERSION
+    artifact["actions"] = []
+    artifact["records"] = [{
+        "kind": "seat-signature",
+        "n": 0.0,
+        "levelIndex": 0.0,
+        "tick": 0.0,
+        "participantId": "red",
+    }]
+    assert validate_replay_artifact(artifact) == []
+
+    artifact["records"][0]["kind"] = []
+    problems = validate_replay_artifact(artifact)
+    assert any("unknown kind" in problem for problem in problems)
+
+    artifact["records"][0]["kind"] = "\ud800"
+    encoded = json.dumps(
+        validate_replay_artifact(artifact),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    assert encoded
+
+
+def test_validators_require_extension_slots_to_be_objects():
+    artifact = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
+    artifact["header"]["extensions"] = []
+    artifact["header"]["totals"]["extensions"] = []
+    artifact["header"]["levels"][0]["extensions"] = []
+    artifact["header"]["levels"][0]["result"]["extensions"] = []
+
+    problems = "\n".join(validate_replay_artifact(artifact))
+    assert "header.extensions must be an object" in problems
+    assert "header.totals.extensions must be an object" in problems
+    assert "level 0 extensions must be an object" in problems
+    assert "level 0 result.extensions must be an object" in problems
 
 
 @pytest.mark.parametrize(

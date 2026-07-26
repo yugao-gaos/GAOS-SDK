@@ -9,7 +9,10 @@ identity/order contract with durable transition-watermark recovery; the public
 session guide contains the normative host sequence and
 crash/ownership rules; v1.1 audit records are explicitly advisory host
 attestation with additive RFC-010 integrity slots reserved; and N1–N5 plus
-their evidence suites are closed.
+their evidence suites are closed. The final freeze also adopts the
+`timeout` API/wire vocabulary, advisory session `hostTime`, and additive
+RFC-010 `seatKeys`, `clientTime`, timeout-policy, and periodic-signature
+reservations.
 
 ## 1. Problem
 
@@ -163,7 +166,9 @@ headline v0.20 item. Do not pre-build it — measure first.
 - WASM dmath backend — **still evidence-gated, and now additionally gated on
   N1**: porting the current algorithm would freeze the π/2 defect into two
   backends under a bit-identity claim;
-- naming migration: **decide** the names in v0.20, execute in v0.21.
+- no timeout naming migration remains: v0.19 freezes `prepareTimeout`,
+  `TimeoutInput`, `timeoutId`, record/event kind `timeout`, and resolution
+  cause `timeout`.
 
 ## 4. Mechanics
 
@@ -205,8 +210,11 @@ v0.19 because the final implementation review made them release evidence.
 ## 6. Decisions
 
 1. `finalizeRunReplay` requires the run seed and rejects any transcript whose
-   recorded per-level seed differs from `runLevelSeed(runSeed, index)`.
+   source header does not use `seedPolicy: 'explicit'` or whose recorded
+   per-level seed differs from `runLevelSeed(runSeed, index)`.
 2. Acknowledgements live directly on `ObservationDelta` and are ordered
    exactly like the applied reducer input batch. Rejections use the same
    observation stream and are resumable by durable transition watermark.
 3. Publish `0.19.0` directly; migration-blocking additive fixes use `0.19.x`.
+4. The v0.19 wire vocabulary is `timeout`; `deadline` is not a compatibility
+   alias because no tag shipped the superseded spelling.

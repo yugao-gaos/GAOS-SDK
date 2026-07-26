@@ -223,12 +223,15 @@ mismatch records and redacted records that cannot be recomputed, plus salt
 reuse across distinct commitments. `ok: true` means no demonstrated replay
 inconsistency.
 
-In v1.1, deadline and commitment-mismatch records remain unauthenticated host
+In v1.1, timeout and commitment-mismatch records remain unauthenticated host
 attestation. Rechecking proves only that recorded values form a consistent
 story; it cannot prove authorship or prevent a host from fabricating,
 reattributing, or deleting audit records. Leaderboards and third parties must
 not treat this lane as evidence until RFC-010's v1.2 submission signatures
-and per-seat chains are implemented.
+and per-seat chains are implemented. Those signatures authenticate
+authorship in both lanes and can constrain timeout position in ticks mode;
+they cannot prove wall-clock earliness, and turns-mode positional checks
+degrade.
 
 Live reveal processing reports salt reuse through
 `prepared.result.warnings`. It remains non-fatal because session/seat/window
@@ -239,14 +242,14 @@ warning: salt reuse weakens resistance to offline guessing.
 
 `liveTranscript()` is an append-only durability log, not a portable result.
 Once the reducer reports `won` or `failed`, `finalizeReplay(transcript,
-options)` projects it into `gaos.replay` v1.1. Deadline, extension, checkpoint,
+options)` projects it into `gaos.replay` v1.1. Timeout, extension, checkpoint,
 grouped-resolution, and commitment-mismatch records survive in their portable
 lanes.
 
-A deadline that encounters an already-pending commitment rejection is still
-auditable: the committed event order is `deadline`, `rejection`, then
+A timeout that encounters an already-pending commitment rejection is still
+auditable: the committed event order is `timeout`, `rejection`, then
 `checkpoint`. Ordinary advance rejection uses `rejection`, then `checkpoint`,
-so every rejection precedes its transition checkpoint. The forced deadline
+so every rejection precedes its transition checkpoint. The forced timeout
 input is not recorded as applied when the pending rejection prevents reducer
 execution.
 
@@ -255,9 +258,19 @@ the `./session` subpath alongside `SessionConflictError` and
 `SessionAdvanceError`; malformed protocol commands are normalized to that
 public ingest taxonomy.
 
-The strict v1.1 replay schema reserves the RFC-010 roster, signature-policy,
+Every durable `SessionEvent` carries advisory host UTC milliseconds in
+`hostTime` for correlation with host logs. Rehydration preserves the recorded
+value. It is never reducer input or signature-preimage material. Comparisons
+that ask whether the same inputs produce the same semantic transcript must
+exclude `hostTime`; only persistence/rehydration equality includes it.
+`FinalizeOptions.includeHostTime` projects it into replay records, off by
+default, and the portable verifier ignores it.
+
+The strict v1.1 replay schema reserves the RFC-010 `seatKeys`,
+signature/timeout-policy, periodic `seat-signature`, `clientTime`,
 canonical-command, cursor, chain-link, and signature slots. They round-trip
-today but have no v1.1 verification semantics.
+today but have no v1.1 verification semantics. Future signed submissions
+require `clientTime`; unsigned submissions are the only timestamp-free form.
 
 See [portable replay and verification](/mechanisms/replay) for the JSONL
 format and whole-run verifier.

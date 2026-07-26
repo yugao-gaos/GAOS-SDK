@@ -225,7 +225,7 @@ export {
   type ReplayArtifactRecheckResult,
   type ReplayCheckpoint,
   type ReplayCommitMismatchAudit,
-  type ReplayDeadline,
+  type ReplayTimeout,
   type ReplayExtension,
   type ReplayFormatVersion,
   type ReplayGameRef,
@@ -240,6 +240,7 @@ export {
   type ReplayResolution,
   type ReplayResolutionInput,
   type ReplaySeedPolicy,
+  type ReplaySeatSignatureReservation,
   type ReplayTotals,
   type TranscriptReplayOptions,
 } from './replay-format.js';
