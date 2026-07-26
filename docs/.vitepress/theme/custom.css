@@ -56,8 +56,134 @@
 }
 
 .VPHomeHero .tagline {
-  max-width: 650px;
+  max-width: 760px;
   line-height: 1.65;
+}
+
+.VPHomeFeatures {
+  padding-top: 28px;
+}
+
+.release-proof {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin: 0.5rem 0 3rem;
+}
+
+.release-proof span {
+  border: 1px solid color-mix(in srgb, var(--vp-c-brand-1) 24%, var(--vp-c-divider));
+  border-radius: 999px;
+  padding: 0.45rem 0.75rem;
+  color: var(--vp-c-text-2);
+  background: color-mix(in srgb, var(--vp-c-brand-soft) 44%, var(--vp-c-bg));
+  font-size: 0.78rem;
+}
+
+.release-proof strong {
+  color: var(--vp-c-text-1);
+}
+
+.home-section-intro {
+  max-width: 760px;
+  color: var(--vp-c-text-2);
+  font-size: 1.02rem;
+  line-height: 1.75;
+}
+
+.audience-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0 3.5rem;
+}
+
+.audience-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--audience-accent) 34%, var(--vp-c-divider));
+  border-radius: 18px;
+  padding: 1.45rem;
+  background:
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--audience-accent) 16%, transparent), transparent 42%),
+    var(--vp-c-bg-soft);
+}
+
+.audience-card--games {
+  --audience-accent: #6b5bd6;
+}
+
+.audience-card--evaluation {
+  --audience-accent: #23879a;
+}
+
+.audience-kicker {
+  color: var(--audience-accent);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.audience-card h3 {
+  margin: 0.45rem 0 0.75rem;
+  font-size: 1.25rem;
+}
+
+.audience-card p {
+  color: var(--vp-c-text-2);
+  line-height: 1.65;
+}
+
+.audience-cta {
+  display: inline-block;
+  margin-top: 0.4rem;
+  color: var(--audience-accent) !important;
+  font-weight: 750;
+  text-decoration: none !important;
+}
+
+.verification-flow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0.75rem;
+  margin: 1.5rem 0;
+}
+
+.verification-step {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 14px;
+  padding: 1rem;
+  background: var(--vp-c-bg-soft);
+}
+
+.verification-step > span {
+  color: var(--vp-c-brand-1);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+
+.verification-step strong {
+  display: block;
+  margin-top: 0.3rem;
+  color: var(--vp-c-text-1);
+  font-size: 1rem;
+}
+
+.verification-step p {
+  margin: 0.45rem 0 0;
+  color: var(--vp-c-text-2);
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
+.verification-arrow {
+  display: grid;
+  place-items: center;
+  color: var(--vp-c-brand-1);
+  font-size: 1.25rem;
 }
 
 .VPFeature {
@@ -190,10 +316,19 @@
 }
 
 @media (max-width: 700px) {
+  .audience-grid,
   .ownership-grid,
   .mechanism-grid,
   .zonoid-showcase {
     grid-template-columns: 1fr;
+  }
+
+  .verification-flow {
+    grid-template-columns: 1fr;
+  }
+
+  .verification-arrow {
+    transform: rotate(90deg);
   }
 
   .zonoid-showcase {

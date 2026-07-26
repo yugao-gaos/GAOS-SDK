@@ -3,16 +3,15 @@
 For the public chronological changelog, see the
 [complete version history](/version-history).
 
-## v0.20.0 (unreleased)
+## v0.20.0
 
-In development on `main` (`package.json` reads `0.20.0-dev`). Completes the
-resolved implementation scope of
-[RFC-010](/rfcs/rfc-010-submission-signatures-and-interest), including the
-Arena and TabletopLabs migration returns. **Not released and not tagged.**
-Consumers mid-migration should stay on the `v0.19.0` tag until this ships and
-is announced (RFC-009 §4.3). The tag gate includes fresh Arena and
-TabletopLabs repin checks plus production of a locally verified signed
-artifact; repository tests alone do not satisfy RFC-010 §C4 adoption.
+Released July 26, 2026. This release completes the resolved implementation
+scope of [RFC-010](/rfcs/rfc-010-submission-signatures-and-interest), including
+the Arena and TabletopLabs migration findings. Its central result is portable,
+signed run evidence that a third party can verify offline with a pinned
+historical adapter—without trusting the host or a GAOS-operated service.
+
+[View the v0.20.0 release on GitHub →](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.20.0)
 
 ### Migration from v0.19
 
@@ -44,8 +43,8 @@ not a substitute for measuring the product's actual WebSocket stack.
 Durable `SessionEvent.kind` also adds `interest` and `seat-signature`; exhaustive
 switches need arms for enabled RFC-010 lanes. A patch is an observation body,
 not a durable session-event kind. This is an intentional pre-1.0 source/wire
-break accepted because Arena and TabletopLabs are still early integrations and
-will validate the release candidate before the tag.
+break, accepted because Arena and TabletopLabs are early integrations and can
+migrate without a compatibility period.
 
 - `gaos.replay` v1.2 assigns cryptographic meaning to the reserved integrity
   slots: canonical Ed25519 submission envelopes, roster-bound per-seat

@@ -3,16 +3,16 @@
 GAOS uses the v0.x line to refine its contracts before v1.0. Products should
 review the migration notes when updating across minor versions.
 
-::: tip Current development: v0.20.0
+::: tip Current release: v0.20.0
 Portable replay now adds roster-bound Ed25519 submission chains and explicit
 `trusted` / `unverifiable` / `rejected` offline verdicts.
 :::
 
 ## v0.20.0 — signed portable evidence
 
-Implementation candidate completed July 26, 2026 after Arena and TabletopLabs
-returned their v0.19 integration findings; release remains untagged pending
-consumer repin and signed-artifact adoption checks.
+Released July 26, 2026 after Arena and TabletopLabs returned their v0.19
+integration findings. v0.20 makes the resulting signed artifacts fully
+third-party verifiable with a pinned historical adapter and no GAOS service.
 
 - `gaos.replay` v1.2 validates and verifies
   `gaos.submission.ed25519.v1`, with canonical command/cursor/time material for

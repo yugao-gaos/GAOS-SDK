@@ -2,7 +2,7 @@ import { defineConfig } from 'vitepress';
 
 export default defineConfig({
   title: 'Gaming AGI Open SDK',
-  description: 'Build once. Play as a human. Evaluate as an agent.',
+  description: 'Build deterministic, agent-ready games with signed runs any third party can verify offline.',
   base: '/GAOS-TurnBasedGrid-SDK/',
   cleanUrls: true,
   lastUpdated: true,
@@ -16,31 +16,31 @@ export default defineConfig({
     }],
     ['meta', {
       property: 'og:description',
-      content: 'An open-source SDK bridging game development and agent evaluation through one deterministic game core.',
+      content: 'One deterministic game core for human play, agent evaluation, and signed runs any third party can verify offline.',
     }],
     ['meta', {
       property: 'og:image',
-      content: 'https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/gaos-tabletop-sdk-social.png',
+      content: 'https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/og.png',
     }],
-    ['meta', { property: 'og:image:width', content: '1730' }],
+    ['meta', { property: 'og:image:width', content: '1731' }],
     ['meta', { property: 'og:image:height', content: '909' }],
     ['meta', {
       property: 'og:image:alt',
-      content: 'Gaming AGI Open SDK — build once, play as a human, evaluate as an agent.',
+      content: 'Gaming AGI Open SDK — one game core for human play, agent evaluation, and third-party proof.',
     }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
     ['meta', { name: 'twitter:title', content: 'Gaming AGI Open SDK' }],
     ['meta', {
       name: 'twitter:description',
-      content: 'Build once. Play as a human. Evaluate as an agent.',
+      content: 'One game core. Human play, agent evaluation, third-party proof.',
     }],
     ['meta', {
       name: 'twitter:image',
-      content: 'https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/gaos-tabletop-sdk-social.png',
+      content: 'https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/og.png',
     }],
     ['meta', {
       name: 'twitter:image:alt',
-      content: 'Gaming AGI Open SDK — build once, play as a human, evaluate as an agent.',
+      content: 'Gaming AGI Open SDK — one game core for human play, agent evaluation, and third-party proof.',
     }],
   ],
   themeConfig: {

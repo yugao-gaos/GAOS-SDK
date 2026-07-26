@@ -54,7 +54,7 @@ jobs:
           npm install "$GITHUB_WORKSPACE/$npm_tarball" >/dev/null
           node --input-type=module -e "
             const engine = await import('@yugao-gaos/turn-based-grid-sdk/engine');
-            if (engine.GAOS_REPLAY_FORMAT_VERSION !== '1.1') process.exit(1);
+            if (engine.GAOS_REPLAY_FORMAT_VERSION !== '1.2') process.exit(1);
           "
           test -f node_modules/@yugao-gaos/turn-based-grid-sdk/schemas/gaos.replay-v1.schema.json
           test -f node_modules/@yugao-gaos/turn-based-grid-sdk/fixtures/replay/gaos-replay-v1.golden.jsonl
@@ -63,7 +63,7 @@ jobs:
           EXPECTED_VERSION="${GITHUB_REF_NAME#v}" python -c "
           import os, agilabs_arena
           assert agilabs_arena.__version__ == os.environ['EXPECTED_VERSION']
-          assert agilabs_arena.GAOS_REPLAY_FORMAT_VERSION == '1.1'
+          assert agilabs_arena.GAOS_REPLAY_FORMAT_VERSION == '1.2'
           "
 
       - run: npm publish

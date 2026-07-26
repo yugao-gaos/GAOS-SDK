@@ -1,58 +1,95 @@
 # Gaming AGI Open SDK (GAOS)
 
-**Build once. Play as a human. Evaluate as an agent.**
+**Build deterministic games. Evaluate agents. Let any third party verify the
+result.**
 
-GAOS is an open-source SDK for building games and interactive benchmarks that
-humans and agents can both play. It gives researchers reusable game mechanisms,
-structured agent interfaces, and evidence anyone can verify, while helping game
-developers keep one authoritative game core ready for agents later.
+[Documentation](https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/) ·
+[Playable demos](https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/demos/) ·
+[v0.20 release notes](docs/releases.md) ·
+[Discord](https://discord.gg/vdvUgcqPU)
 
-The SDK owns reusable infrastructure. Each product still owns its world,
-content, benchmark claims, scoring meaning, hosting, and presentation.
+GAOS is an open-source TypeScript and Python SDK for games that humans and
+agents can both play. One reducer drives the game, the agent environment, the
+authoritative session, and deterministic replay. Signed runs can be checked
+offline by anyone with the pinned game adapter—without trusting the host or a
+GAOS-operated service.
 
-## Start here
+## The three reasons to use GAOS
 
-- [Documentation](https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/)
-- [Quickstart and language guide](docs/quickstart.md)
-- [Capabilities](docs/capabilities.md)
-- [Architecture and ownership boundaries](docs/architecture.md)
-- [Mechanism reference](docs/mechanisms/index.md)
-- [Agentic play](docs/agentic-play.md)
-- [Python SDK surface](docs/python.md)
-- [Portable replay and verification](docs/mechanisms/replay.md)
-- [Trust, signatures, and verification](docs/trust-and-verification.md)
+### 1. One deterministic core
+
+Write the rules once. The same reducer powers human clients, model and CLI
+agents, solvers, tournaments, authoritative multiplayer, and replay. Hidden
+information stays seat-scoped; action order, randomness, and scoring remain
+reproducible.
+
+### 2. Third-party-verifiable runs
+
+Portable `gaos.replay` v1.2 evidence combines deterministic re-simulation,
+Ed25519 seat signatures, roster-bound hash chains, and independent command and
+timeout reconstruction. The offline verifier returns an explicit verdict:
+`trusted`, `unverifiable`, or `rejected`.
+
+```sh
+gaos verify run.gaos-replay.jsonl --adapter ./historical-adapter.mjs
+gaos-verify run.gaos-replay.jsonl --adapter ./historical_adapter.py
+```
+
+### 3. Production session infrastructure
+
+Use prepared commit/abort transitions, idempotent submissions, authoritative
+ticks, prediction reconciliation, reconnect snapshots, signed interest scopes,
+and adaptive observation delivery. GAOS supplies the hard multiplayer and
+evidence plumbing while your product keeps its world, presentation, hosting,
+and commercial policy.
+
+## Built for two teams
+
+| Game developers | Benchmark and evaluation teams |
+|---|---|
+| Ship human play today without creating a second rules engine for bots tomorrow. Use reusable board, card, zone, movement, visibility, scoring, settlement, and session mechanisms. | Turn interactive games into reproducible single- or multi-agent evaluations. Use structured legal actions, provider-neutral drivers, portable transcripts, signed evidence, and offline verification. |
+| [Build your first game →](docs/quickstart.md) | [Build an agent evaluation →](docs/agentic-play.md) |
+
+## What “third-party verifiable” means
+
+A scoring authority pins the historical reducer and pure command adapter named
+by the artifact, then checks the run locally. A `trusted` verdict proves that:
+
+- the recorded inputs reproduce the recorded game result;
+- the declared seat keys authored the signed submission chains;
+- chain order, periodic signing tiers, and roster binding are intact; and
+- signed commands and timeout inputs independently map to the recorded actions.
+
+GAOS does not claim that a key belongs to a real-world identity, that an
+artifact was published rather than withheld, or that wall-clock timing was
+fair. Those remain product and scoring-authority policy. See
+[Trust and verification](docs/trust-and-verification.md) for the exact boundary.
+
+## Start building
+
+```sh
+npm install 'git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.20.0'
+```
+
+Choose the path that matches your project:
+
+- [Quickstart and authenticated package-registry install](docs/quickstart.md)
+- [Complete capability map](docs/capabilities.md)
+- [Reusable mechanism reference](docs/mechanisms/index.md)
 - [Authoritative sessions and integrity](docs/session-and-integrity.md)
-- [Roadmap, including the future naming migration](docs/roadmap.md)
+- [Portable replay and verification](docs/mechanisms/replay.md)
+- [Architecture and ownership boundaries](docs/architecture.md)
 
-The existing repository and package names remain active for compatibility; no
-replacement name is active yet.
+## Built with GAOS
 
-**Built with GAOS:** [Zonoid](https://zonoid.ai) is the first production game
-and live reference. For questions and ideas, join the
-[GAOS Discord community](https://discord.gg/vdvUgcqPU).
+[Zonoid](https://zonoid.ai) is the first production game and live reference: a
+strategy game for humans and AI agents built around prediction, planning, and
+judgment.
 
-## Built during OpenAI Build Week
-
-The **GAOS SDK is the submitted project**. This standalone repository was
-created on July 21, 2026 during OpenAI Build Week, and its complete commit and
-release history was produced during the event. The work turned the reusable
-mechanism engine, deterministic agent evaluation environment, provider-neutral
-drivers, and CLI integrations into an independently installable open-source
-toolkit with TypeScript and Python releases.
-
-The pre-existing Zonoid platform is outside the submission scope, but was
-central to production. As the game evolved, GAOS generalized its initial
-spatial engine into reusable game-mechanism, multiplayer, verification, and
-agent capabilities; Zonoid then validated them in a live product. Judges can
-register at [zonoid.ai](https://zonoid.ai) and download the game without
-rebuilding its platform source. The
-[GPT-5.6 Sol case study](docs/building-with-gpt-5-6-sol.md) records Codex's role
-in extraction, design, implementation, review, publishing, and agent-play
-testing.
-
-GAOS is submitted in the **Developer Tools** category. Submission links,
-prebuilt installation checks, supported platforms, verification commands, and
-the `/feedback` Session ID are collected in [DEVPOST.md](DEVPOST.md).
+GAOS was extracted and published as a standalone SDK during OpenAI Build Week
+2026. The [GPT-5.6 Sol case study](docs/building-with-gpt-5-6-sol.md) records
+the design, implementation, review, and agent-play workflow. Submission
+materials remain available in [DEVPOST.md](DEVPOST.md).
 
 ## Development
 
@@ -69,11 +106,8 @@ python3 -m build
 ```
 
 Live integration tests use `ARENA_BASE_URL` and skip automatically when a
-compatible API host is not available.
-
-Use `npm run docs:dev` to work on the documentation locally. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for contribution checks and [SECURITY.md](SECURITY.md)
-for private vulnerability reporting.
+compatible API host is unavailable. See [CONTRIBUTING.md](CONTRIBUTING.md) and
+[SECURITY.md](SECURITY.md).
 
 ## License
 

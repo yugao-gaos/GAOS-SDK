@@ -115,4 +115,4 @@ __all__ = [
     "verify_ed25519_base64",
     "verify_replay",
 ]
-__version__ = "0.20.0.dev0"
+__version__ = "0.20.0"
