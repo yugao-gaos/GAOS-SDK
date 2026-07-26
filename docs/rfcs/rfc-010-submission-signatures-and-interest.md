@@ -5,9 +5,17 @@ migration-gated** · Target: v0.20 · Breaking: no (additive; requires the
 baseline field reservations) ·
 Depends on: RFC-006, RFC-008, and **baseline T2 closed**
 
-Two parts in one RFC because they couple at exactly one point: an interest
-scope change is a client-declared, signable submission (§B4), and it is the
-only place where a bandwidth optimisation becomes a security-relevant claim.
+**This is the v0.20 document.** Parts A–C are the designed scope: signatures
+(A) and interest (B) share an RFC because they couple at exactly one point —
+an interest scope change is a client-declared, signable submission (§B4), the
+only place where a bandwidth optimisation becomes a security-relevant claim —
+and C is what must be documented alongside them.
+
+Parts D and E are the *earned* scope: the two consumer migrations' return
+channels under RFC-009 §4.3, consolidated here. **D** is what lands on the
+v0.19.x line (four items, three of them migration-blocking); **E** is what
+v0.20 should take on. The former RFC-011 (Arena) and RFC-012 (TabletopLabs)
+are retired into these parts — see the consolidated scope table at the end.
 
 > **All four §B7 open questions are resolved (2026-07-26)**, including the
 > scope-change lane, which turned out to rest on a false premise rather than a
@@ -1175,6 +1183,72 @@ be forced with an explicit spec. This is now recorded in RFC-009 §4.
 *Method note: this finding came from verifying the pin rather than trusting the
 prose. That is the behaviour to keep.*
 
+## D5 — `finalizeRunReplay` rejects runs whose non-final levels were lost
+
+*Source: Arena. Class: additive, **migration-blocking**.*
+
+Verified at `v0.19.0`:
+
+```ts
+// src/session.ts:2022
+if (levelIndex < transcripts.length - 1 && level.result.status !== 'won') {
+  throw new TypeError(`run transcript ${levelIndex} must be won before another level`);
+}
+```
+
+Arena's scored runs advance through **failed** levels — the agent plays a
+pinned level set to the end and is ranked on *total stars, then total turns
+across the set*. A partly-failed run is the ordinary outcome of a paid ticket,
+not an edge case.
+
+**The gate is the only part of the stack that disagrees, and I confirmed each
+half of that claim separately.** The format admits failed non-final levels:
+`status` is an unconstrained `won | failed` enum with no positional rule
+(`src/engine/replay-format.ts:657`, `python/agilabs_arena/replay.py:513`,
+`schemas/gaos.replay-v1.schema.json:103`). The verifier admits them too —
+`recheckReplayArtifact` re-simulates each segment independently and aggregates
+at `replay-format.ts:1717–1718`:
+
+```ts
+totalStars += result.replayed.status === 'won' ? (result.replayed.stars ?? 0) : 0;
+totalActionsUsed += result.replayed.actionsUsed;
+```
+
+A failed level contributes zero stars while its `actionsUsed` still counts —
+which *is* Arena's ranking, already implemented. So the artifact would
+round-trip, validate, and recheck correctly today; **only the projection
+refuses to build it.** The gate encodes a *product* assumption ("a run is a
+survival ladder") inside a *format* projection whose own verifier does not
+share it.
+
+Consequence: Arena still writes its own transcript format at `/submit` — the
+exact divergence RFC-009 §2.1 moved run composition into v0.19 to prevent, in
+the consumer whose `session-do` the kernel was extracted from.
+
+**Fix — one optional field on `FinalizeRunOptions`, default preserving today's
+behaviour byte-for-byte:**
+
+```ts
+advancePolicy?: 'win-to-advance' | 'play-all-levels';
+```
+
+with the gate consulting `(options.advancePolicy ?? 'win-to-advance')`. Every
+other run check is unchanged under both policies: shared
+session/game/dmath/timeout headers, `seedPolicy: 'explicit'`, per-segment
+`runLevelSeed(runSeed, i)`, global renumbering, terminal validity.
+
+**Why a policy field rather than dropping the gate** — dropping it silently
+accepts a genuinely malformed ladder run, a real host-bug class for products
+whose runs *do* end on a loss. Both shapes are legitimate and, as Arena notes,
+indistinguishable from the transcripts alone, so the host must declare which
+one it composed. Inferring it is not available.
+
+**Re-pin note.** This is the exercised case of the RFC-009 §4.4
+additive-optional exception, so the freeze check will legitimately print
+`src/session.ts`. The announcement must say so explicitly rather than let the
+check read as a violation — which is itself the argument for preferring one
+such release over a habit of them.
+
 ---
 
 # Part E — v0.20 scope returned by the migrations
@@ -1253,3 +1327,262 @@ credit. Build both in v0.20; if only one, the codec.
 *Follow-up available: the consumer offers live traces once its authoritative
 host is deployed. Take them — the synthetic table is the caveat both sides
 flagged.*
+
+## E3 — The post-commit wedge class: no legality seam, and an unclassified view failure
+
+*Source: Arena (F5 + F2, merged here because they are one defect class).*
+**Highest-value item returned by either migration.**
+
+Arena reported these as two findings and then observed they share a shape.
+That observation is the important part, so they are consolidated: **a failure
+discovered *after* the intent is durably committed does not reject the
+request, it wedges the session.** The intent is recorded, the participation
+window slot is taken, and every retry re-enters the same failing resolution.
+No input can resolve it.
+
+### E3a — There is no legality surface on the reducer contract
+
+Verified at `v0.19.0`: `ReducerBase` is exactly `init` / `view` / `viewFor?`
+(`src/engine/contracts.ts:122–131`). `TickReducer` adds `advance`;
+`ActionReducer` adds `apply` / `applyIntents?`. There is no `legalActions`, no
+`isCommandLegal`, no `validateCommand`.
+
+So `prepareIngest` never asks whether a command is legal. It validates
+*structure* thoroughly — impersonation, reserved `verifiedPayload`,
+commit/reveal exclusivity, commitment envelope — and probes only
+`reducer.view(state).status !== 'playing'` for terminality. An illegal command
+is first discovered when `apply` throws inside `prepareAdvance`, which runs
+only after the ingest transition is committed and the window is full.
+
+The sharpest evidence is an inconsistency inside the SDK itself: the protocol
+module **does** model this. `GameDefinition.isCommandLegal(state,
+participantId, command)` exists at `src/protocol.ts:119` — and I confirmed the
+kernel never calls it. The concept is present in the codebase and absent from
+the layer that needs it.
+
+**What the workaround costs.** Arena reproduces legality host-side, then uses
+`prepareIngest` → validate against `kernel.observe(seat).actions` →
+`kernel.abort(prepared)` → 4xx. That works, and it is worth being precise about
+why it is not good enough: it duplicates the reducer's rule set *outside* the
+reducer, which is the drift RFC-006 exists to prevent; and the residual risk of
+that drift is **unrecoverable, not merely wrong** — a disagreement between the
+host's notion of legal and the reducer's `apply` produces a wedged paid
+session, not a rejected request. Prepare-then-abort is also a lifecycle
+designed for persistence failure being used as a validator.
+
+**Fix — an optional hook, called during `prepareIngest` before the intent is
+recorded:**
+
+```ts
+interface ReducerBase<TLevel, TState, TView> {
+  /** Reject a command before it is admitted to the participation window. */
+  validateCommand?(state: TState, seat: string, action: SubmittedAction): void;
+}
+```
+
+A throw becomes a typed ingest rejection with nothing committed. Reducers that
+omit it keep today's behaviour exactly.
+
+This is the piece that makes *"any game can be an arena"* batteries-included.
+Without it every host must re-implement legality, and every host that gets it
+subtly wrong bricks sessions rather than rejecting requests.
+
+### E3b — A non-canonicalisable view wedges a committed transition, untyped
+
+Same shape, reached from malformed data rather than ordinary input. Verified:
+the **command** path classifies canonicalisation failure —
+`canonicalJson(submission.command)` is wrapped and rethrown as
+`IntentCollectionError('invalid_submission', …)` at `src/session.ts:759–765`.
+The **view** path does not: `viewDigest(view)` is `fnv1a(canonicalJson(view))`
+(`:492–493`), called bare at `:1080`, `:1175`, and `:1508`. A reducer view
+carrying authored text with an unpaired surrogate throws a raw `TypeError` out
+of `prepareAdvance`.
+
+Two things compound it. It is **unclassified**, so hosts that map
+`IntentCollectionError` / `SessionConflictError` / `SessionAdvanceError` to
+status codes see something indistinguishable from a host bug and return 500.
+And it fires **after** the ingest commit, so the session is wedged. Arena
+reproduced this end-to-end: `/init` returns 201 because construction never
+canonicalises the initial view, and the *first* `/actions` throws — the failure
+is invisible where the level enters the system and appears only once someone
+plays it.
+
+**Fix, in the order worth doing them:**
+
+1. **Fail fast at construction** — canonicalise the initial view once in
+   `createSessionKernel` / `rehydrateKernel` and reject a non-encodable one,
+   the same way the constructor already probes `stateIsolation.fork`
+   cloneability. This alone converts an unrecoverable mid-session wedge into a
+   clean startup rejection, and is worth doing even if 2 and 3 slip.
+2. **Classify the resolution-path failure** — `SessionAdvanceError` with an
+   `invalid_view` code, or a peer class.
+3. **Document the obligation** — reducer views must be canonically encodable.
+   This is currently implicit and is *new* relative to v0.16/v0.17 consumers,
+   whose views were never canonicalised.
+
+## E4 — Seat-local state transitions, and what they do to the §B7.1 taxonomy
+
+*Source: Arena (F4), recorded as "not a defect". It is the most consequential
+design input either migration returned, because it collides with a stated
+invariant.*
+
+Arena's free `controlRevision` substep calls `reducer.prepareIntent`, mutating
+state **outside any resolution** — opening a talk-target chooser, cancelling a
+dialogue. The kernel owns state and exposes no host-driven transition that is
+not a reducer resolution; `prepareExtension` records a lane entry and changes
+nothing. Routing these through `prepareIngest`/`prepareAdvance` would make each
+modal keystroke a world turn requiring every seat to submit, which changes the
+game. So hosted Arena PvP still runs a second, hand-rolled loop and its
+transcript is not kernel-produced.
+
+RFC-006 §4 anticipated exactly this, leaving the substep Arena-side and naming
+a generic extension-lane hook as the seam; §7 Q1 left the shape open. Arena is
+now a concrete answer: it needs **ordered-with-gameplay, state-changing,
+seat-local** transitions that do not advance the shared cursor.
+
+**This extends the §B7.1 taxonomy, and breaks an invariant §B7.1 relied on.**
+B7.1 resolved interest scope changes as a third non-gameplay transition kind,
+justified precisely *because* it cannot reach the reducer — reducer isolation
+is what makes invariant 2 hold by construction. Arena's case is the opposite:
+it must change state. Lining the three up:
+
+| transition | changes state | advances `cursor` | advances `viewRevision` |
+|---|---|---|---|
+| rejection-only (shipped) | no | no | no |
+| interest scope (§B7.1) | no | no | no |
+| **seat-local control (F4)** | **yes** | no | **must** |
+
+The first two are safe because nothing changed, so nothing needs a new view
+revision. The third changes the view, so `viewRevision` must advance — and
+RFC-006 states as an invariant that *"at every observable kernel state,
+`viewRevision(seat) === cursor()` for every declared seat"*, calling that
+equality the stable bridge from an `IngestReceipt.cursor` to the authoritative
+revision after resync. **A seat-local state transition that advances
+`viewRevision` without advancing `cursor` violates it.**
+
+So F4 cannot be granted by analogy to B7.1; it needs its own resolution. Three
+candidate directions, unresolved and stated as such:
+
+1. **Decouple `viewRevision` from `cursor` per seat.** Most direct, and it
+   costs the stable bridge that resync depends on. Likely too expensive.
+2. **Seat-local control state is not reducer state.** Put it in a seat-scoped
+   store the reducer may *read* but resolutions do not own. This is the
+   cleanest if Arena's chooser/dialogue state is genuinely presentation rather
+   than simulation — and the diagnostic is sharp: **if it affects the
+   simulation, determinism already requires it in the transcript, so it was
+   never seat-local to begin with.** Arena should answer that question first;
+   it decides whether this finding is a kernel change at all.
+3. **Model them as resolutions with an empty input set**, which advances both
+   revisions honestly and costs the "every seat must submit" semantics that
+   made Arena reject the resolution path in the first place.
+
+**Recommendation: put question 2's diagnostic to Arena before designing
+anything.** The answer determines whether v0.20 needs a new transition class or
+whether this is host-side presentation state that never belonged in the kernel.
+
+## E5 — Durable event size, joined to E2
+
+*Source: Arena (F3). Same family as E2, measured on a different axis — Arena
+itself makes this point, and it is right: **E2 measures per-tick observation
+cost, E5 measures per-resolution durable event cost.** Scope them together.*
+
+Arena, turns cadence, one seat, single-parameter commands, measured off the
+Durable Object's stored record:
+
+| Event kind | Per turn | Bytes |
+|---|---|---|
+| `intent-accepted` | 1 | 271 |
+| `resolution` | 1 | 392 |
+| `checkpoint` | 1 | 152 |
+| **total** | | **~815** (~818 with enclosing escaping) |
+
+Roughly **30 % is derivable rather than essential**: `eventId` repeats the
+36-char `sessionId` in every event (~150 B/turn of a constant already in
+`SessionHeader`); `canonicalCommand` duplicates `command` as an escaped string
+and is just `canonicalJson(command)`; `consumed` duplicates
+`inputs[].participantId`/`submissionId`, which `inputs` already carries.
+
+The operational finding is worth more than the byte count. Cloudflare Durable
+Objects cap a single stored value at 128 KiB; Arena's shipped content reaches
+375 actions for one level and 760–1305 for a scored run, so a naive
+"transcript in one value" host design dies at ~159 actions — **well inside real
+content**. Arena's fix is host-side (one storage key per level episode, plus
+chunking) and it is explicit that the SDK should not know about the 128 KiB
+cap. Agreed.
+
+**v0.20, documentation first:**
+
+1. Document that `SessionEvent` is the **durable** representation and state its
+   expected size per resolution, so hosts size storage before designing it.
+   Cheapest item here, and it would have caught Arena's design error.
+2. *Consider* a documented compact persistence form — events minus the
+   derivable fields, rehydrated by recomputation — for hosts with per-value
+   limits. In-memory and projection shapes need not change.
+
+## E6 — Host ergonomics: four papercuts that each cost every host the same loop
+
+*Source: Arena (F6–F9). Individually small; grouped because they share a
+cause — the kernel holds the answer and makes the host re-derive it.*
+
+- **No accessor for awaiting seats.** Verified: `awaitingParticipants` exists
+  only as an `IngestReceipt` field (`src/session.ts:253`), computed inline
+  during receipt construction (`:861`, `:1582`). A host answering "who are we
+  waiting for?" on a poll, a reconnect, or after a restart has no accessor, so
+  Arena rebuilds it by replaying `intent-accepted` events since the last
+  resolution. Every host serving a "waiting for opponent" UI writes that loop.
+  → `awaitingSeats(): readonly string[]`, matching the receipt's fields.
+- **A duplicate receipt cannot be classified.** `prepareIngest` returns
+  `status: 'duplicate'` with the cursor the submission was *accepted* at, but
+  the host's response depends on whether it is still **pending** (202) or
+  already **resolved** (200 replaying the tick). Arena infers this by comparing
+  against `kernel.cursor()`, which is fragile at the boundary: "older than the
+  last resolution" and "receipt retention evicted it" are different situations
+  the host cannot distinguish, and `receiptRetention` (default 64) silently
+  changes which it sees. → state it: `resolved: boolean` or
+  `resolvedAtCursor?: number`. The kernel knows precisely; the host is guessing.
+- **Run cursor rebasing is neither done nor documented.** One kernel per level
+  (RFC-006 §D answer 3) means each episode counts `cursor()` from zero, while
+  the revision a client holds must climb across the whole run. Arena carries a
+  `revisionBase`, adding it outbound and subtracting inbound, including
+  rewriting `tickId` so a mismatched one still fails validation rather than
+  being silently repaired. It works, but it is fiddly, **security-adjacent**
+  (cursor validation), and every run-composing host will re-derive it.
+  → document the translation in the multi-level runs section; or accept an
+  `initialCursor` in `SessionKernelOptions` so episode N starts where N-1
+  stopped.
+- **`rehydrateKernel` forces hosts to store or reconstruct the header.** It
+  rejects a transcript whose header does not match the one its options derive —
+  yet the header *is* derived from the options, so it carries no information
+  the caller did not already supply. Hosts either store it redundantly (it
+  embeds the full pinned level config, the largest object in the record) or
+  reconstruct it; Arena builds a throwaway kernel and reads `sessionHeader()`,
+  running `reducer.init` an extra time on every load. → export a pure
+  `sessionHeaderFor(options): SessionHeader` and have both paths use it. Hosts
+  then store events only, which is what a durability log actually is.
+
+---
+
+## Consolidated v0.20 scope from both migrations
+
+| Item | Source | Class | Lands |
+|---|---|---|---|
+| D1 `ObservationDelta` origin discriminator | TTL | blocks migration | v0.19.x |
+| D2 `SubmittedAction.payload` + `replayInput` | TTL | blocks replay | v0.19.x |
+| D3 `./session` re-exports | TTL | packaging | v0.19.x |
+| D5 `advancePolicy` for non-ladder runs | Arena | blocks migration | v0.19.x |
+| **E3 post-commit wedge (legality seam + view classification)** | Arena | contract gap | **v0.20 — highest value** |
+| E4 seat-local state transitions | Arena | design input | v0.20, question first |
+| E1 `TickView` shape | TTL | shape smell | v0.20, hold for 2nd voice |
+| E2 + E5 representation cost | both | measured | v0.20, patch codec + docs |
+| E6 host ergonomics ×4 | Arena | papercuts | v0.20, small |
+
+**If only one item is taken from either migration, take E3.** Both consumers
+independently hit the same class — a failure discovered after durable commit
+wedges the session instead of rejecting the request — and E3a is the one every
+host meets on ordinary input rather than on malformed data.
+
+**Note on independence.** The two returns are largely disjoint, which is itself
+evidence: D5, E3, and E4 have no TabletopLabs counterpart, and D1/D2/E1 have no
+Arena counterpart. The one place they converge — representation cost, E2 and E5
+measured on different axes — is the one place two independent voices agree, and
+it is the item with the strongest claim on v0.20 engineering time after E3.
