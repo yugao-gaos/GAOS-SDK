@@ -1,5 +1,5 @@
 import { performance } from 'node:perf_hooks';
-import { deflateSync } from 'node:zlib';
+import { deflateSync, inflateSync } from 'node:zlib';
 import { canonicalJson } from '../dist/protocol.js';
 import { createBoundedValidatedJsonPatch } from '../dist/observation-codec.js';
 
@@ -7,14 +7,14 @@ import { createBoundedValidatedJsonPatch } from '../dist/observation-codec.js';
  * Measures the two v2 delivery policies, not two wire versions:
  *
  *   1. `patchStrategy: "never"` canonicalises and snapshots the whole view.
- *   2. `patchStrategy: "adaptive"` probes a bounded patch. After a probe loses,
- *      the kernel skips the next PATCH_BACKOFF_TICKS probes, so high-churn
- *      workloads converge near snapshot CPU while sparse workloads retain the
- *      bandwidth win.
+ *   2. `patchStrategy: "adaptive"` probes a bounded patch. Repeated losses
+ *      exponentially back off from PATCH_BACKOFF_TICKS to
+ *      MAX_PATCH_BACKOFF_TICKS, so high-churn workloads converge near snapshot
+ *      CPU while sparse workloads retain the bandwidth win.
  *
- * The compression columns show what permessage-deflate can reclaim in either
- * case. The activity sweep avoids treating one changed entity as representative
- * of every tick.
+ * Compression columns include synchronous encode/decode CPU at zlib levels 1
+ * and 6. This is not a WebSocket implementation benchmark, but it makes the
+ * bandwidth/CPU trade visible instead of calling compression free.
  */
 
 const TICK_HZ = 20;
@@ -27,6 +27,7 @@ const MIN_REDUCTION = 4;
 const MAX_OPERATIONS = 2_048;
 const MAX_BYTES = 65_536;
 const PATCH_BACKOFF_TICKS = 8;
+const MAX_PATCH_BACKOFF_TICKS = 32;
 
 function makeView(entities) {
   return {
@@ -64,10 +65,54 @@ function timeIt(fn) {
   return (performance.now() - started) / ITERATIONS;
 }
 
-const deflated = (text) => deflateSync(Buffer.from(text, 'utf8')).length;
 const byteLength = (text) => Buffer.byteLength(text, 'utf8');
 const perRoomMiBs = (bytes) => (bytes * TICK_HZ * SEATS) / (1024 * 1024);
 const round = (value, places = 3) => Number(value.toFixed(places));
+
+function compressionMetrics(text, level) {
+  const input = Buffer.from(text, 'utf8');
+  const compressed = deflateSync(input, { level });
+  return {
+    bytes: compressed.length,
+    encodeMs: timeIt(() => deflateSync(input, { level })),
+    decodeMs: timeIt(() => inflateSync(compressed)),
+  };
+}
+
+const ownershipRows = SIZES.map((entities) => {
+  const views = new Map();
+  const scopes = new Map();
+  for (let seat = 0; seat < SEATS; seat++) {
+    const view = makeView(entities);
+    views.set(`seat-${seat}`, view);
+    scopes.set(`seat-${seat}`, {
+      participantId: `seat-${seat}`,
+      scopeId: `seat-${seat}`,
+      declaration: null,
+      view,
+    });
+  }
+  const deepCloneMs = timeIt(() => {
+    new Map([...views].map(([key, view]) => [key, structuredClone(view)]));
+    new Map([...scopes].map(([key, scope]) => [key, structuredClone(scope)]));
+  });
+  const copyOnWriteMs = timeIt(() => {
+    new Map(views);
+    new Map([...scopes].map(([key, scope]) => [key, {
+      ...scope,
+      declaration: structuredClone(scope.declaration),
+      view: scope.view,
+    }]));
+  });
+  return {
+    entities,
+    seats: SEATS,
+    scopesPerSeat: 1,
+    deepCloneMs: round(deepCloneMs),
+    copyOnWriteMs: round(copyOnWriteMs),
+    speedup: round(deepCloneMs / copyOnWriteMs, 1),
+  };
+});
 
 const rows = [];
 for (const entities of SIZES) {
@@ -89,27 +134,37 @@ for (const entities of SIZES) {
     const fellBack = patch === null;
     const wireJson = fellBack ? snapshotJson : patch.canonical;
     const wireBytes = byteLength(wireJson);
-    const wireDeflated = deflated(wireJson);
+    const snapshotDeflate1 = compressionMetrics(snapshotJson, 1);
+    const snapshotDeflate6 = compressionMetrics(snapshotJson, 6);
+    const adaptiveDeflate1 = compressionMetrics(wireJson, 1);
+    const adaptiveDeflate6 = compressionMetrics(wireJson, 6);
 
-    // Both paths include the canonical view required for equality and digest.
+    // Mirrors the optimized default scope: one internal copy, then a public
+    // snapshot copy only when the body falls back.
     const snapshotMs = timeIt(() => {
-      canonicalJson(after);
-      structuredClone(after);
+      const scoped = structuredClone(after);
+      canonicalJson(scoped);
+      structuredClone(scoped);
     });
     const probeMs = timeIt(() => {
-      const canonical = canonicalJson(after);
+      const scoped = structuredClone(after);
+      const canonical = canonicalJson(scoped);
       const candidate = createBoundedValidatedJsonPatch(
         before,
-        after,
+        scoped,
         MAX_OPERATIONS,
         Math.min(MAX_BYTES, Math.floor(byteLength(canonical) / MIN_REDUCTION)),
       );
       if (candidate === null) {
-        structuredClone(after);
+        structuredClone(scoped);
       }
     });
-    const adaptiveSteadyMs = fellBack
+    const adaptiveBaseMs = fellBack
       ? (probeMs + snapshotMs * PATCH_BACKOFF_TICKS) / (PATCH_BACKOFF_TICKS + 1)
+      : probeMs;
+    const adaptiveMaxMs = fellBack
+      ? (probeMs + snapshotMs * MAX_PATCH_BACKOFF_TICKS)
+        / (MAX_PATCH_BACKOFF_TICKS + 1)
       : probeMs;
 
     rows.push({
@@ -122,26 +177,50 @@ for (const entities of SIZES) {
         reduction: round(snapshotBytes / wireBytes, 1),
       },
       deflated: {
-        snapshot: deflated(snapshotJson),
-        adaptive: wireDeflated,
-        reduction: round(deflated(snapshotJson) / wireDeflated, 1),
+        level1: {
+          snapshot: snapshotDeflate1.bytes,
+          adaptive: adaptiveDeflate1.bytes,
+          reduction: round(snapshotDeflate1.bytes / adaptiveDeflate1.bytes, 1),
+        },
+        level6: {
+          snapshot: snapshotDeflate6.bytes,
+          adaptive: adaptiveDeflate6.bytes,
+          reduction: round(snapshotDeflate6.bytes / adaptiveDeflate6.bytes, 1),
+        },
       },
       cpuMsPerSeatPerTick: {
         snapshot: round(snapshotMs),
         adaptiveProbe: round(probeMs),
-        adaptiveSteady: round(adaptiveSteadyMs),
+        adaptiveBaseBackoff: round(adaptiveBaseMs),
+        adaptiveMaxBackoff: round(adaptiveMaxMs),
         probeRatio: round(probeMs / snapshotMs, 2),
-        steadyRatio: round(adaptiveSteadyMs / snapshotMs, 2),
+        maxBackoffRatio: round(adaptiveMaxMs / snapshotMs, 2),
+      },
+      compressionCpuMs: {
+        level1: {
+          snapshotEncode: round(snapshotDeflate1.encodeMs),
+          snapshotDecode: round(snapshotDeflate1.decodeMs),
+          adaptiveEncode: round(adaptiveDeflate1.encodeMs),
+          adaptiveDecode: round(adaptiveDeflate1.decodeMs),
+        },
+        level6: {
+          snapshotEncode: round(snapshotDeflate6.encodeMs),
+          snapshotDecode: round(snapshotDeflate6.decodeMs),
+          adaptiveEncode: round(adaptiveDeflate6.encodeMs),
+          adaptiveDecode: round(adaptiveDeflate6.decodeMs),
+        },
       },
       roomMiBs: {
         snapshot: round(perRoomMiBs(snapshotBytes)),
         adaptive: round(perRoomMiBs(wireBytes)),
-        adaptiveDeflated: round(perRoomMiBs(wireDeflated)),
+        adaptiveDeflatedLevel1: round(perRoomMiBs(adaptiveDeflate1.bytes)),
+        adaptiveDeflatedLevel6: round(perRoomMiBs(adaptiveDeflate6.bytes)),
       },
       tickBudgetPct: {
         snapshot: round((snapshotMs * SEATS) / (1000 / TICK_HZ) * 100, 1),
         adaptiveProbe: round((probeMs * SEATS) / (1000 / TICK_HZ) * 100, 1),
-        adaptiveSteady: round((adaptiveSteadyMs * SEATS) / (1000 / TICK_HZ) * 100, 1),
+        adaptiveBaseBackoff: round((adaptiveBaseMs * SEATS) / (1000 / TICK_HZ) * 100, 1),
+        adaptiveMaxBackoff: round((adaptiveMaxMs * SEATS) / (1000 / TICK_HZ) * 100, 1),
       },
     });
   }
@@ -154,6 +233,10 @@ console.log(JSON.stringify({
     seats: SEATS,
     iterations: ITERATIONS,
     patchBackoffTicks: PATCH_BACKOFF_TICKS,
+    maxPatchBackoffTicks: MAX_PATCH_BACKOFF_TICKS,
+    compressionLevels: [1, 6],
+    derivedViews: 'copy-on-write',
   },
+  ownershipRows,
   rows,
 }, null, 1));

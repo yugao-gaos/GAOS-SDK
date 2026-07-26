@@ -39,8 +39,10 @@ consumer repin and signed-artifact adoption checks.
   reconstructible delivery streams.
 - Observation codec v2 is the only v0.20 delivery codec. It uses bounded safe
   JSON patches with snapshot fallback; adaptive delivery backs off after an
-  uneconomic probe, while `patchStrategy: 'never'` keeps v2 snapshots and skips
-  diff CPU entirely. Clients migrate from snapshot-only v1 through
+  uneconomic probe with an exponential per-scope circuit breaker, while
+  `patchStrategy: 'never'` keeps v2 snapshots and skips diff CPU entirely.
+  Derived observation caches use copy-on-write ownership without weakening
+  public snapshot isolation. Clients migrate from snapshot-only v1 through
   `applyObservationDelta`. Repair origins, opaque product action payloads,
   pre-ingest legality, typed view failures, play-all-level runs, and host
   recovery helpers incorporate the two product migrations' findings.

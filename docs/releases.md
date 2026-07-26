@@ -22,16 +22,24 @@ pass envelopes through `applyObservationDelta`.
 
 Patch computation is a delivery policy, not a wire-version choice. The default
 `patchStrategy: 'adaptive'` requires a patch to win by `minReduction` (default
-**4×**) and backs off for `patchBackoffTicks` changed observations (default
-**8**) after an unsafe, over-bound, or uneconomic probe. This prevents
-high-churn tables from paying the full diff cost every tick. Products that
-prefer predictable snapshot CPU can set `patchStrategy: 'never'`; envelopes
-remain v2 and still use `snapshot` or `unchanged` bodies.
+**4×**). After repeated unsafe, over-bound, or uneconomic probes, its per-scope
+circuit breaker doubles from `patchBackoffTicks` (default **8**) up to
+`maxPatchBackoffTicks` (default **32**), then performs a half-open probe.
+Products that prefer predictable snapshot CPU can set
+`patchStrategy: 'never'`; envelopes remain v2 and still use `snapshot` or
+`unchanged` bodies.
 
 The patch walker now abandons operation and canonical-byte bounds during the
 walk, reuses the already cached canonical view for its size decision, and does
-not clone a snapshot on a successful patch. Transport compression remains
-recommended for snapshot-heavy traffic.
+not clone a snapshot on a successful patch. Derived seat and interest views
+use copy-on-write references inside prepared drafts; public observations and
+snapshot bodies remain isolated copies.
+
+Transport compression remains recommended for snapshot-heavy traffic. In the
+synthetic benchmark, zlib level 1 compresses a 500-entity snapshot from 38,420
+to 3,839 bytes in about 0.10 ms/seat; level 6 reaches 3,361 bytes but costs
+about 0.57 ms/seat. These synchronous zlib figures expose the CPU trade and are
+not a substitute for measuring the product's actual WebSocket stack.
 
 Durable `SessionEvent.kind` also adds `interest` and `seat-signature`; exhaustive
 switches need arms for enabled RFC-010 lanes. A patch is an observation body,

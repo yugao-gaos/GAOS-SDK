@@ -286,9 +286,17 @@ describe('RFC-010 completed migration-informed scope', () => {
       ...options,
       observationCodec: { version: 'v2', patchBackoffTicks: -1 },
     })).toThrow(/patchBackoffTicks must be a non-negative safe integer/);
+    expect(() => createSessionKernel({
+      ...options,
+      observationCodec: {
+        version: 'v2',
+        patchBackoffTicks: 8,
+        maxPatchBackoffTicks: 4,
+      },
+    })).toThrow(/maxPatchBackoffTicks must be a safe integer >= patchBackoffTicks/);
   });
 
-  it('backs off adaptive patch probes after a bounded diff falls back', () => {
+  it('exponentially backs off adaptive patch probes and resets after a win', () => {
     interface AdaptiveState {
       tick: number;
       values: number[];
@@ -304,7 +312,7 @@ describe('RFC-010 completed migration-informed scope', () => {
       advance: (state) => ({
         tick: state.tick + 1,
         values: state.values.map((value, index) => (
-          state.tick === 0 || index === 0 ? value + 1 : value
+          state.tick < 5 || index === 0 ? value + 1 : value
         )),
       }),
       view: (state) => ({
@@ -332,6 +340,7 @@ describe('RFC-010 completed migration-informed scope', () => {
         version: 'v2',
         patchStrategy: 'adaptive',
         patchBackoffTicks: 1,
+        maxPatchBackoffTicks: 2,
         maxOperations: 10,
       },
     });
@@ -352,9 +361,37 @@ describe('RFC-010 completed migration-informed scope', () => {
       return body;
     };
 
-    expect(advance('adaptive-1').kind).toBe('snapshot');
-    expect(advance('adaptive-2').kind).toBe('snapshot');
-    expect(advance('adaptive-3').kind).toBe('patch');
+    for (let tick = 1; tick <= 5; tick++) {
+      expect(advance(`adaptive-${tick}`).kind).toBe('snapshot');
+    }
+    expect(advance('adaptive-6').kind).toBe('patch');
+    expect(advance('adaptive-7').kind).toBe('patch');
+  });
+
+  it('keeps copy-on-write cached views isolated from callers and aborted drafts', async () => {
+    const { options } = await signedOptions();
+    const kernel = createSessionKernel({
+      ...options,
+      observationCodec: { version: 'v2', patchStrategy: 'never' },
+    });
+    const observed = kernel.observe('alpha');
+    (observed.entities[0] as { id: string; value: number }).value = 999;
+    expect(kernel.observe('alpha').entities[0]?.value).toBe(0);
+
+    kernel.commit(kernel.prepareIngest({
+      protocol: PROTOCOL_ID,
+      protocolVersion: PROTOCOL_VERSION,
+      sessionId: options.sessionId,
+      tickId: makeTickId(options.sessionId, 0),
+      revision: 0,
+      participantId: 'alpha',
+      submissionId: 'copy-on-write-abort',
+      command: { amount: 1 },
+    }));
+    const advance = kernel.prepareAdvance();
+    expect(advance.deltas[0]?.body.kind).toBe('snapshot');
+    kernel.abort(advance);
+    expect(kernel.observe('alpha').entities[0]?.value).toBe(0);
   });
 
   it('preserves the v0.19 opaque timeout reservation for unsigned sessions', async () => {

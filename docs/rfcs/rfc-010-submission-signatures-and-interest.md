@@ -1347,10 +1347,11 @@ cost without protecting a released consumer. `ObservationDelta.codec` is
 `'v2'`; bodies remain `patch | snapshot | unchanged`, with snapshot fallback
 required for unsafe, over-bound, or non-beneficial patches. Patch computation
 is not mandatory: `patchStrategy: 'never'` emits v2 snapshots, while the
-default `adaptive` strategy backs off for a bounded number of changed
-observations after a losing probe. The optional `observationCodec` setting
-configures that v2 delivery policy and its bounds. This intentionally reopens
-the observation-delivery freeze; both product repins are the tag gate.
+default `adaptive` strategy uses an exponential per-scope circuit breaker after
+losing probes. Its initial and maximum windows are configurable. The optional
+`observationCodec` setting configures that v2 delivery policy and its bounds.
+This intentionally reopens the observation-delivery freeze; both product
+repins are the tag gate.
 
 *Follow-up available: the consumer offers live traces once its authoritative
 host is deployed. Take them — the synthetic table is the caveat both sides
@@ -1621,8 +1622,9 @@ Implementation note (2026-07-26): D1–D3/D5, E2's mandatory v2 envelope with
 bounded adaptive patch delivery, E3, E5's storage guidance, and E6 are
 implemented on the v0.20 development line. The reproducible
 `npm run observations:benchmark` synthetic check now reports snapshot,
-adaptive-probe, and adaptive steady-state CPU across sparse and high-churn
-50/200/500-entity views, alongside raw and deflated wire bytes.
+adaptive-probe, base/max-backoff CPU, derived-cache ownership cost, and timed
+level-1/level-6 compression across sparse and high-churn 50/200/500-entity
+views.
 E1 is implemented as the additive `SessionView`/`TickView` split with an
 explicit `replayMetrics` seam for non-HUD observations. Arena resolved E4:
 unconfirmed chooser/dialogue state is presentation-only, while confirmation

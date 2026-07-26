@@ -104,10 +104,15 @@ export interface ObservationCodecV2Options {
    */
   patchStrategy?: 'adaptive' | 'never';
   /**
-   * Changed observations to emit as snapshots after an adaptive probe loses.
-   * Default 8. Set to 0 to probe every changed observation.
+   * Initial changed observations to emit as snapshots after a probe loses.
+   * Repeated losses double the window. Default 8; set to 0 to always probe.
    */
   patchBackoffTicks?: number;
+  /**
+   * Maximum exponential backoff window. Defaults to at least 32 and never
+   * below `patchBackoffTicks`.
+   */
+  maxPatchBackoffTicks?: number;
   maxOperations?: number;
   maxBytes?: number;
   /**
@@ -496,6 +501,7 @@ interface InterestScopeState<TView> {
   canonical: string;
   /** Delivery-only adaptive patch state; it has no simulation semantics. */
   patchBackoffRemaining: number;
+  patchBackoffWindow: number;
 }
 
 interface KernelState<TState, TCommand extends JsonValue, TView> {
@@ -622,6 +628,18 @@ const utf8Encoder = new TextEncoder();
 
 function cloneMapValues<T>(source: Map<string, T>): Map<string, T> {
   return new Map([...source].map(([key, value]) => [key, structuredClone(value)]));
+}
+
+function forkInterestScopes<TView>(
+  source: Map<string, InterestScopeState<TView>>,
+): Map<string, InterestScopeState<TView>> {
+  return new Map([...source].map(([key, scope]) => [key, {
+    ...scope,
+    declaration: structuredClone(scope.declaration),
+    // Views are derived immutable values. Drafts replace this reference rather
+    // than mutating it, so sharing avoids a full graph clone per prepare call.
+    view: scope.view,
+  }]));
 }
 
 function actionCopy(action: SubmittedAction): SubmittedAction {
@@ -897,6 +915,8 @@ class SessionKernelImpl<
     }
     const patchStrategy = observationCodec.patchStrategy ?? 'adaptive';
     const patchBackoffTicks = observationCodec.patchBackoffTicks ?? 8;
+    const maxPatchBackoffTicks = observationCodec.maxPatchBackoffTicks
+      ?? Math.max(32, patchBackoffTicks);
     const maxOperations = observationCodec.maxOperations ?? 2_048;
     const maxBytes = observationCodec.maxBytes ?? 65_536;
     const minReduction = observationCodec.minReduction ?? 4;
@@ -905,6 +925,12 @@ class SessionKernelImpl<
     }
     if (!Number.isSafeInteger(patchBackoffTicks) || patchBackoffTicks < 0) {
       throw new RangeError('patchBackoffTicks must be a non-negative safe integer');
+    }
+    if (!Number.isSafeInteger(maxPatchBackoffTicks)
+      || maxPatchBackoffTicks < patchBackoffTicks) {
+      throw new RangeError(
+        'maxPatchBackoffTicks must be a safe integer >= patchBackoffTicks',
+      );
     }
     if (!Number.isSafeInteger(maxOperations) || maxOperations <= 0
       || !Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
@@ -917,6 +943,7 @@ class SessionKernelImpl<
       version: 'v2',
       patchStrategy,
       patchBackoffTicks,
+      maxPatchBackoffTicks,
       maxOperations,
       maxBytes,
       minReduction,
@@ -971,9 +998,10 @@ class SessionKernelImpl<
         scopeId: seat,
         declared: false,
         declaration: null,
-        view: structuredClone(seatView),
+        view: seatView,
         canonical,
         patchBackoffRemaining: 0,
+        patchBackoffWindow: patchBackoffTicks,
       });
     }
     this.live = {
@@ -1022,14 +1050,17 @@ class SessionKernelImpl<
     nextCanonical: string,
     unchanged: boolean,
     patchBackoffRemaining: number,
+    patchBackoffWindow: number,
   ): Pick<ObservationDelta<TView>, 'codec' | 'body'> & {
     patchBackoffRemaining: number;
+    patchBackoffWindow: number;
   } {
     if (unchanged) {
       return {
         codec: 'v2',
         body: { kind: 'unchanged' },
         patchBackoffRemaining,
+        patchBackoffWindow,
       };
     }
     if (this.observationCodec.patchStrategy === 'never') {
@@ -1037,6 +1068,7 @@ class SessionKernelImpl<
         codec: 'v2',
         body: { kind: 'snapshot', view: structuredClone(next) },
         patchBackoffRemaining: 0,
+        patchBackoffWindow: this.observationCodec.patchBackoffTicks,
       };
     }
     if (patchBackoffRemaining > 0) {
@@ -1044,6 +1076,7 @@ class SessionKernelImpl<
         codec: 'v2',
         body: { kind: 'snapshot', view: structuredClone(next) },
         patchBackoffRemaining: patchBackoffRemaining - 1,
+        patchBackoffWindow,
       };
     }
     const snapshotBytes = utf8Encoder.encode(nextCanonical).length;
@@ -1065,6 +1098,7 @@ class SessionKernelImpl<
           codec: 'v2',
           body: { kind: 'patch', operations: patch.operations },
           patchBackoffRemaining: 0,
+          patchBackoffWindow: this.observationCodec.patchBackoffTicks,
         };
       }
     } catch {
@@ -1073,7 +1107,14 @@ class SessionKernelImpl<
     return {
       codec: 'v2',
       body: { kind: 'snapshot', view: structuredClone(next) },
-      patchBackoffRemaining: this.observationCodec.patchBackoffTicks,
+      patchBackoffRemaining: patchBackoffWindow,
+      patchBackoffWindow: Math.min(
+        this.observationCodec.maxPatchBackoffTicks,
+        Math.max(
+          this.observationCodec.patchBackoffTicks,
+          patchBackoffWindow * 2,
+        ),
+      ),
     };
   }
 
@@ -1083,9 +1124,12 @@ class SessionKernelImpl<
     cursor: number,
     tick: number,
   ): { view: TView; canonical: string } {
-    const view = ('declared' in scope && !scope.declared) || this.options.interest === undefined
-      ? structuredClone(fullView)
-      : this.options.interest.narrowView(structuredClone(fullView), {
+    const interest = this.options.interest;
+    const usesFullView = ('declared' in scope && !scope.declared)
+      || interest === undefined;
+    const view = usesFullView
+      ? fullView
+      : interest.narrowView(structuredClone(fullView), {
         sessionId: this.options.sessionId,
         participantId: scope.participantId,
         scopeId: scope.scopeId,
@@ -1103,7 +1147,9 @@ class SessionKernelImpl<
         `interest scope ${scope.scopeId} widened or altered the partitioned view`,
       );
     }
-    return { view: structuredClone(view), canonical };
+    // A product hook may retain the object it returns. Detach declared scopes
+    // from that reference; default scopes can safely share the internal view.
+    return { view: usesFullView ? view : structuredClone(view), canonical };
   }
 
   private validatedParticipantsForView(view: TView): string[] {
@@ -1126,13 +1172,14 @@ class SessionKernelImpl<
       events: [...this.live.events],
       receipts: cloneMapValues(this.live.receipts),
       expiredReceiptKeys: new Set(this.live.expiredReceiptKeys),
-      views: cloneMapValues(this.live.views),
+      // Derived views are immutable and replaced, never mutated in place.
+      views: new Map(this.live.views),
       viewCanonical: new Map(this.live.viewCanonical),
       viewRevisions: new Map(this.live.viewRevisions),
       commitments: cloneMapValues(this.live.commitments),
       nextCommitmentIds: new Map(this.live.nextCommitmentIds),
       seenSalts: new Map(this.live.seenSalts),
-      interestScopes: cloneMapValues(this.live.interestScopes),
+      interestScopes: forkInterestScopes(this.live.interestScopes),
     };
     this.draftForks.set(draft, reducerState);
     return draft;
@@ -1641,6 +1688,7 @@ class SessionKernelImpl<
           scoped.canonical,
           unchanged,
           scope.patchBackoffRemaining,
+          scope.patchBackoffWindow,
         );
         deltas.push({
           seat,
@@ -1661,6 +1709,7 @@ class SessionKernelImpl<
         scope.view = scoped.view;
         scope.canonical = scoped.canonical;
         scope.patchBackoffRemaining = encoded.patchBackoffRemaining;
+        scope.patchBackoffWindow = encoded.patchBackoffWindow;
       }
     }
     draft.window = createIntentWindow(
@@ -2183,9 +2232,10 @@ class SessionKernelImpl<
           scopeId: submission.scopeId,
           declared: true,
           declaration: structuredClone(submission.declaration),
-          view: structuredClone(nextScope.view),
+          view: nextScope.view,
           canonical: nextScope.canonical,
           patchBackoffRemaining: 0,
+          patchBackoffWindow: this.observationCodec.patchBackoffTicks,
         },
       );
       const delta: ObservationDelta<TView> = {
@@ -2492,6 +2542,7 @@ class SessionKernelImpl<
             view: scoped.view,
             canonical: scoped.canonical,
             patchBackoffRemaining: 0,
+            patchBackoffWindow: this.observationCodec.patchBackoffTicks,
           },
         );
       } else if (event.kind === 'resolution') {

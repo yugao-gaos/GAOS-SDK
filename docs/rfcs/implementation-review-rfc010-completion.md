@@ -380,3 +380,30 @@ On the same 20 Hz × 4-seat synthetic run, 500 entities/all-changing now measure
 probe, and 38.3% in adaptive steady state. The previous repeated-probe path
 exceeded the whole tick budget. At 500 entities/one change, adaptive retains
 the intended trade: 1.86× snapshot CPU for 314.8× fewer raw bytes.
+
+---
+
+# Round 5 — exponential breaker, ownership, and compression CPU
+
+The fixed eight-tick breaker still paid one losing probe every ninth changed
+observation. It now doubles 8 → 16 → 32 after repeated losses, probes
+half-open at the end of each window, and resets to eight after a winning patch.
+On a representative 500-entity/all-changing run this puts max-backoff encoding
+at 4.759 ms/seat versus 4.507 ms for snapshots alone: **1.06×**, down from the
+fixed-window 1.20×–1.30× range.
+
+The ownership audit also found avoidable work outside the codec. Cached seat
+views and scope views are derived immutable values but were deep-cloned into
+every prepared draft, and the default scope cloned its full view twice again.
+Drafts now share those graphs copy-on-write and replace their references after
+resolution. A focused four-seat/one-scope microbenchmark at 500 entities drops
+the derived-cache fork portion from **7.725 ms to 0.005 ms**. Reducer-state
+forking and public snapshot isolation are unchanged.
+
+Finally, compression is no longer described as CPU-free. The benchmark times
+synchronous zlib encode/decode at levels 1 and 6. For the 38,420-byte
+500-entity snapshot, level 1 produced 3,839 bytes at about 0.104 ms encode and
+0.107 ms decode per seat; level 6 produced 3,361 bytes at about 0.574 ms encode
+and 0.083 ms decode. Level 1 is the better latency default in this synthetic
+case; products must still measure their actual WebSocket implementation and
+context-takeover policy.

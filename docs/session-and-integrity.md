@@ -144,14 +144,16 @@ Every v0.20 session emits observation codec v2. Its default adaptive strategy
 uses deterministic, bounded JSON patches only when they beat a snapshot by the
 configured `minReduction`. After a probe falls back, that interest scope emits
 snapshots for `patchBackoffTicks` changed observations before probing again.
-Set `patchStrategy: 'never'` to skip diffing entirely while retaining the same
-v2 envelope:
+Repeated failures double that window up to `maxPatchBackoffTicks`; a successful
+half-open probe resets it. Set `patchStrategy: 'never'` to skip diffing entirely
+while retaining the same v2 envelope:
 
 ```ts
 observationCodec: {
   version: 'v2',
   patchStrategy: 'adaptive', // or 'never'
   patchBackoffTicks: 8,
+  maxPatchBackoffTicks: 32,
   minReduction: 4,
   maxOperations: 2_048,
   maxBytes: 65_536,
@@ -164,6 +166,11 @@ during the walk and fall back to a complete v2 snapshot. Clients reconstruct
 every `patch`, `snapshot`, or `unchanged` body with `applyObservationDelta`,
 which checks `viewDigest`. The snapshot-only v1 negotiation path was removed
 before release.
+
+Cached seat and scope views are derived immutable values. Prepared drafts share
+them copy-on-write and replace references after a resolution, avoiding
+full-graph clones. This is internal only: `observe`, `snapshot`, interest
+declaration results, and prepared deltas remain isolated from caller mutation.
 
 An interest policy receives the already partitioned seat view and may only
 remove structure. The kernel checks that invariant before publishing:
