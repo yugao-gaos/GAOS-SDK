@@ -407,3 +407,87 @@ synchronous zlib encode/decode at levels 1 and 6. For the 38,420-byte
 and 0.083 ms decode. Level 1 is the better latency default in this synthetic
 case; products must still measure their actual WebSocket implementation and
 context-takeover policy.
+
+---
+
+# Round 4 — review of `523faf2` + `43f13d7` (adaptive codec)
+
+`tsc` clean, **286 vitest**, **72 pytest**. Benchmark re-run on the same
+desktop.
+
+## The circuit breaker works, and it fixes what I could not
+
+I shipped `minReduction` and said plainly that it fixed the *decision* but not
+the *wasted work* — v2 still built the whole patch before rejecting it, leaving
+500 entities/all-changed at **5.19×** the snapshot CPU. The adaptive backoff
+closes exactly that gap. Every cell where the patch loses now converges on the
+snapshot cost:
+
+| entities | changed | snapshot | probe | max backoff | ratio |
+|---|---|---|---|---|---|
+| 50 | 20 | 0.573 ms | 1.621 ms | 0.605 ms | **1.06×** |
+| 50 | all | 0.443 ms | 1.519 ms | 0.476 ms | **1.07×** |
+| 200 | all | 1.934 ms | 4.801 ms | 2.020 ms | **1.04×** |
+| 500 | all | 4.871 ms | 12.984 ms | 5.116 ms | **1.05×** |
+
+500/all drops from 103.9 % of a 20 Hz tick budget while probing to **40.9 %**
+at max backoff, against the snapshot path's 39.0 %. That is the right shape:
+probe occasionally, pay almost nothing when probing keeps losing.
+
+## Two things this got right that my version did not
+
+- **One envelope instead of two.** `codec` stays the single-member `'v2'` and
+  the escape hatch is `patchStrategy: 'never'`. I had widened `codec` back to
+  `'v1' | 'v2'`, which re-opened the exhaustive-switch hazard of R2-1 for no
+  benefit — my objection was always about *the capability* of a cheap
+  snapshot-only path, not about the wire value `'v1'`. This keeps the
+  capability and keeps the wire narrow.
+- **A more honest benchmark.** My snapshot arm timed `canonicalJson` alone. The
+  new one models what the kernel actually does per seat per tick —
+  `structuredClone` → canonicalise → public `structuredClone`. That is why the
+  absolute numbers rose (500/all snapshot 2.66 ms → 4.87 ms); it is a better
+  measurement, not a regression. **My earlier figures understated v1's cost**,
+  which correspondingly overstated the v1-vs-v2 gap.
+
+## New data worth acting on: deflate level 1, not 6
+
+The benchmark now times compression on both sides. At 500 entities:
+
+| level | snapshot bytes | encode CPU |
+|---|---|---|
+| 1 | 3,834 | **0.176 ms** |
+| 6 | 3,372 | 0.769 ms |
+
+Level 6 buys **12 % more compression for 4.4× the CPU**. Since CPU is the
+binding constraint, **level 1 is the right recommendation** and the docs should
+say so rather than leaving it to the host's default.
+
+## Remaining finding — R4-1 (LOW-MEDIUM): backoff is byte-aware, not CPU-aware
+
+Backoff triggers on a patch *losing on bytes*. A patch that wins decisively on
+bytes never backs off, however much CPU it costs — and at 500 entities those
+are the expensive cells:
+
+| entities | changed | snapshot budget | adaptive budget | bandwidth |
+|---|---|---|---|---|
+| 500 | 1 | 39.1 % | **70.7 %** | 2.93 → 0.007 MiB/s |
+| 500 | 5 | 39.3 % | **77.0 %** | 2.93 → 0.009 MiB/s |
+| 500 | 20 | 40.5 % | **76.1 %** | 2.93 → 0.015 MiB/s |
+
+This is **not a defect** — paying ~2× CPU for ~30–400× bandwidth is a good
+trade, unlike the 7 %-bytes-for-5×-CPU case that started this. But it is a
+*choice*, and the numbers that let a host make it are not written down. A
+500-entity 20 Hz product sits at 77 % of budget **on a fast desktop**; a
+Cloudflare DO isolate is materially slower, and that headroom is thin.
+
+**Suggested:** put the crossover in `session-and-integrity.md` — roughly, above
+a few hundred changed-entity-equivalents per tick, a CPU-bound host should
+prefer `patchStrategy: 'never'` plus level-1 transport compression (which still
+delivers 2.93 → 0.293 MiB/s, a 10× win, at ~39 % of budget), while a
+bandwidth-bound host should stay adaptive. No code change implied.
+
+## Verdict
+
+**Better than what I shipped, and verified.** The backoff genuinely closes the
+CPU regression, the single-envelope design is cleaner than my two-codec
+version, and the benchmark is more truthful. R4-1 is documentation.
