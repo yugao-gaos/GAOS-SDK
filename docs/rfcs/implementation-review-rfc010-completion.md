@@ -3,9 +3,14 @@
 Reviewed at `52fa4a1` against RFC-010 Parts A–E. Health: `tsc --noEmit` clean,
 vitest **277 passed / 3 skipped**, pytest **72 passed / 4 skipped**.
 
-**Verdict: the code is good; the *delivery* is not.** Every item is
-implemented and the two things I expected to be wrong turned out to be right.
-One blocking finding, and it is not in the source.
+**Verdict: ship v0.20.** Every item is implemented, the two things I expected
+to be wrong turned out to be right, and **v0.20 is a drop-in upgrade from
+v0.19.0** — no required option was added, `observationCodec` defaults to `'v1'`,
+and everything else is optional or additive on return types. One real finding
+remains (a test gap in D5) plus two open items; nothing blocks the release.
+
+*Findings 1 and 3 were raised in the first pass and are withdrawn below, with
+the reasoning that was wrong left in place rather than deleted.*
 
 ---
 
@@ -44,33 +49,42 @@ three states are genuinely separable and the host no longer infers anything.
 
 ## Findings
 
-### 1 — HIGH · The v0.19.x line does not exist, so the blocking fixes cannot be delivered
+### 1 — WITHDRAWN · "No v0.19.x line" — v0.20 is a drop-in, so no patch line is needed
 
-**This is the one that matters, and it is a release-mechanics defect rather
-than a code defect.**
+*This review originally raised the absence of a `v0.19.x` branch as a HIGH
+finding: D1/D2/D3/D5 were classified as baseline-line fixes, three of them
+migration-blocking, yet only obtainable by adopting all of unreleased v0.20.*
 
-D1, D2, D3, and D5 were classified under RFC-009 §4.3 as *additive fixes on the
-baseline line*, three of them **migration-blocking**. They are instead sitting
-on `main` at `0.20.0-dev`, stacked on top of the signature layer, the interest
-lane, the patch codec, and a replay schema advanced to **v1.2**. Verified:
+**Withdrawn — the reasoning was from policy rather than from the code.**
+RFC-009 §4.4's freeze exists to stop a *moving contract* from doubling the work
+of two mid-flight migrations. Checking whether the contract actually moved for
+a consumer pinned at `v0.19.0`:
 
-- no `v0.19.x` branch exists (`git branch -a` — only `main` and stale feature
-  branches);
-- `docs/releases.md` has exactly two current sections, `v0.20.0 (unreleased)`
-  and `v0.19.0` — there is **no v0.19.1**, and none of the four fixes is listed
-  as shipping anywhere a consumer can pin.
+- **`observationCodec` defaults to `'v1'`** (`src/session.ts:850–851`): a
+  consumer that does not opt in keeps `codec: 'v1'` and snapshot bodies. The
+  `'v1' | 'v2'` widening never emits v2 unaskedly.
+- **`SessionKernelOptions` gained no required field.** Its mandatory set is
+  unchanged from v0.19: `sessionId`, `game`, `levelId`, `reducer`, `level`,
+  `seed`, `seedPolicy`, `seats`, `hostTime`.
+- Everything else is optional (`interest?`, `seatKeys?`, `signaturePolicy?`,
+  `validateCommand?`, `advancePolicy?`, `payload?`, `origin?`) or additive on
+  **return** types (`resolved`, `awaitingSeats()`), which callers ignore at no
+  cost.
+- v1.0/v1.1 artifacts still parse; the golden fixture is byte-untouched.
 
-Both consumers are pinned at `#v0.19.0`. The only way either gets its
-unblocking fix today is to adopt the whole of unreleased v0.20 — **precisely
-the moving contract under two mid-flight migrations that RFC-009 §4.4's freeze
-exists to prevent.** The freeze was honoured in the source (everything is
-additive and optional) and then bypassed by the packaging.
+**v0.20 is therefore a drop-in upgrade from v0.19.0**, and the freeze's purpose
+is satisfied by that fact rather than by a version number. A v0.19.1 would
+protect nobody from anything and would cost a maintained branch, a second
+cherry-pick target, and a narrowed `origin` union.
 
-**Fix:** branch `v0.19.x` from the `v0.19.0` tag, cherry-pick the four D items,
-release **v0.19.1**, and announce the re-pin. The freeze check
-(`git diff --name-only 5ddd404..v0.19.1 -- src python schema`) will
-legitimately print `src/session.ts` — the announcement must say so explicitly,
-per RFC-010 §D5's re-pin note.
+**Ship v0.20.** Consumers re-pin `#v0.19.0` → `#v0.20.0` and get the
+migration-blocking fixes with no code change on their side.
+
+*Lesson for RFC-009 §4.3: its patch-vs-v0.20 classification tacitly assumed
+v0.20 would be a reshaping release. It came out additive, so the two branches
+of that rule collapsed into one. The rule should be restated in terms of the
+observable question — "does a pinned consumer have to change code?" — not in
+terms of which release the change lands in.*
 
 ### 2 — MEDIUM · D5's test asserts the artifact *builds*, not that it is *correct*
 
@@ -94,13 +108,12 @@ Arena's paid ranking would be silently wrong and this test would still pass.**
 `totalActionsUsed` against hand-computed values for a run with a failed
 non-final level.
 
-### 3 — LOW-MEDIUM · D1's union carries a value that cannot occur in v0.19.x
+### 3 — WITHDRAWN · D1's `'interest'` union value
 
-`origin?: 'resolution' | 'snapshot' | 'interest'` — `'interest'` belongs to
-Part B, which is v0.20. If D1 ships in v0.19.1 (finding 1), consumers get a
-union member that can never appear in that release and must write dead
-handling for it. Narrow the union to `'resolution' | 'snapshot'` on the
-`v0.19.x` branch; keep the third value on `main`.
+Raised only as a consequence of finding 1: if D1 shipped in a v0.19.1 without
+Part B, `origin: 'interest'` would be a union member that could never occur.
+With no v0.19.1, D1 and Part B ship together and the value is always reachable.
+No change needed.
 
 ### 4 — LOW · §A3's open items are still open, with the code now shipped
 
@@ -130,8 +143,13 @@ reviewer re-derives intent that the author already had.
 
 ## Recommendation
 
-**Hold the v0.20 line and cut v0.19.1 first.** Findings 2 and 3 are small and
-belong on the `v0.19.x` branch alongside the cherry-picks, so they cost
-nothing extra if done in the same pass. Nothing here requires reworking what
-was implemented — the source is in good shape, and F7 in particular is better
-than the RFC asked for.
+**Release v0.20.** No patch line, no cherry-picks, no maintained branch. Both
+consumers re-pin `#v0.19.0` → `#v0.20.0` and get all four migration-blocking
+fixes with no code change on their side.
+
+Do finding 2 first — it is a short test and it covers the assertion D5's whole
+justification rests on. Findings 4 (roster lifecycle) and 5 (unbounded
+`historicalSubmissionKeys`) are documentation and can ride the same release.
+
+Nothing implemented needs reworking. The source is in good shape, and F7 is
+better than the RFC asked for.
