@@ -1,6 +1,6 @@
 [project]
 name = "gaos-turn-based-grid-sdk"
-version = "0.19.0"
+version = "0.20.0.dev0"
 description = "Python client and Gymnasium-style environment for the GAOS game SDK"
 readme = "README.md"
 license = "Apache-2.0"
@@ -9,6 +9,9 @@ requires-python = ">=3.10"
 # drops into any harness (Gymnasium, verifiers, bare scripts) without
 # dependency conflicts.
 dependencies = []
+
+[project.scripts]
+gaos-verify = "agilabs_arena.verify:main"
 
 [project.urls]
 Homepage = "https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/"

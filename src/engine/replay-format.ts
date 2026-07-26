@@ -19,6 +19,19 @@ import {
 import { createDmath, type Dmath } from './dmath.js';
 import { locationKey } from './locations.js';
 import {
+  SUBMISSION_SIGNATURE_ALGORITHM,
+  SUBMISSION_SIGNATURE_SCHEME,
+  periodicSignaturePreimageV1,
+  signatureBytesFromBase64,
+  submissionChainHashV1,
+  submissionGenesisHashV1,
+  submissionPreimageV1,
+  submissionRosterHashV1,
+  verifyEd25519Base64,
+  type SubmissionSeatKey,
+  type SubmissionSignaturePolicy,
+} from './submission-signatures.js';
+import {
   recheckTranscript,
   runLevelSeed,
   type RecheckOptions,
@@ -30,12 +43,15 @@ import {
 
 /** Stable identifier carried by every SDK-owned portable replay. */
 export const GAOS_REPLAY_FORMAT_ID = 'gaos.replay' as const;
-/** Current schema version for grouped resolutions and audit records. */
-export const GAOS_REPLAY_FORMAT_VERSION = '1.1' as const;
-/** Read-only compatibility version accepted by the parser and verifier. */
+/** Current schema version for signed submissions and per-seat audit chains. */
+export const GAOS_REPLAY_FORMAT_VERSION = '1.2' as const;
+/** Unsigned grouped/audit format accepted for migration compatibility. */
+export const GAOS_REPLAY_UNSIGNED_FORMAT_VERSION = '1.1' as const;
+/** Action-only compatibility version accepted by the parser and verifier. */
 export const GAOS_REPLAY_LEGACY_FORMAT_VERSION = '1.0' as const;
 export type ReplayFormatVersion =
   | typeof GAOS_REPLAY_LEGACY_FORMAT_VERSION
+  | typeof GAOS_REPLAY_UNSIGNED_FORMAT_VERSION
   | typeof GAOS_REPLAY_FORMAT_VERSION;
 /** Media type used by downloads, object storage, and module manifests. */
 export const GAOS_REPLAY_MIME = 'application/vnd.gaos.replay+jsonl' as const;
@@ -43,6 +59,8 @@ export const GAOS_REPLAY_MIME = 'application/vnd.gaos.replay+jsonl' as const;
 export const GAOS_REPLAY_EXTENSION = 'gaos-replay.jsonl' as const;
 /** Seed policy compatible with `runLevelSeed`. */
 export const GAOS_REPLAY_DERIVED_SEEDS = 'gaos.run-level-seed.v1' as const;
+/** Fixed reference used by v1.2 timeout records for the header policy. */
+export const GAOS_TIMEOUT_POLICY_REF = 'header.timeoutPolicy' as const;
 
 /**
  * Drop-in value for TabletopLabs-style `results.replayFormat` declarations.
@@ -55,6 +73,11 @@ export const GAOS_REPLAY_MANIFEST_FORMAT = Object.freeze({
 });
 
 export type ReplaySeedPolicy = 'explicit' | typeof GAOS_REPLAY_DERIVED_SEEDS;
+
+export interface ReplayTickTimeoutPolicy {
+  mode: 'ticks';
+  windowTicks: number;
+}
 
 /**
  * Selects the game and historical deterministic adapter needed to recheck it.
@@ -96,11 +119,12 @@ export interface ReplayTotals {
   extensions?: JsonObject;
 }
 
-/** Reserved roster slot for RFC-010; v1.1 assigns no trust semantics. */
+/** v1.1 reservation shape; v1.2 requires every RFC-010 field. */
 export interface ReplaySeatIntegrityReservation {
   id: string;
   publicKey?: string;
   alg?: string;
+  signingTier?: { N: number };
 }
 
 /** First line of a GAOS replay JSONL artifact. */
@@ -118,12 +142,12 @@ export interface ReplayHeader<TLevel> {
   levels: Array<ReplayLevelRecord<TLevel>>;
   totals: ReplayTotals;
   visibility?: TranscriptVisibility;
-  /** RFC-010 reservation; ignored by the v1.1 verifier. */
-  seatKeys?: ReplaySeatIntegrityReservation[];
-  /** RFC-010 reservation; ignored by the v1.1 verifier. */
-  signaturePolicy?: JsonObject;
-  /** Reserved timeout-policy declaration; ignored by the v1.1 verifier. */
-  timeoutPolicy?: JsonObject;
+  /** RFC-010 key roster; opaque reservation only when reading v1.1. */
+  seatKeys?: ReadonlyArray<ReplaySeatIntegrityReservation | SubmissionSeatKey>;
+  /** RFC-010 construction policy; opaque reservation only when reading v1.1. */
+  signaturePolicy?: JsonObject | SubmissionSignaturePolicy;
+  /** Opaque in v1.1; v1.2 assigns tick-bounded timeout semantics. */
+  timeoutPolicy?: JsonObject | ReplayTickTimeoutPolicy;
   /** Host, creator, agent, signing, or benchmark metadata. */
   extensions?: JsonObject;
 }
@@ -175,7 +199,7 @@ export interface ReplayTimeout {
   windowRef: number;
   participantId: string | null;
   reason: string;
-  /** Reserved reference into `ReplayHeader.timeoutPolicy`. */
+  /** v1.2 uses the fixed `header.timeoutPolicy` reference. */
   timeoutPolicyRef?: string;
   /** Advisory host UTC milliseconds; ignored by replay verification. */
   hostTime?: number;
@@ -254,7 +278,7 @@ export interface ReplayArtifact<TLevel> {
   header: ReplayHeader<TLevel>;
   /** Compatibility projection for action-oriented v1.0 consumers. */
   actions: ReplayAction[];
-  /** Ordered v1.1 record stream. Absent on parsed v1.0/action-only artifacts. */
+  /** Ordered v1.1+ record stream. Absent on parsed v1.0/action-only artifacts. */
   records?: ReplayRecord[];
 }
 
@@ -293,13 +317,13 @@ export interface CreateReplayArtifactInput<TLevel> {
   perm: number[];
   levels: Array<ReplayLevelInput<TLevel>>;
   actions?: ReplayActionInput[];
-  /** Supplying records opts into the v1.1 grouped/audit transport. */
+  /** Supplying records opts into the v1.1+ grouped/audit transport. */
   records?: ReplayRecord[];
   totals?: ReplayTotals;
   visibility?: TranscriptVisibility;
-  seatKeys?: ReplaySeatIntegrityReservation[];
-  signaturePolicy?: JsonObject;
-  timeoutPolicy?: JsonObject;
+  seatKeys?: readonly ReplaySeatIntegrityReservation[];
+  signaturePolicy?: JsonObject | SubmissionSignaturePolicy;
+  timeoutPolicy?: JsonObject | ReplayTickTimeoutPolicy;
   extensions?: JsonObject;
 }
 
@@ -317,6 +341,36 @@ export interface ReplayReducerContext<TLevel> {
   dmath?: Dmath;
 }
 
+export interface ReplaySubmissionContext {
+  sessionId: string;
+  tick: number;
+  cursor: number;
+  participantId: string;
+  submissionId: string;
+}
+
+export interface ReplayTimeoutContext<TLevel> {
+  sessionId: string;
+  game: ReplayGameRef;
+  levelId: string;
+  levelVersion?: string | number;
+  level: TLevel;
+  seed: number;
+  participantId: string | null;
+  windowRef: number;
+}
+
+export interface ReplaySemanticAdapter<TLevel> {
+  commandToAction?: (
+    command: JsonValue,
+    context: ReplaySubmissionContext,
+  ) => SubmittedAction;
+  timeoutToAction?: (
+    context: ReplayTimeoutContext<TLevel>,
+    timeout: ReplayTimeout,
+  ) => SubmittedAction;
+}
+
 export type ReplayReducerResolver<
   TLevel,
   TState,
@@ -327,6 +381,14 @@ export interface ReplayArtifactRecheckOptions<TLevel, TState> {
   optionsForLevel?: (
     context: ReplayReducerContext<TLevel>,
   ) => RecheckOptions<TState> | undefined;
+  /**
+   * Historical pure adapter functions. A signed artifact is only `trusted`
+   * when every applicable submission and timeout action is independently
+   * reconstructed through these functions.
+   */
+  semanticAdapterForLevel?: (
+    context: ReplayReducerContext<TLevel>,
+  ) => ReplaySemanticAdapter<TLevel> | undefined;
 }
 
 export interface ReplayLevelRecheck {
@@ -336,8 +398,44 @@ export interface ReplayLevelRecheck {
   result: RecheckResult;
 }
 
+export type ReplaySignatureState = 'signed' | 'partial' | 'unsigned';
+export type ReplayVerificationVerdict = 'trusted' | 'unverifiable' | 'rejected';
+
+export interface ReplaySeatSignatureCheck {
+  seat: string;
+  submissions: number;
+  validSignatures: number;
+  chainReproduced: boolean;
+  policySatisfied: boolean;
+  chainHead: string;
+}
+
+export interface ReplaySignatureCheck {
+  state: ReplaySignatureState;
+  problems: string[];
+  seats: ReplaySeatSignatureCheck[];
+}
+
+export type ReplaySemanticState =
+  | 'verified'
+  | 'unavailable'
+  | 'not_applicable'
+  | 'failed';
+
+export interface ReplaySemanticCheck {
+  submissions: ReplaySemanticState;
+  timeouts: ReplaySemanticState;
+  problems: string[];
+}
+
 export interface ReplayArtifactRecheckResult {
   ok: boolean;
+  /** Adoption-level verdict; policy can require `trusted` for scored runs. */
+  verdict: ReplayVerificationVerdict;
+  /** Signature and chain facts remain orthogonal to deterministic replay `ok`. */
+  signatures: ReplaySignatureCheck;
+  /** Independent reconstruction of signed commands and host timeout actions. */
+  semantics: ReplaySemanticCheck;
   problems: string[];
   /** Non-fatal audit limitations and security hygiene warnings. */
   diagnostics: string[];
@@ -406,6 +504,83 @@ function validNonNegativeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
+function isGroupedReplayVersion(value: unknown): boolean {
+  return value === GAOS_REPLAY_UNSIGNED_FORMAT_VERSION
+    || value === GAOS_REPLAY_FORMAT_VERSION;
+}
+
+function validateV12IntegrityFields(
+  candidate: Record<string, unknown>,
+  label: string,
+  problems: string[],
+): void {
+  const identity = [
+    'submissionId',
+    'canonicalCommand',
+    'cursor',
+  ] as const;
+  const chain = [
+    'clientTime',
+    'prevChainHash',
+  ] as const;
+  const identityPresent = identity.filter((field) => candidate[field] !== undefined);
+  const chainPresent = chain.filter((field) => candidate[field] !== undefined);
+  if (identityPresent.length !== 0 && identityPresent.length !== identity.length) {
+    problems.push(`${label} must carry every submission identity field or none`);
+  }
+  if (chainPresent.length !== 0 && chainPresent.length !== chain.length) {
+    problems.push(`${label} must carry both clientTime and prevChainHash or neither`);
+  }
+  if (chainPresent.length !== 0 && identityPresent.length !== identity.length) {
+    problems.push(`${label} chain fields require every submission identity field`);
+  }
+  if (candidate['sig'] !== undefined
+    && (identityPresent.length !== identity.length || chainPresent.length !== chain.length)) {
+    problems.push(`${label} sig requires every submission and chain field`);
+  }
+  if (identityPresent.length === identity.length) {
+    if (typeof candidate['submissionId'] !== 'string'
+      || candidate['submissionId'].length === 0) {
+      problems.push(`${label} submissionId must be a non-empty string`);
+    }
+    if (!validNonNegativeInteger(candidate['cursor'])) {
+      problems.push(`${label} cursor must be a non-negative safe integer`);
+    }
+    if (typeof candidate['canonicalCommand'] !== 'string') {
+      problems.push(`${label} canonicalCommand must be canonical JSON text`);
+    } else {
+      try {
+        if (canonicalJson(JSON.parse(candidate['canonicalCommand'])) !== candidate['canonicalCommand']) {
+          problems.push(`${label} canonicalCommand must use canonical JSON bytes`);
+        }
+      } catch {
+        problems.push(`${label} canonicalCommand must be valid canonical JSON`);
+      }
+    }
+  }
+  if (chainPresent.length === chain.length) {
+    if (!validNonNegativeInteger(candidate['clientTime'])) {
+      problems.push(`${label} clientTime must be a non-negative safe integer`);
+    }
+    try {
+      signatureBytesFromBase64(
+        candidate['prevChainHash'] as string,
+        `${label} prevChainHash`,
+        32,
+      );
+    } catch (error) {
+      problems.push(error instanceof Error ? error.message : `${label} prevChainHash is invalid`);
+    }
+  }
+  if (candidate['sig'] !== undefined) {
+    try {
+      signatureBytesFromBase64(candidate['sig'] as string, `${label} sig`, 64);
+    } catch (error) {
+      problems.push(error instanceof Error ? error.message : `${label} sig is invalid`);
+    }
+  }
+}
+
 function validatePermutation(value: unknown): boolean {
   return Array.isArray(value)
     && value.every((entry) => Number.isSafeInteger(entry)
@@ -446,7 +621,9 @@ export function createReplayArtifact<TLevel>(
   const header: ReplayHeader<TLevel> = {
     kind: 'header',
     format: GAOS_REPLAY_FORMAT_ID,
-    formatVersion: GAOS_REPLAY_FORMAT_VERSION,
+    formatVersion: input.seatKeys === undefined && input.signaturePolicy === undefined
+      ? GAOS_REPLAY_UNSIGNED_FORMAT_VERSION
+      : GAOS_REPLAY_FORMAT_VERSION,
     sessionId: input.sessionId,
     game: input.game,
     seed: input.seed,
@@ -538,10 +715,11 @@ export function validateReplayArtifact(value: unknown): string[] {
     problems.push(`header.format must be ${GAOS_REPLAY_FORMAT_ID}`);
   }
   if (header['formatVersion'] !== GAOS_REPLAY_FORMAT_VERSION
+    && header['formatVersion'] !== GAOS_REPLAY_UNSIGNED_FORMAT_VERSION
     && header['formatVersion'] !== GAOS_REPLAY_LEGACY_FORMAT_VERSION) {
     problems.push(
       `header.formatVersion must be ${GAOS_REPLAY_LEGACY_FORMAT_VERSION}`
-      + ` or ${GAOS_REPLAY_FORMAT_VERSION}`,
+      + `, ${GAOS_REPLAY_UNSIGNED_FORMAT_VERSION}, or ${GAOS_REPLAY_FORMAT_VERSION}`,
     );
   }
   if (header['formatVersion'] === GAOS_REPLAY_LEGACY_FORMAT_VERSION
@@ -570,6 +748,59 @@ export function validateReplayArtifact(value: unknown): string[] {
   for (const field of ['signaturePolicy', 'timeoutPolicy', 'extensions'] as const) {
     if (header[field] !== undefined && !isRecord(header[field])) {
       problems.push(`header.${field} must be an object`);
+    }
+  }
+  if (header['formatVersion'] === GAOS_REPLAY_FORMAT_VERSION) {
+    const hasRoster = header['seatKeys'] !== undefined;
+    const hasPolicy = header['signaturePolicy'] !== undefined;
+    if (hasRoster !== hasPolicy) {
+      problems.push('v1.2 seatKeys and signaturePolicy must be declared together');
+    }
+    if (hasPolicy) {
+      const policy = header['signaturePolicy'];
+      if (!isRecord(policy)) {
+        problems.push('header.signaturePolicy must be an object');
+      } else {
+        rejectUnknownProperties(policy, ['scheme'], 'header.signaturePolicy', problems);
+        if (policy['scheme'] !== SUBMISSION_SIGNATURE_SCHEME) {
+          problems.push(
+            `header.signaturePolicy.scheme must be ${SUBMISSION_SIGNATURE_SCHEME}`,
+          );
+        }
+      }
+    }
+    if (hasRoster) {
+      if (!Array.isArray(header['seatKeys']) || header['seatKeys'].length === 0) {
+        problems.push('header.seatKeys must be a non-empty array');
+      } else {
+        try {
+          submissionRosterHashV1(header['seatKeys'] as SubmissionSeatKey[]);
+        } catch (error) {
+          problems.push(
+            `header.seatKeys is invalid: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+    }
+    const timeoutPolicy = header['timeoutPolicy'];
+    if (timeoutPolicy !== undefined) {
+      if (!isRecord(timeoutPolicy)) {
+        problems.push('header.timeoutPolicy must be an object');
+      } else {
+        rejectUnknownProperties(
+          timeoutPolicy,
+          ['mode', 'windowTicks'],
+          'header.timeoutPolicy',
+          problems,
+        );
+        if (timeoutPolicy['mode'] !== 'ticks') {
+          problems.push('header.timeoutPolicy.mode must be ticks');
+        }
+        if (!validNonNegativeInteger(timeoutPolicy['windowTicks'])
+          || timeoutPolicy['windowTicks'] === 0) {
+          problems.push('header.timeoutPolicy.windowTicks must be a positive safe integer');
+        }
+      }
     }
   }
 
@@ -785,6 +1016,9 @@ export function validateReplayArtifact(value: unknown): string[] {
           );
         }
       }
+      if (header['formatVersion'] === GAOS_REPLAY_FORMAT_VERSION) {
+        validateV12IntegrityFields(action, `action ${String(action['n'])}`, problems);
+      }
       if (Number.isSafeInteger(action['tick']) && (action['tick'] as number) < 0) {
         problems.push(`action ${String(action['n'])} tick must be non-negative`);
       }
@@ -894,8 +1128,11 @@ export function validateReplayArtifact(value: unknown): string[] {
 
   const records = value['records'];
   if (records !== undefined) {
-    if (header['formatVersion'] !== GAOS_REPLAY_FORMAT_VERSION) {
-      problems.push(`records require header.formatVersion ${GAOS_REPLAY_FORMAT_VERSION}`);
+    if (!isGroupedReplayVersion(header['formatVersion'])) {
+      problems.push(
+        `records require header.formatVersion ${GAOS_REPLAY_UNSIGNED_FORMAT_VERSION}`
+        + ` or ${GAOS_REPLAY_FORMAT_VERSION}`,
+      );
     }
     if (!Array.isArray(records)) {
       problems.push('records must be an array');
@@ -962,6 +1199,9 @@ export function validateReplayArtifact(value: unknown): string[] {
             && !validNonNegativeInteger(candidate[field])) {
             problems.push(`${label} ${field} must be a non-negative safe integer`);
           }
+        }
+        if (header['formatVersion'] === GAOS_REPLAY_FORMAT_VERSION) {
+          validateV12IntegrityFields(candidate, label, problems);
         }
         for (const field of ['boardId', 'zoneId', 'seat'] as const) {
           if (candidate[field] !== undefined
@@ -1205,6 +1445,28 @@ export function validateReplayArtifact(value: unknown): string[] {
               || record['timeoutPolicyRef'].length === 0)) {
             problems.push(`timeout ${index} timeoutPolicyRef must be a non-empty string`);
           }
+          if (header['formatVersion'] === GAOS_REPLAY_FORMAT_VERSION) {
+            const timeoutPolicy = header['timeoutPolicy'];
+            if (timeoutPolicy === undefined) {
+              if (record['timeoutPolicyRef'] !== undefined) {
+                problems.push(
+                  `timeout ${index} timeoutPolicyRef requires header.timeoutPolicy`,
+                );
+              }
+            } else if (record['timeoutPolicyRef'] !== GAOS_TIMEOUT_POLICY_REF) {
+              problems.push(
+                `timeout ${index} timeoutPolicyRef must be ${GAOS_TIMEOUT_POLICY_REF}`,
+              );
+            } else if (isRecord(timeoutPolicy)
+              && validNonNegativeInteger(timeoutPolicy['windowTicks'])
+              && validNonNegativeInteger(record['tick'])
+              && validNonNegativeInteger(record['windowRef'])
+              && record['tick'] !== record['windowRef'] + timeoutPolicy['windowTicks']) {
+              problems.push(
+                `timeout ${index} tick must equal windowRef + windowTicks`,
+              );
+            }
+          }
         } else if (kind === 'extension') {
           if (typeof record['lane'] !== 'string' || record['lane'].length === 0) {
             problems.push(`extension ${index} lane must be a non-empty string`);
@@ -1220,6 +1482,9 @@ export function validateReplayArtifact(value: unknown): string[] {
             problems.push(`checkpoint ${index} digest must be an unsigned 32-bit integer`);
           }
         } else if (kind === 'commit-mismatch') {
+          if (header['formatVersion'] === GAOS_REPLAY_FORMAT_VERSION) {
+            validateV12IntegrityFields(record, `commit-mismatch ${index}`, problems);
+          }
           if (!validNonNegativeInteger(record['tick'])) {
             problems.push(`commit-mismatch ${index} tick must be a non-negative safe integer`);
           }
@@ -1261,6 +1526,35 @@ export function validateReplayArtifact(value: unknown): string[] {
             problems.push(
               `seat-signature ${index} participantId must be a non-empty string`,
             );
+          }
+          if (header['formatVersion'] === GAOS_REPLAY_FORMAT_VERSION) {
+            if (!validNonNegativeInteger(record['clientTime'])) {
+              problems.push(
+                `seat-signature ${index} clientTime must be a non-negative safe integer`,
+              );
+            }
+            try {
+              signatureBytesFromBase64(
+                record['prevChainHash'] as string,
+                `seat-signature ${index} prevChainHash`,
+                32,
+              );
+            } catch (error) {
+              problems.push(
+                error instanceof Error ? error.message : `seat-signature ${index} chain is invalid`,
+              );
+            }
+            try {
+              signatureBytesFromBase64(
+                record['sig'] as string,
+                `seat-signature ${index} sig`,
+                64,
+              );
+            } catch (error) {
+              problems.push(
+                error instanceof Error ? error.message : `seat-signature ${index} sig is invalid`,
+              );
+            }
           }
         }
       }
@@ -1313,20 +1607,345 @@ export function parseReplayJsonl<TLevel = unknown>(jsonl: string): ReplayArtifac
   });
   const header = parsed[0];
   const stream = parsed.slice(1);
-  const hasV11Records = isRecord(header)
-    && header['formatVersion'] === GAOS_REPLAY_FORMAT_VERSION
+  const hasGroupedRecords = isRecord(header)
+    && isGroupedReplayVersion(header['formatVersion'])
     && stream.some((record) => isRecord(record) && record['kind'] !== 'action');
   const projectedActions = projectRecordActions(stream);
   const artifact = {
     header,
-    actions: hasV11Records
+    actions: hasGroupedRecords
       ? projectedActions
       : stream,
-    ...(hasV11Records ? { records: stream } : {}),
+    ...(hasGroupedRecords ? { records: stream } : {}),
   };
   const problems = validateReplayArtifact(artifact);
   if (problems.length > 0) throw new ReplayFormatError(problems);
   return artifact as ReplayArtifact<TLevel>;
+}
+
+interface ReplaySubmissionForSignature {
+  seat: string;
+  levelIndex: number;
+  tick: number;
+  value: ReplayResolutionInput | ReplayAction | ReplayCommitMismatchAudit;
+  label: string;
+  alwaysRequiresSignature: boolean;
+}
+
+function signatureSubmissions(artifact: ReplayArtifact<unknown>): Array<
+  | { kind: 'submission'; submission: ReplaySubmissionForSignature }
+  | { kind: 'periodic'; record: ReplaySeatSignatureReservation; label: string }
+> {
+  const result: Array<
+    | { kind: 'submission'; submission: ReplaySubmissionForSignature }
+    | { kind: 'periodic'; record: ReplaySeatSignatureReservation; label: string }
+  > = [];
+  const records = artifact.records ?? artifact.actions;
+  for (const [recordIndex, record] of records.entries()) {
+    if (record.kind === 'resolution') {
+      for (const [inputIndex, input] of record.inputs.entries()) {
+        if (typeof input.seat !== 'string' || input.submissionId === undefined) continue;
+        result.push({
+          kind: 'submission',
+          submission: {
+            seat: input.seat,
+            levelIndex: record.levelIndex,
+            tick: record.tick,
+            value: input,
+            label: `resolution ${record.n} input ${inputIndex}`,
+            alwaysRequiresSignature: input.commit !== undefined || input.reveal !== undefined,
+          },
+        });
+      }
+    } else if (record.kind === 'action'
+      && typeof record.seat === 'string'
+      && record.submissionId !== undefined) {
+      result.push({
+        kind: 'submission',
+        submission: {
+          seat: record.seat,
+          levelIndex: record.levelIndex,
+          tick: record.tick ?? 0,
+          value: record,
+          label: `action ${record.n}`,
+          alwaysRequiresSignature: record.commit !== undefined || record.reveal !== undefined,
+        },
+      });
+    } else if (record.kind === 'commit-mismatch') {
+      result.push({
+        kind: 'submission',
+        submission: {
+          seat: record.participantId,
+          levelIndex: record.levelIndex,
+          tick: record.tick,
+          value: record,
+          label: `commit-mismatch ${record.n}`,
+          alwaysRequiresSignature: true,
+        },
+      });
+    } else if (record.kind === 'seat-signature') {
+      result.push({
+        kind: 'periodic',
+        record,
+        label: `seat-signature ${record.n}`,
+      });
+    } else {
+      void recordIndex;
+    }
+  }
+  return result;
+}
+
+/**
+ * Verify RFC-010 signatures and per-seat chains without invoking game code.
+ * v1.0/v1.1 artifacts remain valid but are explicitly `unsigned`.
+ */
+export function recheckReplaySignatures(
+  artifact: ReplayArtifact<unknown>,
+): ReplaySignatureCheck {
+  if (artifact.header.formatVersion !== GAOS_REPLAY_FORMAT_VERSION
+    || artifact.header.seatKeys === undefined
+    || artifact.header.signaturePolicy === undefined) {
+    return { state: 'unsigned', problems: [], seats: [] };
+  }
+  const problems: string[] = [];
+  let signatureMaterial = 0;
+  let validSignatures = 0;
+  let rosterHash: string;
+  try {
+    rosterHash = submissionRosterHashV1(
+      artifact.header.seatKeys as SubmissionSeatKey[],
+    );
+  } catch (error) {
+    return {
+      state: artifact.header.seatKeys.some((entry) => isRecord(entry) && entry['sig'] !== undefined)
+        ? 'partial'
+        : 'unsigned',
+      problems: [
+        `cannot hash seat roster: ${error instanceof Error ? error.message : String(error)}`,
+      ],
+      seats: [],
+    };
+  }
+  const keys = new Map(
+    (artifact.header.seatKeys as SubmissionSeatKey[]).map((entry) => [entry.id, entry]),
+  );
+  interface MutableSeatCheck {
+    seat: string;
+    submissions: number;
+    validSignatures: number;
+    chainReproduced: boolean;
+    policySatisfied: boolean;
+    chainHead: string;
+    firstSubmissionTick?: number;
+    submissionPositions: Array<{ levelIndex: number; tick: number; order: number }>;
+    attestationPositions: Array<{ levelIndex: number; tick: number; order: number }>;
+    chainBroken: boolean;
+  }
+  const checks = new Map<string, MutableSeatCheck>();
+  for (const entry of keys.values()) {
+    checks.set(entry.id, {
+      seat: entry.id,
+      submissions: 0,
+      validSignatures: 0,
+      chainReproduced: true,
+      policySatisfied: true,
+      chainHead: submissionGenesisHashV1(
+        artifact.header.sessionId,
+        entry.id,
+        rosterHash,
+      ),
+      submissionPositions: [],
+      attestationPositions: [],
+      chainBroken: false,
+    });
+  }
+
+  for (const [order, item] of signatureSubmissions(artifact).entries()) {
+    if (item.kind === 'periodic') {
+      const record = item.record;
+      const check = checks.get(record.participantId);
+      const key = keys.get(record.participantId);
+      if (!check || !key) {
+        problems.push(`${item.label} names seat outside header.seatKeys`);
+        continue;
+      }
+      if (record.sig !== undefined) signatureMaterial++;
+      if (record.prevChainHash !== check.chainHead) {
+        check.chainReproduced = false;
+        check.policySatisfied = false;
+        problems.push(`${item.label} does not sign seat ${record.participantId}'s current chain head`);
+        continue;
+      }
+      if (record.clientTime === undefined || record.sig === undefined) {
+        check.policySatisfied = false;
+        problems.push(`${item.label} is missing clientTime or sig`);
+        continue;
+      }
+      const valid = verifyEd25519Base64(
+        key.publicKey,
+        periodicSignaturePreimageV1({
+          sessionId: artifact.header.sessionId,
+          seat: record.participantId,
+          tick: record.tick,
+          clientTime: record.clientTime,
+          chainHead: record.prevChainHash,
+        }),
+        record.sig,
+      );
+      if (!valid) {
+        check.policySatisfied = false;
+        problems.push(`${item.label} has an invalid Ed25519 signature`);
+        continue;
+      }
+      validSignatures++;
+      check.validSignatures++;
+      check.attestationPositions.push({
+        levelIndex: record.levelIndex,
+        tick: record.tick,
+        order,
+      });
+      continue;
+    }
+
+    const { submission } = item;
+    const check = checks.get(submission.seat);
+    const key = keys.get(submission.seat);
+    if (!check || !key) {
+      problems.push(`${submission.label} names seat outside header.seatKeys`);
+      continue;
+    }
+    check.submissions++;
+    check.firstSubmissionTick ??= submission.tick;
+    check.submissionPositions.push({
+      levelIndex: submission.levelIndex,
+      tick: submission.tick,
+      order,
+    });
+    const value = submission.value;
+    if (value.sig !== undefined) signatureMaterial++;
+    const hasChain = value.submissionId !== undefined
+      && value.canonicalCommand !== undefined
+      && value.cursor !== undefined
+      && value.clientTime !== undefined
+      && value.prevChainHash !== undefined;
+    if (!hasChain) {
+      check.chainBroken = true;
+      check.chainReproduced = false;
+      check.policySatisfied = false;
+      problems.push(`${submission.label} is missing RFC-010 chain metadata`);
+      continue;
+    }
+    const submissionId = value.submissionId!;
+    const canonicalCommand = value.canonicalCommand!;
+    const cursor = value.cursor!;
+    const clientTime = value.clientTime!;
+    const prevChainHash = value.prevChainHash!;
+    if (check.chainBroken || value.prevChainHash !== check.chainHead) {
+      check.chainBroken = true;
+      check.chainReproduced = false;
+      check.policySatisfied = false;
+      problems.push(`${submission.label} does not reproduce seat ${submission.seat}'s chain`);
+      continue;
+    }
+    let command: JsonValue;
+    try {
+      command = JSON.parse(canonicalCommand) as JsonValue;
+      if (canonicalJson(command) !== canonicalCommand) throw new TypeError('not canonical');
+    } catch {
+      check.chainBroken = true;
+      check.chainReproduced = false;
+      check.policySatisfied = false;
+      problems.push(`${submission.label} canonicalCommand is not canonical JSON`);
+      continue;
+    }
+    const envelope = {
+      sessionId: artifact.header.sessionId,
+      seat: submission.seat,
+      submissionId,
+      cursor,
+      tick: submission.tick,
+      clientTime,
+      command,
+      prevChainHash,
+    };
+    const preimage = submissionPreimageV1(envelope);
+    check.chainHead = submissionChainHashV1(envelope);
+    if (value.sig === undefined) {
+      if (submission.alwaysRequiresSignature) {
+        check.policySatisfied = false;
+        problems.push(`${submission.label} requires a tier-1 signature`);
+      }
+      continue;
+    }
+    if (!verifyEd25519Base64(key.publicKey, preimage, value.sig)) {
+      check.policySatisfied = false;
+      problems.push(`${submission.label} has an invalid Ed25519 signature`);
+      continue;
+    }
+    validSignatures++;
+    check.validSignatures++;
+    check.attestationPositions.push({
+      levelIndex: submission.levelIndex,
+      tick: submission.tick,
+      order,
+    });
+  }
+
+  for (const [seat, check] of checks) {
+    const key = keys.get(seat)!;
+    if (check.firstSubmissionTick !== undefined) {
+      for (const submission of check.submissionPositions) {
+        const covering = check.attestationPositions.find(
+          (candidate) => candidate.order >= submission.order,
+        );
+        if (covering === undefined) {
+          check.policySatisfied = false;
+          problems.push(
+            `seat ${seat} has no signed chain head covering submission at `
+            + `level ${submission.levelIndex} tick ${submission.tick}`,
+          );
+          break;
+        }
+        if (covering.levelIndex !== submission.levelIndex) {
+          check.policySatisfied = false;
+          problems.push(
+            `seat ${seat} crosses a level boundary without signing its chain head`,
+          );
+          break;
+        }
+        if (covering.tick - submission.tick > key.signingTier.N) {
+          check.policySatisfied = false;
+          problems.push(
+            `seat ${seat} exceeds signingTier.N=${key.signingTier.N} for submission at `
+            + `level ${submission.levelIndex} tick ${submission.tick}`,
+          );
+          break;
+        }
+      }
+    }
+  }
+
+  const seats: ReplaySeatSignatureCheck[] = [...checks.values()].map((check) => ({
+    seat: check.seat,
+    submissions: check.submissions,
+    validSignatures: check.validSignatures,
+    chainReproduced: check.chainReproduced,
+    policySatisfied: check.policySatisfied,
+    chainHead: check.chainHead,
+  }));
+  const complete = seats.every(
+    (seat) => seat.chainReproduced && seat.policySatisfied,
+  );
+  return {
+    state: signatureMaterial === 0
+      ? seats.some((seat) => seat.submissions > 0) ? 'partial' : 'signed'
+      : complete && validSignatures === signatureMaterial
+        ? 'signed'
+        : 'partial',
+    problems,
+    seats,
+  };
 }
 
 function replaySubmittedAction(input: ReplayResolutionInput): SubmittedAction {
@@ -1342,6 +1961,188 @@ function replaySubmittedAction(input: ReplayResolutionInput): SubmittedAction {
     ...(input.commit === undefined ? {} : { commit: input.commit }),
     ...(input.reveal === undefined ? {} : { reveal: input.reveal }),
     ...(input.verifiedPayload === undefined ? {} : { verifiedPayload: input.verifiedPayload }),
+  };
+}
+
+function replayAuthoredAction(input: ReplayResolutionInput): SubmittedAction {
+  const { verifiedPayload: _verifiedPayload, ...authored } = input;
+  return replaySubmittedAction(authored);
+}
+
+function canonicalAction(action: SubmittedAction): string {
+  return canonicalJson(action as unknown as JsonValue);
+}
+
+function parseCanonicalCommand(command: string): JsonValue {
+  const parsed: unknown = JSON.parse(command);
+  assertJsonValue(parsed);
+  if (canonicalJson(parsed) !== command) {
+    throw new TypeError('canonicalCommand is not canonical JSON');
+  }
+  return parsed;
+}
+
+function recheckReplaySemantics<TLevel, TState>(
+  artifact: ReplayArtifact<TLevel>,
+  options: ReplayArtifactRecheckOptions<TLevel, TState>,
+  contexts: ReadonlyMap<number, ReplayReducerContext<TLevel>>,
+): ReplaySemanticCheck {
+  let submissionCount = 0;
+  let timeoutCount = 0;
+  let submissionUnavailable = false;
+  let timeoutUnavailable = false;
+  const problems: string[] = [];
+  const records = artifact.records ?? [];
+  const adapters = new Map<number, ReplaySemanticAdapter<TLevel> | undefined>();
+  const adapterFor = (levelIndex: number): ReplaySemanticAdapter<TLevel> | undefined => {
+    if (!adapters.has(levelIndex)) {
+      const context = contexts.get(levelIndex);
+      adapters.set(
+        levelIndex,
+        context === undefined ? undefined : options.semanticAdapterForLevel?.(context),
+      );
+    }
+    return adapters.get(levelIndex);
+  };
+  const checkSubmission = (
+    levelIndex: number,
+    tick: number,
+    input: ReplayResolutionInput,
+    label: string,
+  ): void => {
+    if (input.submissionId === undefined
+      || input.canonicalCommand === undefined
+      || input.cursor === undefined
+      || input.seat === undefined) return;
+    submissionCount++;
+    const base = contexts.get(levelIndex);
+    const mapper = adapterFor(levelIndex)?.commandToAction;
+    if (base === undefined || mapper === undefined) {
+      submissionUnavailable = true;
+      return;
+    }
+    try {
+      const mapped = mapper(parseCanonicalCommand(input.canonicalCommand), {
+        sessionId: artifact.header.sessionId,
+        tick,
+        cursor: input.cursor,
+        participantId: input.seat,
+        submissionId: input.submissionId,
+      });
+      const normalized = mapped.seat === undefined
+        ? { ...mapped, seat: input.seat }
+        : mapped;
+      if (canonicalAction(normalized) !== canonicalAction(replayAuthoredAction(input))) {
+        problems.push(`${label} command maps to a different replay action`);
+      }
+    } catch (error) {
+      problems.push(
+        `${label} command mapping failed: `
+        + `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  };
+
+  for (const [recordIndex, record] of records.entries()) {
+    if (record.kind === 'action') {
+      checkSubmission(record.levelIndex, record.tick ?? 0, record, `action ${record.n}`);
+    } else if (record.kind === 'resolution') {
+      for (const [inputIndex, input] of record.inputs.entries()) {
+        checkSubmission(
+          record.levelIndex,
+          record.tick,
+          input,
+          `resolution ${record.n} input ${inputIndex}`,
+        );
+      }
+    } else if (record.kind === 'commit-mismatch'
+      && record.canonicalCommand !== undefined
+      && record.cursor !== undefined
+      && record.attemptedReveal !== undefined) {
+      submissionCount++;
+      const base = contexts.get(record.levelIndex);
+      const mapper = adapterFor(record.levelIndex)?.commandToAction;
+      if (base === undefined || mapper === undefined) {
+        submissionUnavailable = true;
+      } else {
+        try {
+          const mapped = mapper(parseCanonicalCommand(record.canonicalCommand), {
+            sessionId: artifact.header.sessionId,
+            tick: record.tick,
+            cursor: record.cursor,
+            participantId: record.participantId,
+            submissionId: record.submissionId,
+          });
+          const expectedReveal = {
+            commitmentId: record.commitmentId,
+            salt: record.attemptedReveal.salt,
+            payload: record.attemptedReveal.payload,
+          };
+          if (canonicalJson(mapped.reveal as unknown as JsonValue)
+            !== canonicalJson(expectedReveal)) {
+            problems.push(
+              `commit-mismatch record ${record.n} command maps to a different reveal`,
+            );
+          }
+        } catch (error) {
+          problems.push(
+            `commit-mismatch record ${record.n} command mapping failed: `
+            + `${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+    } else if (record.kind === 'timeout') {
+      const resolution = records.slice(recordIndex + 1).find((candidate) =>
+        candidate.levelIndex === record.levelIndex
+        && (candidate.kind === 'resolution'
+          || candidate.kind === 'timeout'
+          || candidate.kind === 'commit-mismatch'));
+      if (resolution?.kind !== 'resolution'
+        || resolution.cause !== 'timeout'
+        || resolution.systemInput === undefined) continue;
+      timeoutCount++;
+      const base = contexts.get(record.levelIndex);
+      const mapper = adapterFor(record.levelIndex)?.timeoutToAction;
+      if (base === undefined || mapper === undefined) {
+        timeoutUnavailable = true;
+        continue;
+      }
+      try {
+        const mapped = mapper({
+          sessionId: artifact.header.sessionId,
+          game: base.game,
+          levelId: base.level.id,
+          ...(base.level.version === undefined ? {} : { levelVersion: base.level.version }),
+          level: base.level.level,
+          seed: base.level.seed,
+          participantId: record.participantId,
+          windowRef: record.windowRef,
+        }, record);
+        if (canonicalAction(mapped)
+          !== canonicalAction(replayAuthoredAction(resolution.systemInput))) {
+          problems.push(`timeout ${record.n} maps to a different system action`);
+        }
+      } catch (error) {
+        problems.push(
+          `timeout ${record.n} mapping failed: `
+          + `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+  }
+
+  const failedSubmissions = problems.some((problem) =>
+    problem.includes('command map') || problem.includes('command mapping'));
+  const failedTimeouts = problems.some((problem) =>
+    problem.startsWith('timeout ') && problem.includes('map'));
+  return {
+    submissions: submissionCount === 0
+      ? 'not_applicable'
+      : failedSubmissions ? 'failed' : submissionUnavailable ? 'unavailable' : 'verified',
+    timeouts: timeoutCount === 0
+      ? 'not_applicable'
+      : failedTimeouts ? 'failed' : timeoutUnavailable ? 'unavailable' : 'verified',
+    problems,
   };
 }
 
@@ -1634,12 +2435,20 @@ export function recheckReplayArtifact<
   if (problems.length > 0) {
     return {
       ok: false,
+      verdict: 'rejected',
+      signatures: { state: 'unsigned', problems: [], seats: [] },
+      semantics: {
+        submissions: 'not_applicable',
+        timeouts: 'not_applicable',
+        problems: [],
+      },
       problems,
       diagnostics,
       levels: [],
       replayed: { statuses: [], totalStars: 0, totalActionsUsed: 0 },
     };
   }
+  const signatures = recheckReplaySignatures(artifact as ReplayArtifact<unknown>);
 
   const checks: ReplayLevelRecheck[] = [];
   let totalStars = 0;
@@ -1660,6 +2469,13 @@ export function recheckReplayArtifact<
       );
       return {
         ok: false,
+        verdict: 'rejected',
+        signatures,
+        semantics: {
+          submissions: 'not_applicable',
+          timeouts: 'not_applicable',
+          problems: [],
+        },
         problems,
         diagnostics,
         levels: [],
@@ -1668,12 +2484,14 @@ export function recheckReplayArtifact<
     }
   }
   const seenSalts = new Map<string, { identity: string; location: string }>();
+  const replayContexts = new Map<number, ReplayReducerContext<TLevel>>();
   for (const level of artifact.header.levels) {
     const context: ReplayReducerContext<TLevel> = {
       game: artifact.header.game,
       level,
       ...(replayDmath === undefined ? {} : { dmath: replayDmath }),
     };
+    replayContexts.set(level.index, context);
     const reducer = resolveReducer(context);
     if (!reducer) {
       problems.push(
@@ -1731,8 +2549,31 @@ export function recheckReplayArtifact<
       );
     }
   }
+  const semantics = recheckReplaySemantics(artifact, options, replayContexts);
+  if (semantics.submissions === 'unavailable') {
+    diagnostics.push(
+      'signed command bytes were authenticated, but command-to-action mapping was not supplied',
+    );
+  }
+  if (semantics.timeouts === 'unavailable') {
+    diagnostics.push(
+      'timeout actions were replayed, but timeoutToAction mapping was not supplied',
+    );
+  }
+  const semanticsRejected = semantics.submissions === 'failed'
+    || semantics.timeouts === 'failed';
+  const semanticsUnavailable = semantics.submissions === 'unavailable'
+    || semantics.timeouts === 'unavailable';
   return {
     ok: problems.length === 0,
+    verdict: problems.length > 0 || signatures.problems.length > 0
+      || signatures.state === 'partial' || semanticsRejected
+      ? 'rejected'
+      : signatures.state === 'signed' && !semanticsUnavailable
+        ? 'trusted'
+        : 'unverifiable',
+    signatures,
+    semantics,
     problems,
     diagnostics,
     levels: checks,

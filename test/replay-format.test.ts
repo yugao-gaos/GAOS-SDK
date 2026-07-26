@@ -174,7 +174,7 @@ describe('portable GAOS replay JSONL', () => {
       .toThrow(/actions must exactly match the projection of records/);
   });
 
-  it('preserves the unimplemented RFC-010 integrity reservation slots', () => {
+  it('preserves opaque RFC-010 reservation slots in legacy v1.1 artifacts', () => {
     const reserved = structuredClone(runArtifact());
     const seatKey: ReplaySeatIntegrityReservation = {
       id: 'red',

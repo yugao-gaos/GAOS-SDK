@@ -1,7 +1,8 @@
 # RFC-010 — Submission signatures, audit chains, and generic interest management
 
-Status: **design-complete (2026-07-26) — Part A ready to implement** · Target:
-v0.20 · Breaking: no (additive; requires the baseline field reservations) ·
+Status: **Part A implemented for v0.20 development (2026-07-26); Part B
+migration-gated** · Target: v0.20 · Breaking: no (additive; requires the
+baseline field reservations) ·
 Depends on: RFC-006, RFC-008, and **baseline T2 closed**
 
 Two parts in one RFC because they couple at exactly one point: an interest
@@ -110,6 +111,12 @@ async. Therefore:
   and for a batch-verification path.
 - **Python must verify too**, or the cross-language equivalence claim breaks
   the moment signatures exist. Python side needs the same vectors.
+
+Implementation measurement (2026-07-26): the reproducible
+`npm run signatures:benchmark` check measures about 2.9 ms/signature on the
+development desktop after warm-up. That is above the planning estimate but
+remains an offline cost; the per-seat periodic tier prevents it from entering
+the host tick path.
 
 ## A5. The signing envelope
 
@@ -324,7 +331,7 @@ header `seatKeys`/`signaturePolicy`/`timeoutPolicy`; the periodic
 `seat-signature` record; action and resolution-input
 `submissionId`/`canonicalCommand`/`cursor`/`clientTime`/`prevChainHash`/`sig`;
 and matching mismatch fields. Live submission and session-event types
-likewise reserve `clientTime`, `prevChainHash`, and `sig`. v1.2 will validate
+likewise reserve `clientTime`, `prevChainHash`, and `sig`. v1.2 validates
 and interpret these fields; in particular, `clientTime` becomes mandatory
 whenever `sig` is present.
 

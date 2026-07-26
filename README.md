@@ -4,7 +4,7 @@
 
 GAOS is an open-source SDK for building games and interactive benchmarks that
 humans and agents can both play. It gives researchers reusable game mechanisms,
-structured agent interfaces, and replayable evidence, while helping game
+structured agent interfaces, and evidence anyone can verify, while helping game
 developers keep one authoritative game core ready for agents later.
 
 The SDK owns reusable infrastructure. Each product still owns its world,
@@ -20,6 +20,7 @@ content, benchmark claims, scoring meaning, hosting, and presentation.
 - [Agentic play](docs/agentic-play.md)
 - [Python SDK surface](docs/python.md)
 - [Portable replay and verification](docs/mechanisms/replay.md)
+- [Trust, signatures, and verification](docs/trust-and-verification.md)
 - [Authoritative sessions and integrity](docs/session-and-integrity.md)
 - [Roadmap, including the future naming migration](docs/roadmap.md)
 

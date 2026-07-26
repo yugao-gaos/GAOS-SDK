@@ -128,9 +128,9 @@ be filled by guessing.
 The v0.19 kernel bounds future tick targets, catch-up work, retained receipts,
 and extension bytes. A participation window admits exactly one unresolved
 intent per seat, so there is no multi-entry per-seat buffer. The client-side
-`PredictionSession` class remains deferred to v0.20 so it can be extracted
-from a working TabletopLabs migration; its acknowledgement contract is stable
-in v0.19.
+`PredictionSession` extraction remains migration-informed and starts only
+after TabletopLabs supplies real traffic; its acknowledgement contract is
+already stable.
 
 Receipt retention bounds stored responses, not idempotency. Once a submission
 identity has been accepted, reusing it at any later cursor returns
@@ -159,8 +159,8 @@ The input list must be non-empty and ordered. Transcript `i` must use
 `seedPolicy: 'explicit'`; all segments share their session, game/adapter,
 and dmath declaration; and every non-final segment must be won. The projection
 assigns global action/record numbers and level indices, derives aggregate
-totals, and returns an ordinary `gaos.replay` v1.1 artifact for the existing
-whole-run verifier.
+totals, and returns an unsigned `gaos.replay` v1.1 artifact, or v1.2 when the
+shared session header declares a signing roster and policy.
 
 ## Deterministic math
 
@@ -229,11 +229,23 @@ In v1.1, timeout and commitment-mismatch records remain unauthenticated host
 attestation. Rechecking proves only that recorded values form a consistent
 story; it cannot prove authorship or prevent a host from fabricating,
 reattributing, or deleting audit records. Leaderboards and third parties must
-not treat this lane as evidence until RFC-010's v1.2 submission signatures
-and per-seat chains are implemented. Those signatures authenticate
-authorship in both lanes and can constrain timeout position in ticks mode;
-they cannot prove wall-clock earliness, and turns-mode positional checks
-degrade.
+not treat this lane as evidence. In v1.2, RFC-010 submission signatures and
+per-seat chains authenticate signed commit/reveal authorship and make
+fabrication, reattribution, deletion, and reordering detectable. They can
+constrain timeout position in ticks mode; they cannot prove wall-clock
+earliness, and turns-mode positional checks degrade.
+
+For a signed timeout lane, configure a versioned pure
+`timeoutToAction(context, timeout)` function. The kernel derives the system
+input from it, and the offline verifier calls the historical function again.
+A mismatch rejects the artifact; an unavailable function prevents a
+`trusted` verdict. A tick-bounded header policy has the exact shape
+`{ mode: 'ticks', windowTicks: N }`; its timeout records use
+`timeoutPolicyRef: 'header.timeoutPolicy'` and must occur at
+`windowRef + N`.
+Before that tick, an incomplete policy-bound window remains open; at or past
+the deadline, `prepareAdvance` refuses to suppress the timeout and requires
+`prepareTimeout`. A complete window may still resolve early.
 
 Live reveal processing reports salt reuse through
 `prepared.result.warnings`. It remains non-fatal because session/seat/window
@@ -244,9 +256,11 @@ warning: salt reuse weakens resistance to offline guessing.
 
 `liveTranscript()` is an append-only durability log, not a portable result.
 Once the reducer reports `won` or `failed`, `finalizeReplay(transcript,
-options)` projects it into `gaos.replay` v1.1. Timeout, extension, checkpoint,
-grouped-resolution, and commitment-mismatch records survive in their portable
-lanes.
+options)` projects it into unsigned `gaos.replay` v1.1 by default. A kernel
+configured with `seatKeys` and
+`signaturePolicy: { scheme: 'gaos.submission.ed25519.v1' }` projects v1.2.
+Timeout, extension, checkpoint, grouped-resolution, commitment-mismatch, and
+periodic `seat-signature` records survive in their portable lanes.
 
 A timeout that encounters an already-pending commitment rejection is still
 auditable: the committed event order is `timeout`, `rejection`, then
@@ -275,11 +289,20 @@ into replay records, off by default, and the verifier ignores it. Never sort
 by `hostTime`: wall clocks can move backwards. Durable ordering is `tick`,
 `cursor`, then `transitionRevision`.
 
-The strict v1.1 replay schema reserves the RFC-010 `seatKeys`,
+The strict v1.1 replay schema continues to round-trip the RFC-010 `seatKeys`,
 signature/timeout-policy, periodic `seat-signature`, `clientTime`,
-canonical-command, cursor, chain-link, and signature slots. They round-trip
-today but have no v1.1 verification semantics. Future signed submissions
-require `clientTime`; unsigned submissions are the only timestamp-free form.
+canonical-command, cursor, chain-link, and signature reservations without
+interpreting them. V1.2 validates and verifies those fields. Chained
+submissions require `clientTime`; a fully unsigned legacy submission is the
+only timestamp-free form.
+
+`prepareSeatSignature({ participantId, tick, clientTime, prevChainHash, sig })`
+records a periodic chain-head signature as an ordered non-gameplay
+transition. It is allowed after terminal gameplay so a client can attest the
+final tail. Persist its event before `commit()` like every other prepared
+transition. The host records these bytes but need not verify them on the tick
+path.
 
 See [portable replay and verification](/mechanisms/replay) for the JSONL
-format and whole-run verifier.
+format and whole-run verifier, and
+[trust and verification](/trust-and-verification) for signing adoption.

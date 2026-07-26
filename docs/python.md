@@ -119,8 +119,10 @@ canonical_jsonl = serialize_replay_jsonl(artifact)
 
 Validation checks the replay envelope, schema, sequence, digests, and canonical
 transport representation. It does not execute the game. Full rechecking
-requires the pinned historical reducer and authored content and is available
-through the TypeScript engine. See
+requires the pinned historical reducer and authored content. Use the
+TypeScript `gaos verify` adapter contract or provide a Python
+`recheck_replay(artifact)` adapter whose result includes semantic
+command/timeout binding facts for signed evidence. See
 [portable replay and verification](/mechanisms/replay).
 
 For matchmaking, control revision, and lower-level envelope operations, see

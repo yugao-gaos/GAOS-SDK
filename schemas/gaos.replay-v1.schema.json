@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/v0.19.0/schemas/gaos.replay-v1.schema.json",
+  "$id": "https://raw.githubusercontent.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/v0.20.0/schemas/gaos.replay-v1.schema.json",
   "title": "GAOS portable replay v1",
-  "description": "Schema for a decoded gaos.replay v1 artifact. v1.0 stores actions after the header; v1.1 may instead store grouped resolution and audit records.",
+  "description": "Schema for a decoded gaos.replay v1 artifact. v1.0 stores actions, v1.1 adds grouped audit records, and v1.2 assigns RFC-010 signature semantics.",
   "type": "object",
   "additionalProperties": false,
   "required": ["header", "actions"],
@@ -70,9 +70,237 @@
           }
         ]
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "header": {
+            "properties": {
+              "formatVersion": { "const": "1.2" }
+            },
+            "required": ["formatVersion"]
+          }
+        },
+        "required": ["header"]
+      },
+      "then": {
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "header": { "required": ["timeoutPolicy"] }
+              }
+            },
+            "then": {
+              "properties": {
+                "records": {
+                  "items": {
+                    "if": {
+                      "properties": { "kind": { "const": "timeout" } },
+                      "required": ["kind"]
+                    },
+                    "then": {
+                      "required": ["timeoutPolicyRef"],
+                      "properties": {
+                        "timeoutPolicyRef": { "const": "header.timeoutPolicy" }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "records": {
+                  "items": {
+                    "if": {
+                      "properties": { "kind": { "const": "timeout" } },
+                      "required": ["kind"]
+                    },
+                    "then": { "not": { "required": ["timeoutPolicyRef"] } }
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "properties": {
+          "header": {
+            "dependentRequired": {
+              "seatKeys": ["signaturePolicy"],
+              "signaturePolicy": ["seatKeys"]
+            },
+            "properties": {
+              "seatKeys": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "$ref": "#/$defs/seatKeyV12" }
+              },
+              "signaturePolicy": { "$ref": "#/$defs/signaturePolicyV12" },
+              "timeoutPolicy": { "$ref": "#/$defs/timeoutPolicyV12" }
+            }
+          },
+          "actions": {
+            "items": { "$ref": "#/$defs/integrityV12" }
+          },
+          "records": {
+            "items": {
+              "allOf": [
+                {
+                  "if": {
+                    "properties": { "kind": { "const": "action" } },
+                    "required": ["kind"]
+                  },
+                  "then": { "$ref": "#/$defs/integrityV12" }
+                },
+                {
+                  "if": {
+                    "properties": { "kind": { "const": "resolution" } },
+                    "required": ["kind"]
+                  },
+                  "then": {
+                    "properties": {
+                      "inputs": {
+                        "items": { "$ref": "#/$defs/integrityV12" }
+                      },
+                      "systemInput": { "$ref": "#/$defs/integrityV12" }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "properties": { "kind": { "const": "commit-mismatch" } },
+                    "required": ["kind"]
+                  },
+                  "then": { "$ref": "#/$defs/integrityV12" }
+                },
+                {
+                  "if": {
+                    "properties": { "kind": { "const": "seat-signature" } },
+                    "required": ["kind"]
+                  },
+                  "then": {
+                    "required": ["clientTime", "prevChainHash", "sig"],
+                    "properties": {
+                      "clientTime": { "$ref": "#/$defs/nonNegativeSafeInteger" },
+                      "prevChainHash": { "$ref": "#/$defs/hashBase64" },
+                      "sig": { "$ref": "#/$defs/signatureBase64" }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
     }
   ],
   "$defs": {
+    "nonNegativeSafeInteger": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "hashBase64": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]{43}=$"
+    },
+    "signatureBase64": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]{86}==$"
+    },
+    "seatKeyV12": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "publicKey", "alg", "signingTier"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "publicKey": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9+/]{43}=$"
+        },
+        "alg": { "const": "Ed25519" },
+        "signingTier": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["N"],
+          "properties": {
+            "N": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          }
+        }
+      }
+    },
+    "signaturePolicyV12": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scheme"],
+      "properties": {
+        "scheme": { "const": "gaos.submission.ed25519.v1" }
+      }
+    },
+    "timeoutPolicyV12": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "windowTicks"],
+      "properties": {
+        "mode": { "const": "ticks" },
+        "windowTicks": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "integrityV12": {
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              { "required": ["submissionId"] },
+              { "required": ["canonicalCommand"] },
+              { "required": ["cursor"] }
+            ]
+          },
+          "then": {
+            "required": [
+              "submissionId",
+              "canonicalCommand",
+              "cursor"
+            ]
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              { "required": ["clientTime"] },
+              { "required": ["prevChainHash"] },
+              { "required": ["sig"] }
+            ]
+          },
+          "then": {
+            "required": [
+              "submissionId",
+              "canonicalCommand",
+              "cursor",
+              "clientTime",
+              "prevChainHash"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "submissionId": { "type": "string", "minLength": 1 },
+        "canonicalCommand": { "type": "string", "minLength": 1 },
+        "cursor": { "$ref": "#/$defs/nonNegativeSafeInteger" },
+        "clientTime": { "$ref": "#/$defs/nonNegativeSafeInteger" },
+        "prevChainHash": { "$ref": "#/$defs/hashBase64" },
+        "sig": { "$ref": "#/$defs/signatureBase64" }
+      }
+    },
     "jsonObject": {
       "type": "object",
       "additionalProperties": true
@@ -152,7 +380,7 @@
       "properties": {
         "kind": { "const": "header" },
         "format": { "const": "gaos.replay" },
-        "formatVersion": { "enum": ["1.0", "1.1"] },
+        "formatVersion": { "enum": ["1.0", "1.1", "1.2"] },
         "sessionId": { "type": "string", "minLength": 1 },
         "game": { "$ref": "#/$defs/gameRef" },
         "seed": {

@@ -7,13 +7,25 @@ import math
 import re
 from typing import Any
 
+from .signatures import (
+    SUBMISSION_SIGNATURE_SCHEME,
+    periodic_signature_preimage_v1,
+    signature_bytes_from_base64,
+    submission_chain_hash_v1,
+    submission_genesis_hash_v1,
+    submission_preimage_v1,
+    submission_roster_hash_v1,
+    verify_ed25519_base64,
+)
 
 GAOS_REPLAY_FORMAT_ID = "gaos.replay"
-GAOS_REPLAY_FORMAT_VERSION = "1.1"
+GAOS_REPLAY_FORMAT_VERSION = "1.2"
+GAOS_REPLAY_UNSIGNED_FORMAT_VERSION = "1.1"
 GAOS_REPLAY_LEGACY_FORMAT_VERSION = "1.0"
 GAOS_REPLAY_MIME = "application/vnd.gaos.replay+jsonl"
 GAOS_REPLAY_EXTENSION = "gaos-replay.jsonl"
 GAOS_REPLAY_DERIVED_SEEDS = "gaos.run-level-seed.v1"
+GAOS_TIMEOUT_POLICY_REF = "header.timeoutPolicy"
 GAOS_REPLAY_MANIFEST_FORMAT = {
     "mime": GAOS_REPLAY_MIME,
     "extension": GAOS_REPLAY_EXTENSION,
@@ -65,6 +77,90 @@ def _valid_non_negative_integer(value: Any) -> bool:
 
 def _valid_u32(value: Any) -> bool:
     return _is_int(value) and 0 <= value <= _U32_MAX
+
+
+def _is_grouped_version(value: Any) -> bool:
+    return value in (
+        GAOS_REPLAY_UNSIGNED_FORMAT_VERSION,
+        GAOS_REPLAY_FORMAT_VERSION,
+    )
+
+
+def _validate_v12_integrity_fields(
+    candidate: dict[str, Any],
+    label: str,
+) -> list[str]:
+    problems: list[str] = []
+    identity = (
+        "submissionId",
+        "canonicalCommand",
+        "cursor",
+    )
+    chain = (
+        "clientTime",
+        "prevChainHash",
+    )
+    identity_present = [field for field in identity if field in candidate]
+    chain_present = [field for field in chain if field in candidate]
+    if len(identity_present) not in (0, len(identity)):
+        problems.append(
+            f"{label} must carry every submission identity field or none"
+        )
+    if len(chain_present) not in (0, len(chain)):
+        problems.append(
+            f"{label} must carry both clientTime and prevChainHash or neither"
+        )
+    if chain_present and len(identity_present) != len(identity):
+        problems.append(
+            f"{label} chain fields require every submission identity field"
+        )
+    if "sig" in candidate and (
+        len(identity_present) != len(identity)
+        or len(chain_present) != len(chain)
+    ):
+        problems.append(
+            f"{label} sig requires every submission and chain field"
+        )
+    if len(identity_present) == len(identity):
+        if (
+            not isinstance(candidate["submissionId"], str)
+            or not candidate["submissionId"]
+        ):
+            problems.append(f"{label} submissionId must be a non-empty string")
+        if not _valid_non_negative_integer(candidate["cursor"]):
+            problems.append(f"{label} cursor must be a non-negative safe integer")
+        canonical = candidate["canonicalCommand"]
+        if not isinstance(canonical, str):
+            problems.append(f"{label} canonicalCommand must be canonical JSON text")
+        else:
+            try:
+                if canonical_json(json.loads(canonical)) != canonical:
+                    problems.append(
+                        f"{label} canonicalCommand must use canonical JSON bytes"
+                    )
+            except (TypeError, ValueError, json.JSONDecodeError):
+                problems.append(
+                    f"{label} canonicalCommand must be valid canonical JSON"
+                )
+    if len(chain_present) == len(chain):
+        if not _valid_non_negative_integer(candidate["clientTime"]):
+            problems.append(
+                f"{label} clientTime must be a non-negative safe integer"
+            )
+        try:
+            signature_bytes_from_base64(
+                candidate["prevChainHash"],
+                f"{label} prevChainHash",
+                32,
+            )
+        except (TypeError, ValueError) as error:
+            problems.append(str(error))
+    if "sig" in candidate:
+        try:
+            signature_bytes_from_base64(candidate["sig"], f"{label} sig", 64)
+        except (TypeError, ValueError) as error:
+            problems.append(str(error))
+    return problems
 
 
 def _valid_permutation(value: Any) -> bool:
@@ -376,11 +472,14 @@ def validate_replay_artifact(value: Any) -> list[str]:
         problems.append(f"header.format must be {GAOS_REPLAY_FORMAT_ID}")
     if header.get("formatVersion") not in (
         GAOS_REPLAY_LEGACY_FORMAT_VERSION,
+        GAOS_REPLAY_UNSIGNED_FORMAT_VERSION,
         GAOS_REPLAY_FORMAT_VERSION,
     ):
         problems.append(
             "header.formatVersion must be "
-            f"{GAOS_REPLAY_LEGACY_FORMAT_VERSION} or {GAOS_REPLAY_FORMAT_VERSION}"
+            f"{GAOS_REPLAY_LEGACY_FORMAT_VERSION}, "
+            f"{GAOS_REPLAY_UNSIGNED_FORMAT_VERSION}, or "
+            f"{GAOS_REPLAY_FORMAT_VERSION}"
         )
     if (
         header.get("formatVersion") == GAOS_REPLAY_LEGACY_FORMAT_VERSION
@@ -415,6 +514,53 @@ def validate_replay_artifact(value: Any) -> list[str]:
     for field in ("signaturePolicy", "timeoutPolicy", "extensions"):
         if field in header and not isinstance(header[field], dict):
             problems.append(f"header.{field} must be an object")
+    if header.get("formatVersion") == GAOS_REPLAY_FORMAT_VERSION:
+        has_roster = "seatKeys" in header
+        has_policy = "signaturePolicy" in header
+        if has_roster != has_policy:
+            problems.append(
+                "v1.2 seatKeys and signaturePolicy must be declared together"
+            )
+        if has_policy and isinstance(header["signaturePolicy"], dict):
+            problems.extend(_reject_unknown(
+                header["signaturePolicy"],
+                {"scheme"},
+                "header.signaturePolicy",
+            ))
+            if (
+                header["signaturePolicy"].get("scheme")
+                != SUBMISSION_SIGNATURE_SCHEME
+            ):
+                problems.append(
+                    "header.signaturePolicy.scheme must be "
+                    f"{SUBMISSION_SIGNATURE_SCHEME}"
+                )
+        if has_roster:
+            try:
+                submission_roster_hash_v1(header["seatKeys"])
+            except (TypeError, ValueError, KeyError) as error:
+                problems.append(f"header.seatKeys is invalid: {error}")
+        timeout_policy = header.get("timeoutPolicy")
+        if timeout_policy is not None:
+            if not isinstance(timeout_policy, dict):
+                problems.append("header.timeoutPolicy must be an object")
+            else:
+                problems.extend(_reject_unknown(
+                    timeout_policy,
+                    {"mode", "windowTicks"},
+                    "header.timeoutPolicy",
+                ))
+                if timeout_policy.get("mode") != "ticks":
+                    problems.append("header.timeoutPolicy.mode must be ticks")
+                if (
+                    not _valid_non_negative_integer(
+                        timeout_policy.get("windowTicks")
+                    )
+                    or timeout_policy.get("windowTicks") == 0
+                ):
+                    problems.append(
+                        "header.timeoutPolicy.windowTicks must be a positive safe integer"
+                    )
 
     game = header.get("game")
     if not isinstance(game, dict):
@@ -659,6 +805,11 @@ def validate_replay_artifact(value: Any) -> list[str]:
                     problems.append(
                         f"action {_message_value(number)} {field} must be a non-negative safe integer"
                     )
+            if header.get("formatVersion") == GAOS_REPLAY_FORMAT_VERSION:
+                problems.extend(_validate_v12_integrity_fields(
+                    action,
+                    f"action {_message_value(number)}",
+                ))
             tick = action.get("tick")
             if _valid_safe_integer(tick) and tick < 0:
                 problems.append(f"action {_message_value(number)} tick must be non-negative")
@@ -749,9 +900,11 @@ def validate_replay_artifact(value: Any) -> list[str]:
 
     records = value.get("records")
     if "records" in value:
-        if header.get("formatVersion") != GAOS_REPLAY_FORMAT_VERSION:
+        if not _is_grouped_version(header.get("formatVersion")):
             problems.append(
-                f"records require header.formatVersion {GAOS_REPLAY_FORMAT_VERSION}"
+                "records require header.formatVersion "
+                f"{GAOS_REPLAY_UNSIGNED_FORMAT_VERSION} or "
+                f"{GAOS_REPLAY_FORMAT_VERSION}"
             )
         if not isinstance(records, list):
             problems.append("records must be an array")
@@ -866,6 +1019,11 @@ def validate_replay_artifact(value: Any) -> list[str]:
                         permutation,
                         action_record=True,
                     ))
+                    if header.get("formatVersion") == GAOS_REPLAY_FORMAT_VERSION:
+                        problems.extend(_validate_v12_integrity_fields(
+                            record,
+                            f"record {index} action",
+                        ))
                 elif kind == "resolution":
                     if not _valid_non_negative_integer(record.get("tick")):
                         problems.append(
@@ -880,6 +1038,15 @@ def validate_replay_artifact(value: Any) -> list[str]:
                                 f"resolution {index} input {input_index}",
                                 permutation,
                             ))
+                            if (
+                                header.get("formatVersion")
+                                == GAOS_REPLAY_FORMAT_VERSION
+                                and isinstance(replay_input, dict)
+                            ):
+                                problems.extend(_validate_v12_integrity_fields(
+                                    replay_input,
+                                    f"resolution {index} input {input_index}",
+                                ))
                     if record.get("cause") not in ("complete", "timeout", "tick"):
                         problems.append(
                             f"resolution {index} cause must be complete, timeout, or tick"
@@ -896,6 +1063,15 @@ def validate_replay_artifact(value: Any) -> list[str]:
                                 f"resolution {index} systemInput",
                                 permutation,
                             ))
+                            if (
+                                header.get("formatVersion")
+                                == GAOS_REPLAY_FORMAT_VERSION
+                                and isinstance(system_input, dict)
+                            ):
+                                problems.extend(_validate_v12_integrity_fields(
+                                    system_input,
+                                    f"resolution {index} systemInput",
+                                ))
                             if isinstance(record.get("inputs"), list):
                                 try:
                                     encoded_system = canonical_json(system_input)
@@ -966,6 +1142,33 @@ def validate_replay_artifact(value: Any) -> list[str]:
                         problems.append(
                             f"timeout {index} timeoutPolicyRef must be a non-empty string"
                         )
+                    if header.get("formatVersion") == GAOS_REPLAY_FORMAT_VERSION:
+                        timeout_policy = header.get("timeoutPolicy")
+                        if timeout_policy is None:
+                            if "timeoutPolicyRef" in record:
+                                problems.append(
+                                    f"timeout {index} timeoutPolicyRef requires "
+                                    "header.timeoutPolicy"
+                                )
+                        elif record.get("timeoutPolicyRef") != GAOS_TIMEOUT_POLICY_REF:
+                            problems.append(
+                                f"timeout {index} timeoutPolicyRef must be "
+                                f"{GAOS_TIMEOUT_POLICY_REF}"
+                            )
+                        elif (
+                            isinstance(timeout_policy, dict)
+                            and _valid_non_negative_integer(
+                                timeout_policy.get("windowTicks")
+                            )
+                            and _valid_non_negative_integer(record.get("tick"))
+                            and _valid_non_negative_integer(record.get("windowRef"))
+                            and record["tick"]
+                            != record["windowRef"] + timeout_policy["windowTicks"]
+                        ):
+                            problems.append(
+                                f"timeout {index} tick must equal "
+                                "windowRef + windowTicks"
+                            )
                 elif kind == "extension":
                     if not isinstance(record.get("lane"), str) or not record["lane"]:
                         problems.append(
@@ -983,6 +1186,11 @@ def validate_replay_artifact(value: Any) -> list[str]:
                             f"checkpoint {index} digest must be an unsigned 32-bit integer"
                         )
                 elif kind == "commit-mismatch":
+                    if header.get("formatVersion") == GAOS_REPLAY_FORMAT_VERSION:
+                        problems.extend(_validate_v12_integrity_fields(
+                            record,
+                            f"commit-mismatch {index}",
+                        ))
                     if not _valid_non_negative_integer(record.get("tick")):
                         problems.append(
                             f"commit-mismatch {index} tick must be a non-negative safe integer"
@@ -1035,6 +1243,27 @@ def validate_replay_artifact(value: Any) -> list[str]:
                         problems.append(
                             f"seat-signature {index} participantId must be a non-empty string"
                         )
+                    if header.get("formatVersion") == GAOS_REPLAY_FORMAT_VERSION:
+                        if not _valid_non_negative_integer(record.get("clientTime")):
+                            problems.append(
+                                f"seat-signature {index} clientTime must be a non-negative safe integer"
+                            )
+                        try:
+                            signature_bytes_from_base64(
+                                record.get("prevChainHash"),
+                                f"seat-signature {index} prevChainHash",
+                                32,
+                            )
+                        except (TypeError, ValueError) as error:
+                            problems.append(str(error))
+                        try:
+                            signature_bytes_from_base64(
+                                record.get("sig"),
+                                f"seat-signature {index} sig",
+                                64,
+                            )
+                        except (TypeError, ValueError) as error:
+                            problems.append(str(error))
             if isinstance(actions, list):
                 try:
                     if canonical_json(_project_record_actions(records)) != canonical_json(actions):
@@ -1148,19 +1377,19 @@ def parse_replay_jsonl(jsonl: str) -> dict[str, Any]:
             ) from error
     header = parsed[0]
     stream = parsed[1:]
-    has_v11_records = (
+    has_grouped_records = (
         isinstance(header, dict)
-        and header.get("formatVersion") == GAOS_REPLAY_FORMAT_VERSION
+        and _is_grouped_version(header.get("formatVersion"))
         and any(
             isinstance(record, dict) and record.get("kind") != "action"
             for record in stream
         )
     )
-    actions = _project_record_actions(stream) if has_v11_records else stream
+    actions = _project_record_actions(stream) if has_grouped_records else stream
     artifact = {
         "header": header,
         "actions": actions,
-        **({"records": stream} if has_v11_records else {}),
+        **({"records": stream} if has_grouped_records else {}),
     }
     problems = validate_replay_artifact(artifact)
     if problems:
@@ -1177,3 +1406,286 @@ def serialize_replay_jsonl(artifact: dict[str, Any]) -> str:
     stream = artifact.get("records", artifact["actions"])
     records = [artifact["header"], *stream]
     return "\n".join(canonical_json(record) for record in records) + "\n"
+
+
+def recheck_replay_signatures(artifact: dict[str, Any]) -> dict[str, Any]:
+    """Verify RFC-010 signatures and per-seat chains without game code."""
+
+    header = artifact.get("header", {})
+    if (
+        header.get("formatVersion") != GAOS_REPLAY_FORMAT_VERSION
+        or "seatKeys" not in header
+        or "signaturePolicy" not in header
+    ):
+        return {"state": "unsigned", "problems": [], "seats": []}
+
+    problems: list[str] = []
+    signature_material = 0
+    valid_signatures = 0
+    try:
+        roster_hash = submission_roster_hash_v1(header["seatKeys"])
+    except (TypeError, ValueError, KeyError) as error:
+        return {
+            "state": "partial",
+            "problems": [f"cannot hash seat roster: {error}"],
+            "seats": [],
+        }
+    keys = {entry["id"]: entry for entry in header["seatKeys"]}
+    checks: dict[str, dict[str, Any]] = {}
+    for seat, key in keys.items():
+        checks[seat] = {
+            "seat": seat,
+            "submissions": 0,
+            "validSignatures": 0,
+            "chainReproduced": True,
+            "policySatisfied": True,
+            "chainHead": submission_genesis_hash_v1(
+                header["sessionId"],
+                seat,
+                roster_hash,
+            ),
+            "firstSubmissionTick": None,
+            "submissionPositions": [],
+            "attestationPositions": [],
+            "chainBroken": False,
+            "N": key["signingTier"]["N"],
+        }
+
+    items: list[tuple[str, dict[str, Any], int, int, str, bool]] = []
+    for record in artifact.get("records", artifact.get("actions", [])):
+        kind = record.get("kind")
+        if kind == "resolution":
+            for input_index, replay_input in enumerate(record.get("inputs", [])):
+                if (
+                    isinstance(replay_input.get("seat"), str)
+                    and "submissionId" in replay_input
+                ):
+                    items.append((
+                        "submission",
+                        replay_input,
+                        record["levelIndex"],
+                        record["tick"],
+                        f"resolution {record['n']} input {input_index}",
+                        "commit" in replay_input or "reveal" in replay_input,
+                    ))
+        elif (
+            kind == "action"
+            and isinstance(record.get("seat"), str)
+            and "submissionId" in record
+        ):
+            items.append((
+                "submission",
+                record,
+                record["levelIndex"],
+                record.get("tick", 0),
+                f"action {record['n']}",
+                "commit" in record or "reveal" in record,
+            ))
+        elif kind == "commit-mismatch":
+            items.append((
+                "submission",
+                record,
+                record["levelIndex"],
+                record["tick"],
+                f"commit-mismatch {record['n']}",
+                True,
+            ))
+        elif kind == "seat-signature":
+            items.append((
+                "periodic",
+                record,
+                record["levelIndex"],
+                record["tick"],
+                f"seat-signature {record['n']}",
+                False,
+            ))
+
+    for order, (
+        kind,
+        value,
+        level_index,
+        tick,
+        label,
+        always_required,
+    ) in enumerate(items):
+        seat = (
+            value.get("participantId")
+            if kind == "periodic" or value.get("kind") == "commit-mismatch"
+            else value.get("seat")
+        )
+        check = checks.get(seat)
+        key = keys.get(seat)
+        if check is None or key is None:
+            problems.append(f"{label} names seat outside header.seatKeys")
+            continue
+        if "sig" in value:
+            signature_material += 1
+
+        if kind == "periodic":
+            if value.get("prevChainHash") != check["chainHead"]:
+                check["chainReproduced"] = False
+                check["policySatisfied"] = False
+                problems.append(
+                    f"{label} does not sign seat {seat}'s current chain head"
+                )
+                continue
+            if "clientTime" not in value or "sig" not in value:
+                check["policySatisfied"] = False
+                problems.append(f"{label} is missing clientTime or sig")
+                continue
+            valid = verify_ed25519_base64(
+                key["publicKey"],
+                periodic_signature_preimage_v1({
+                    "sessionId": header["sessionId"],
+                    "seat": seat,
+                    "tick": tick,
+                    "clientTime": value["clientTime"],
+                    "chainHead": value["prevChainHash"],
+                }),
+                value["sig"],
+            )
+            if not valid:
+                check["policySatisfied"] = False
+                problems.append(f"{label} has an invalid Ed25519 signature")
+                continue
+            valid_signatures += 1
+            check["validSignatures"] += 1
+            check["attestationPositions"].append({
+                "levelIndex": level_index,
+                "tick": tick,
+                "order": order,
+            })
+            continue
+
+        check["submissions"] += 1
+        if check["firstSubmissionTick"] is None:
+            check["firstSubmissionTick"] = tick
+        check["submissionPositions"].append({
+            "levelIndex": level_index,
+            "tick": tick,
+            "order": order,
+        })
+        chain_fields = (
+            "submissionId",
+            "canonicalCommand",
+            "cursor",
+            "clientTime",
+            "prevChainHash",
+        )
+        if not all(field in value for field in chain_fields):
+            check["chainBroken"] = True
+            check["chainReproduced"] = False
+            check["policySatisfied"] = False
+            problems.append(f"{label} is missing RFC-010 chain metadata")
+            continue
+        if (
+            check["chainBroken"]
+            or value["prevChainHash"] != check["chainHead"]
+        ):
+            check["chainBroken"] = True
+            check["chainReproduced"] = False
+            check["policySatisfied"] = False
+            problems.append(f"{label} does not reproduce seat {seat}'s chain")
+            continue
+        try:
+            command = json.loads(value["canonicalCommand"])
+            if canonical_json(command) != value["canonicalCommand"]:
+                raise ValueError("not canonical")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            check["chainBroken"] = True
+            check["chainReproduced"] = False
+            check["policySatisfied"] = False
+            problems.append(f"{label} canonicalCommand is not canonical JSON")
+            continue
+        envelope = {
+            "sessionId": header["sessionId"],
+            "seat": seat,
+            "submissionId": value["submissionId"],
+            "cursor": value["cursor"],
+            "tick": tick,
+            "clientTime": value["clientTime"],
+            "command": command,
+            "prevChainHash": value["prevChainHash"],
+        }
+        preimage = submission_preimage_v1(envelope)
+        check["chainHead"] = submission_chain_hash_v1(envelope)
+        if "sig" not in value:
+            if always_required:
+                check["policySatisfied"] = False
+                problems.append(f"{label} requires a tier-1 signature")
+            continue
+        if not verify_ed25519_base64(
+            key["publicKey"],
+            preimage,
+            value["sig"],
+        ):
+            check["policySatisfied"] = False
+            problems.append(f"{label} has an invalid Ed25519 signature")
+            continue
+        valid_signatures += 1
+        check["validSignatures"] += 1
+        check["attestationPositions"].append({
+            "levelIndex": level_index,
+            "tick": tick,
+            "order": order,
+        })
+
+    for seat, check in checks.items():
+        first_tick = check["firstSubmissionTick"]
+        if first_tick is None:
+            continue
+        for submission in check["submissionPositions"]:
+            covering = next(
+                (
+                    candidate
+                    for candidate in check["attestationPositions"]
+                    if candidate["order"] >= submission["order"]
+                ),
+                None,
+            )
+            if covering is None:
+                check["policySatisfied"] = False
+                problems.append(
+                    f"seat {seat} has no signed chain head covering "
+                    f"submission at level {submission['levelIndex']} "
+                    f"tick {submission['tick']}"
+                )
+                break
+            if covering["levelIndex"] != submission["levelIndex"]:
+                check["policySatisfied"] = False
+                problems.append(
+                    f"seat {seat} crosses a level boundary without "
+                    "signing its chain head"
+                )
+                break
+            if covering["tick"] - submission["tick"] > check["N"]:
+                check["policySatisfied"] = False
+                problems.append(
+                    f"seat {seat} exceeds signingTier.N={check['N']} "
+                    f"for submission at level {submission['levelIndex']} "
+                    f"tick {submission['tick']}"
+                )
+                break
+
+    seats = [{
+        key: value
+        for key, value in check.items()
+        if key not in {
+            "firstSubmissionTick",
+            "submissionPositions",
+            "attestationPositions",
+            "chainBroken",
+            "N",
+        }
+    } for check in checks.values()]
+    complete = all(
+        seat["chainReproduced"] and seat["policySatisfied"]
+        for seat in seats
+    )
+    if signature_material == 0:
+        state = "partial" if any(seat["submissions"] for seat in seats) else "signed"
+    elif complete and valid_signatures == signature_material:
+        state = "signed"
+    else:
+        state = "partial"
+    return {"state": state, "problems": problems, "seats": seats}

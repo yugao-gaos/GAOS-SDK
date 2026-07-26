@@ -25,14 +25,11 @@ export interface JsonObject { [key: string]: JsonValue }
 
 export interface ProtocolExtensions extends JsonObject {}
 
-/**
- * Reserved for RFC-010. v1 accepts these slots but assigns them no
- * authentication or chain semantics.
- */
+/** RFC-010 integrity fields; semantics activate under a v1.2 replay policy. */
 export interface SubmissionIntegrityReservation {
   /**
-   * RFC-010 reservation. Required whenever `sig` is present once signing is
-   * implemented; v1 records it without judging client-clock correctness.
+   * Required for chained submissions. Recorded without judging the client
+   * clock's correctness.
    */
   clientTime?: number;
   prevChainHash?: string;

@@ -20,12 +20,12 @@ hero:
 ## Build the game and the agent surface together
 
 GAOS gives researchers and game developers one deterministic core for human
-play, agent play, and replayable evidence.
+play, agent play, and signed evidence anyone can verify.
 
 <div class="ownership-grid">
   <div class="ownership-card">
     <h3>Researchers and benchmark creators</h3>
-    <p>Start with deterministic mechanisms, unified agent actions, single- and multi-agent environments, model and CLI adapters, transcripts, and portable replay verification.</p>
+    <p>Start with deterministic mechanisms, unified agent actions, single- and multi-agent environments, model and CLI adapters, transcripts, and roster-bound portable replay verification.</p>
     <p>Your benchmark still owns its tasks, capability claims, scoring methodology, held-out content, analytics, and publication.</p>
   </div>
   <div class="ownership-card">

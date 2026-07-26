@@ -14,6 +14,31 @@ both the pin rule and the freeze rules that still apply to it.
 
 This layer is the optional authoritative session and integrity layer:
 
+- `gaos.replay` v1.2 assigns cryptographic meaning to the reserved integrity
+  slots: canonical Ed25519 submission envelopes, roster-bound per-seat
+  SHA-256 chains, per-seat periodic signing tiers, and durable
+  `seat-signature` checkpoints;
+- replay results separate deterministic `ok` from signature state and expose
+  the adoption verdicts `trusted`, `unverifiable`, and `rejected`; unsigned
+  v1.0/v1.1 artifacts remain valid and report `unverifiable`;
+- trusted verification independently reconstructs signed commands and timeout
+  actions through the pinned semantic adapter; missing mappings are
+  `unverifiable`, while mismatches are `rejected`;
+- tick-bounded timeout policy uses
+  `{ mode: 'ticks', windowTicks: N }` and fixes timeout position at
+  `windowRef + N`; wall-clock fairness remains outside the artifact;
+- TypeScript uses async WebCrypto signing plus synchronous pure-JS
+  verification; the zero-dependency Python package signs and verifies the same
+  published complete-preimage vectors;
+- `gaos verify <artifact> --adapter <module>` and Python `gaos-verify` compose
+  pinned product replay with signature facts completely offline;
+- signed kernel sessions declare `seatKeys` and
+  `signaturePolicy: { scheme: 'gaos.submission.ed25519.v1' }`, preserve exact
+  command/cursor material for accepted and rejected submissions, and record
+  periodic heads through `prepareSeatSignature`;
+- the session hot path caches canonical seat views, reuses their bytes for
+  unchanged checks and digests, snapshots each view once, and clones the heavy
+  prepared-delta graph once while preserving distinct published array shells;
 - `./session` prepared transitions enforce persist-before-publish ordering;
 - reducer drafts have explicit fork, discard, and retirement ownership;
 - accepted partial-window intents and receipts survive crash rehydration;

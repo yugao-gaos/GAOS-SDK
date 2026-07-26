@@ -12,6 +12,7 @@ from agilabs_arena import (
     GAOS_REPLAY_FORMAT_ID,
     GAOS_REPLAY_LEGACY_FORMAT_VERSION,
     GAOS_REPLAY_FORMAT_VERSION,
+    GAOS_REPLAY_UNSIGNED_FORMAT_VERSION,
     ReplayFormatError,
     canonical_json,
     parse_replay_jsonl,
@@ -81,7 +82,7 @@ def test_golden_fixture_conforms_to_published_json_schema():
 
 def test_v11_grouped_resolution_round_trips_and_projects_actions():
     legacy = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
-    header = {**legacy["header"], "formatVersion": GAOS_REPLAY_FORMAT_VERSION}
+    header = {**legacy["header"], "formatVersion": GAOS_REPLAY_UNSIGNED_FORMAT_VERSION}
     action = legacy["actions"][0]
     replay_input = {
         key: value
@@ -124,7 +125,7 @@ def test_v11_grouped_resolution_rejects_malformed_inputs(
     input_patch, cause, expected
 ):
     legacy = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
-    header = {**legacy["header"], "formatVersion": GAOS_REPLAY_FORMAT_VERSION}
+    header = {**legacy["header"], "formatVersion": GAOS_REPLAY_UNSIGNED_FORMAT_VERSION}
     source = legacy["actions"][0]
     replay_input = {
         key: value
@@ -148,7 +149,7 @@ def test_v11_grouped_resolution_rejects_malformed_inputs(
 
 def test_v11_records_and_actions_must_have_an_exact_projection():
     artifact = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
-    artifact["header"]["formatVersion"] = GAOS_REPLAY_FORMAT_VERSION
+    artifact["header"]["formatVersion"] = GAOS_REPLAY_UNSIGNED_FORMAT_VERSION
     artifact["records"] = []
 
     problems = "\n".join(validate_replay_artifact(artifact))
@@ -164,7 +165,7 @@ def test_schema_rejects_v11_commitment_and_timeout_shape_errors():
     artifact = {
         "header": {
             **legacy["header"],
-            "formatVersion": GAOS_REPLAY_FORMAT_VERSION,
+            "formatVersion": GAOS_REPLAY_UNSIGNED_FORMAT_VERSION,
         },
         "actions": [{
             **legacy["actions"][0],
@@ -199,7 +200,7 @@ def test_rfc010_reservation_slots_round_trip_without_v11_semantics():
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
     validator = Draft202012Validator(schema)
     artifact = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
-    artifact["header"]["formatVersion"] = GAOS_REPLAY_FORMAT_VERSION
+    artifact["header"]["formatVersion"] = GAOS_REPLAY_UNSIGNED_FORMAT_VERSION
     artifact["header"]["seatKeys"] = [{
         "id": "red",
         "publicKey": "reserved-key",
@@ -244,7 +245,7 @@ def test_rfc010_reservation_slots_round_trip_without_v11_semantics():
 
 def test_python_validator_matches_json_integer_numbers_and_reports_safely():
     artifact = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
-    artifact["header"]["formatVersion"] = GAOS_REPLAY_FORMAT_VERSION
+    artifact["header"]["formatVersion"] = GAOS_REPLAY_UNSIGNED_FORMAT_VERSION
     artifact["actions"] = []
     artifact["records"] = [{
         "kind": "seat-signature",
@@ -269,7 +270,7 @@ def test_python_validator_matches_json_integer_numbers_and_reports_safely():
 
 def test_timeout_participant_id_is_required_even_when_null_is_allowed():
     artifact = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
-    artifact["header"]["formatVersion"] = GAOS_REPLAY_FORMAT_VERSION
+    artifact["header"]["formatVersion"] = GAOS_REPLAY_UNSIGNED_FORMAT_VERSION
     artifact["actions"] = []
     artifact["records"] = [{
         "kind": "timeout",
@@ -423,7 +424,7 @@ def test_python_rejects_boolean_sequence_numbers(mutation):
 
 def test_python_rejects_boolean_v11_record_sequence_number():
     legacy = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
-    header = {**legacy["header"], "formatVersion": GAOS_REPLAY_FORMAT_VERSION}
+    header = {**legacy["header"], "formatVersion": GAOS_REPLAY_UNSIGNED_FORMAT_VERSION}
     replay_input = {
         key: value
         for key, value in legacy["actions"][0].items()

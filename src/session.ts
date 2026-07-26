@@ -17,12 +17,16 @@ export type { IntentErrorCode } from './protocol.js';
 import {
   COMMITMENT_SCHEME,
   GAOS_REPLAY_DERIVED_SEEDS,
+  GAOS_TIMEOUT_POLICY_REF,
+  SUBMISSION_SIGNATURE_SCHEME,
   advanceTick,
   assertCommitmentEnvelope,
   createCommitmentHash,
   createReplayArtifact,
   fnv1a,
   runLevelSeed,
+  signatureBytesFromBase64,
+  submissionRosterHashV1,
   type CommitmentEnvelope,
   type Dmath,
   type Reducer,
@@ -31,7 +35,11 @@ import {
   type ReplayRecord,
   type ReplayResolutionInput,
   type ReplaySeedPolicy,
+  type ReplayTickTimeoutPolicy,
+  type ReplayTimeoutContext,
   type RevealEnvelope,
+  type SubmissionSeatKey,
+  type SubmissionSignaturePolicy,
   type SubmittedAction,
   type TickRate,
   type TickView,
@@ -89,8 +97,19 @@ export interface SessionKernelOptions<
    * Ordering always uses tick/cursor/transitionRevision, never this clock.
    */
   hostTime: (() => number) | 'none';
-  /** Reserved timeout-policy declaration; v0.19 assigns no policy semantics. */
-  timeoutPolicy?: JsonObject;
+  /** Tick-bounded v1.2 policy. Turns mode intentionally has no positional proof. */
+  timeoutPolicy?: ReplayTickTimeoutPolicy;
+  /** Pure, versioned adapter used to derive every timeout system action. */
+  timeoutToAction?: {
+    bivarianceHack(
+      context: ReplayTimeoutContext<TLevel>,
+      timeout: TimeoutInput,
+    ): SubmittedAction;
+  }['bivarianceHack'];
+  /** RFC-010 key roster. Supplying it opts finalized artifacts into v1.2. */
+  seatKeys?: readonly SubmissionSeatKey[];
+  /** Required with `seatKeys`; fixes the complete signing construction. */
+  signaturePolicy?: SubmissionSignaturePolicy;
   dmath?: Dmath;
   limits?: SessionLimits;
   stateIsolation?: SessionStateIsolation<TState>;
@@ -108,8 +127,9 @@ export interface SessionHeader<TLevel = unknown> {
   cadence:
     | { mode: 'turns' }
     | { mode: 'ticks'; ticksPerSecond: number };
-  /** Reserved timeout-policy declaration; v0.19 assigns no policy semantics. */
-  timeoutPolicy?: JsonObject;
+  timeoutPolicy?: ReplayTickTimeoutPolicy;
+  seatKeys?: readonly SubmissionSeatKey[];
+  signaturePolicy?: SubmissionSignaturePolicy;
   dmath?: {
     algorithm: string;
     backend: 'js' | 'wasm';
@@ -126,6 +146,8 @@ interface SessionEventBase {
 export interface CanonicalInput extends SubmissionIntegrityReservation {
   participantId: string | null;
   submissionId: string | null;
+  canonicalCommand?: string;
+  cursor?: number;
   action: SubmittedAction;
 }
 
@@ -138,11 +160,8 @@ export type SessionEvent =
     submissionId: string;
     command: JsonValue;
     canonicalCommand: string;
-    /** RFC-010 reservation; v0.19 assigns no signature semantics. */
     clientTime?: number;
-    /** RFC-010 reservation; v0.19 assigns no signature semantics. */
     prevChainHash?: string;
-    /** RFC-010 reservation; v0.19 does not verify signatures. */
     sig?: string;
   })
   | (SessionEventBase & {
@@ -171,7 +190,7 @@ export type SessionEvent =
     participantId: string | null;
     /** Why the host concluded that the seat would not respond. */
     reason: string;
-    /** Reserved reference into `SessionHeader.timeoutPolicy`. */
+    /** v1.2 uses the fixed `header.timeoutPolicy` reference. */
     timeoutPolicyRef?: string;
   })
   | (SessionEventBase & {
@@ -179,6 +198,14 @@ export type SessionEvent =
     tick: number;
     lane: string;
     record: JsonObject;
+  })
+  | (SessionEventBase & {
+    kind: 'seat-signature';
+    tick: number;
+    participantId: string;
+    clientTime: number;
+    prevChainHash: string;
+    sig: string;
   })
   | (SessionEventBase & {
     kind: 'checkpoint';
@@ -289,8 +316,16 @@ export interface TimeoutInput {
   participantId?: string | null;
   /** `elapsed`, `disconnect`, or a product-defined non-empty reason. */
   reason: string;
-  /** Reserved reference into the declared timeout policy. */
+  /** Must be `header.timeoutPolicy` when the header declares a policy. */
   timeoutPolicyRef?: string;
+}
+
+export interface SeatSignatureInput {
+  participantId: string;
+  tick: number;
+  clientTime: number;
+  prevChainHash: string;
+  sig: string;
 }
 
 export interface FinalizeOptions {
@@ -334,6 +369,8 @@ interface KernelState<TState, TCommand extends JsonValue, TView> {
   receipts: Map<string, ReceiptState>;
   expiredReceiptKeys: Set<string>;
   views: Map<string, TView>;
+  /** Canonical form of each cached view, reused by deltas and state digests. */
+  viewCanonical: Map<string, string>;
   viewRevisions: Map<string, number>;
   commitments: Map<string, LiveCommitment>;
   nextCommitmentIds: Map<string, number>;
@@ -408,9 +445,10 @@ export interface SessionKernel<TCommand extends JsonValue, TView> {
   prepareAdvance(target?: number): Prepared<AdvanceSummary<TView>>;
   prepareTimeout(
     timeout: TimeoutInput,
-    forcedInput: SubmittedAction,
+    forcedInput?: SubmittedAction,
   ): Prepared<AdvanceSummary<TView>>;
   prepareExtension(lane: string, record: JsonObject): Prepared<void>;
+  prepareSeatSignature(input: SeatSignatureInput): Prepared<void>;
   commit(prepared: Prepared<unknown>): void;
   abort(prepared: Prepared<unknown>): void;
   observe(seat: string): TView;
@@ -493,6 +531,17 @@ function viewDigest(view: unknown): number {
   return fnv1a(canonicalJson(view));
 }
 
+function compareUnicodeCodePoints(left: string, right: string): number {
+  const leftPoints = Array.from(left, (value) => value.codePointAt(0)!);
+  const rightPoints = Array.from(right, (value) => value.codePointAt(0)!);
+  const length = Math.min(leftPoints.length, rightPoints.length);
+  for (let index = 0; index < length; index++) {
+    const difference = leftPoints[index]! - rightPoints[index]!;
+    if (difference !== 0) return difference;
+  }
+  return leftPoints.length - rightPoints.length;
+}
+
 class SessionKernelImpl<
   TLevel,
   TState,
@@ -530,13 +579,45 @@ class SessionKernelImpl<
     if (options.hostTime !== 'none' && typeof options.hostTime !== 'function') {
       throw new TypeError("hostTime must be a UTC epoch-millisecond provider or 'none'");
     }
-    if (options.timeoutPolicy !== undefined
-      && (options.timeoutPolicy === null
-        || typeof options.timeoutPolicy !== 'object'
-        || Array.isArray(options.timeoutPolicy))) {
-      throw new TypeError('timeoutPolicy must be an object');
+    if (options.timeoutPolicy !== undefined) {
+      if (!isObjectRecord(options.timeoutPolicy)
+        || options.timeoutPolicy.mode !== 'ticks'
+        || !Number.isSafeInteger(options.timeoutPolicy.windowTicks)
+        || options.timeoutPolicy.windowTicks <= 0
+        || Object.keys(options.timeoutPolicy).some(
+          (key) => key !== 'mode' && key !== 'windowTicks',
+        )) {
+        throw new TypeError(
+          'timeoutPolicy must be { mode: "ticks", windowTicks: positiveInteger }',
+        );
+      }
+      if (options.cadence.mode !== 'ticks') {
+        throw new TypeError('tick-bounded timeoutPolicy requires ticks cadence');
+      }
+      if (options.seatKeys === undefined) {
+        throw new TypeError('tick-bounded timeoutPolicy requires a v1.2 signing roster');
+      }
+      if (typeof options.timeoutToAction !== 'function') {
+        throw new TypeError('tick-bounded timeoutPolicy requires timeoutToAction');
+      }
     }
-    if (options.timeoutPolicy !== undefined) canonicalJson(options.timeoutPolicy);
+    if (options.timeoutToAction !== undefined && typeof options.timeoutToAction !== 'function') {
+      throw new TypeError('timeoutToAction must be a function');
+    }
+    if ((options.seatKeys === undefined) !== (options.signaturePolicy === undefined)) {
+      throw new TypeError('seatKeys and signaturePolicy must be supplied together');
+    }
+    if (options.seatKeys !== undefined) {
+      submissionRosterHashV1(options.seatKeys);
+      if (options.signaturePolicy?.scheme !== SUBMISSION_SIGNATURE_SCHEME) {
+        throw new TypeError(`signaturePolicy.scheme must be ${SUBMISSION_SIGNATURE_SCHEME}`);
+      }
+      const rosterSeats = new Set(options.seatKeys.map(({ id }) => id));
+      if (rosterSeats.size !== options.seats.length
+        || options.seats.some((seat) => !rosterSeats.has(seat))) {
+        throw new TypeError('seatKeys must name every declared session seat exactly once');
+      }
+    }
     this.limits = {
       maxFutureTicks: options.limits?.maxFutureTicks
         ?? (options.cadence.mode === 'ticks'
@@ -582,6 +663,12 @@ class SessionKernelImpl<
       ...(options.timeoutPolicy === undefined
         ? {}
         : { timeoutPolicy: structuredClone(options.timeoutPolicy) }),
+      ...(options.seatKeys === undefined
+        ? {}
+        : { seatKeys: structuredClone(options.seatKeys) }),
+      ...(options.signaturePolicy === undefined
+        ? {}
+        : { signaturePolicy: structuredClone(options.signaturePolicy) }),
       ...(options.dmath === undefined
         ? {}
         : {
@@ -594,9 +681,12 @@ class SessionKernelImpl<
     const initialView = options.reducer.view(initialState);
     const participants = this.validatedParticipantsForView(initialView);
     const views = new Map<string, TView>();
+    const viewCanonical = new Map<string, string>();
     const revisions = new Map<string, number>();
     for (const seat of options.seats) {
-      views.set(seat, this.viewFor(initialState, seat));
+      const seatView = this.viewFor(initialState, seat);
+      views.set(seat, seatView);
+      viewCanonical.set(seat, canonicalJson(seatView));
       revisions.set(seat, 0);
     }
     this.live = {
@@ -609,6 +699,7 @@ class SessionKernelImpl<
       receipts: new Map(),
       expiredReceiptKeys: new Set(),
       views,
+      viewCanonical,
       viewRevisions: revisions,
       commitments: new Map(),
       nextCommitmentIds: new Map(),
@@ -645,6 +736,7 @@ class SessionKernelImpl<
       receipts: cloneMapValues(this.live.receipts),
       expiredReceiptKeys: new Set(this.live.expiredReceiptKeys),
       views: cloneMapValues(this.live.views),
+      viewCanonical: new Map(this.live.viewCanonical),
       viewRevisions: new Map(this.live.viewRevisions),
       commitments: cloneMapValues(this.live.commitments),
       nextCommitmentIds: new Map(this.live.nextCommitmentIds),
@@ -700,9 +792,15 @@ class SessionKernelImpl<
       draft.transitionRevision = nextRevision;
       draft.events.push(...events);
     }
-    const publishedEvents = deepFreeze(structuredClone(events));
-    const publishedDeltas = deepFreeze(structuredClone(deltas));
-    const publishedResult = deepFreeze(structuredClone(result));
+    // The two delta array shells intentionally remain distinct, while one
+    // structured clone memoizes their shared (and usually much larger)
+    // element graph. This preserves the prepared-result isolation contract
+    // without serializing every snapshot twice.
+    const published = deepFreeze(structuredClone({
+      events,
+      deltas: [...deltas],
+      result,
+    }));
     const state: PreparedState<TState, TCommand, TView> = {
       owner: this.owner,
       completion: 'open',
@@ -713,9 +811,9 @@ class SessionKernelImpl<
     return Object.freeze({
       baseTransitionRevision: base,
       nextTransitionRevision: nextRevision,
-      events: publishedEvents,
-      deltas: publishedDeltas,
-      result: publishedResult,
+      events: published.events,
+      deltas: published.deltas,
+      result: published.result,
       [preparedTransition]: state as PreparedState<unknown, JsonValue, unknown>,
     });
   }
@@ -764,6 +862,35 @@ class SessionKernelImpl<
         'invalid_submission',
         error instanceof Error ? error.message : 'submission command must contain plain JSON',
       );
+    }
+    if (this.header.signaturePolicy !== undefined) {
+      const hasClientTime = submission.clientTime !== undefined;
+      const hasPrevious = submission.prevChainHash !== undefined;
+      if (hasClientTime !== hasPrevious || (submission.sig !== undefined && !hasClientTime)) {
+        throw new IntentCollectionError(
+          'invalid_submission',
+          'signed sessions require both clientTime and prevChainHash, with sig optional',
+        );
+      }
+      if (hasClientTime) {
+        if (!Number.isSafeInteger(submission.clientTime) || submission.clientTime! < 0) {
+          throw new IntentCollectionError(
+            'invalid_submission',
+            'clientTime must be a non-negative safe integer',
+          );
+        }
+        try {
+          signatureBytesFromBase64(submission.prevChainHash!, 'prevChainHash', 32);
+          if (submission.sig !== undefined) {
+            signatureBytesFromBase64(submission.sig, 'sig', 64);
+          }
+        } catch (error) {
+          throw new IntentCollectionError(
+            'invalid_submission',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      }
     }
     const existing = this.live.receipts.get(key);
     if (existing) {
@@ -993,6 +1120,8 @@ class SessionKernelImpl<
                 salt: action.reveal.salt,
                 payload: structuredClone(action.reveal.payload),
               },
+              canonicalCommand: canonicalJson(intent.command),
+              cursor: draft.cursor,
               ...(intent.clientTime === undefined ? {} : { clientTime: intent.clientTime }),
               ...(intent.prevChainHash === undefined
                 ? {}
@@ -1007,6 +1136,8 @@ class SessionKernelImpl<
       inputs.push({
         participantId: intent.participantId,
         submissionId: intent.submissionId,
+        canonicalCommand: canonicalJson(intent.command),
+        cursor: draft.cursor,
         action,
         ...(intent.clientTime === undefined ? {} : { clientTime: intent.clientTime }),
         ...(intent.prevChainHash === undefined
@@ -1074,11 +1205,12 @@ class SessionKernelImpl<
     const view = this.options.reducer.view(draft.reducerState);
     const deltas: ObservationDelta<TView>[] = [];
     for (const seat of this.options.seats) {
-      const previous = draft.views.get(seat)!;
       const next = this.viewFor(draft.reducerState, seat);
       const revision = (draft.viewRevisions.get(seat) ?? 0) + 1;
-      const nextDigest = viewDigest(next);
-      const unchanged = canonicalJson(previous) === canonicalJson(next);
+      const canonicalNext = canonicalJson(next);
+      const nextDigest = fnv1a(canonicalNext);
+      const unchanged = draft.viewCanonical.get(seat) === canonicalNext;
+      const nextSnapshot = structuredClone(next);
       const delta: ObservationDelta<TView> = {
         seat,
         transitionRevision: draft.transitionRevision + 1,
@@ -1089,10 +1221,11 @@ class SessionKernelImpl<
         rejections: [],
         body: unchanged
           ? { kind: 'unchanged' }
-          : { kind: 'snapshot', view: structuredClone(next) },
+          : { kind: 'snapshot', view: nextSnapshot },
         viewDigest: nextDigest,
       };
-      draft.views.set(seat, structuredClone(next));
+      draft.views.set(seat, nextSnapshot);
+      draft.viewCanonical.set(seat, canonicalNext);
       draft.viewRevisions.set(seat, revision);
       deltas.push(delta);
     }
@@ -1220,16 +1353,31 @@ class SessionKernelImpl<
         if (target < draft.tick) {
           throw new SessionAdvanceError('stale_target', 'target precedes the current tick');
         }
+        const ready = draft.window.participants.every(
+          (seat) => Object.hasOwn(draft.window.intents, seat),
+        );
+        if (this.header.timeoutPolicy !== undefined && !ready) {
+          const deadline = draft.tick + this.header.timeoutPolicy.windowTicks;
+          if (target >= deadline) {
+            throw new SessionAdvanceError(
+              'not_ready',
+              `open window reached tick ${deadline}; prepareTimeout is required`,
+            );
+          }
+          requested = 0;
+        }
         if (target - draft.tick > this.limits.maxFutureTicks) {
           throw new SessionAdvanceError(
             'invalid_target',
             'target exceeds maxFutureTicks',
           );
         }
-        requested = target - draft.tick + 1;
-        if (requested > this.limits.maxCatchUpTicks) {
-          requested = this.limits.maxCatchUpTicks;
-          partial = true;
+        if (requested !== 0) {
+          requested = target - draft.tick + 1;
+          if (requested > this.limits.maxCatchUpTicks) {
+            requested = this.limits.maxCatchUpTicks;
+            partial = true;
+          }
         }
       }
       let resolutions = 0;
@@ -1261,6 +1409,13 @@ class SessionKernelImpl<
           resolutions++;
         }
         if (this.options.reducer.view(draft.reducerState).status !== 'playing') break;
+        if (this.header.timeoutPolicy !== undefined
+          && !draft.window.participants.every(
+            (seat) => Object.hasOwn(draft.window.intents, seat),
+          )) {
+          partial ||= index + 1 < requested;
+          break;
+        }
       }
       const digest = this.digestState(draft);
       if (resolutions > 0 || rawEvents.at(-1)?.kind === 'rejection') {
@@ -1276,7 +1431,7 @@ class SessionKernelImpl<
         rejections,
         warnings,
       };
-      return this.makePrepared(draft, rawEvents, deltas, result);
+      return this.makePrepared(draft, rawEvents, deltas, result, requested === 0);
     } catch (error) {
       this.discardDraft(draft);
       throw error;
@@ -1285,13 +1440,10 @@ class SessionKernelImpl<
 
   prepareTimeout(
     timeout: TimeoutInput,
-    forcedInput: SubmittedAction,
+    forcedInput?: SubmittedAction,
   ): Prepared<AdvanceSummary<TView>> {
     if (!isObjectRecord(timeout)) {
       throw new TypeError('timeout must be an object');
-    }
-    if (!isObjectRecord(forcedInput)) {
-      throw new TypeError('forcedInput must be an object');
     }
     if (typeof timeout.timeoutId !== 'string' || timeout.timeoutId.length === 0) {
       throw new TypeError('timeoutId must be a non-empty string');
@@ -1304,8 +1456,29 @@ class SessionKernelImpl<
         || timeout.timeoutPolicyRef.length === 0)) {
       throw new TypeError('timeoutPolicyRef must be a non-empty string');
     }
-    if (!Number.isSafeInteger(timeout.tick) || timeout.tick !== this.live.tick) {
-      throw new SessionAdvanceError('stale_target', 'timeout tick must equal the open tick');
+    const policy = this.header.timeoutPolicy;
+    if (policy === undefined) {
+      if (timeout.timeoutPolicyRef !== undefined) {
+        throw new SessionConflictError(
+          'timeoutPolicyRef requires a declared timeout policy',
+        );
+      }
+      if (!Number.isSafeInteger(timeout.tick) || timeout.tick !== this.live.tick) {
+        throw new SessionAdvanceError('stale_target', 'timeout tick must equal the open tick');
+      }
+    } else {
+      if (timeout.timeoutPolicyRef !== GAOS_TIMEOUT_POLICY_REF) {
+        throw new SessionConflictError(
+          `timeoutPolicyRef must be ${GAOS_TIMEOUT_POLICY_REF}`,
+        );
+      }
+      if (!Number.isSafeInteger(timeout.tick)
+        || timeout.tick !== this.live.cursor + policy.windowTicks) {
+        throw new SessionAdvanceError(
+          'stale_target',
+          'timeout tick must equal windowRef + timeoutPolicy.windowTicks',
+        );
+      }
     }
     const participantId = timeout.participantId ?? null;
     if (participantId !== null) {
@@ -1316,8 +1489,45 @@ class SessionKernelImpl<
         throw new SessionConflictError('timeout participant already submitted in the open window');
       }
     }
-    if (forcedInput.seat !== undefined) {
-      if (!this.live.window.participants.includes(forcedInput.seat)) {
+    let derivedInput: SubmittedAction;
+    if (this.options.timeoutToAction === undefined) {
+      if (this.header.signaturePolicy !== undefined) {
+        throw new SessionConflictError(
+          'signed sessions require timeoutToAction for timeout transitions',
+        );
+      }
+      if (!isObjectRecord(forcedInput)) {
+        throw new TypeError('forcedInput must be an object');
+      }
+      derivedInput = forcedInput;
+    } else {
+      derivedInput = this.options.timeoutToAction({
+        sessionId: this.header.sessionId,
+        game: structuredClone(this.header.game),
+        levelId: this.header.levelId,
+        ...(this.header.levelVersion === undefined
+          ? {}
+          : { levelVersion: this.header.levelVersion }),
+        level: structuredClone(this.header.level),
+        seed: this.header.seedPolicy === GAOS_REPLAY_DERIVED_SEEDS
+          ? runLevelSeed(this.header.seed, 0)
+          : this.header.seed,
+        participantId,
+        windowRef: this.live.cursor,
+      }, structuredClone(timeout));
+      if (!isObjectRecord(derivedInput)) {
+        throw new TypeError('timeoutToAction must return a SubmittedAction object');
+      }
+      if (forcedInput !== undefined
+        && canonicalJson(forcedInput as unknown as JsonValue)
+          !== canonicalJson(derivedInput as unknown as JsonValue)) {
+        throw new SessionConflictError(
+          'forcedInput does not match timeoutToAction derivation',
+        );
+      }
+    }
+    if (derivedInput.seat !== undefined) {
+      if (!this.live.window.participants.includes(derivedInput.seat)) {
         throw new SessionConflictError('timeout system input names a seat outside the open window');
       }
       if (participantId === null) {
@@ -1325,13 +1535,13 @@ class SessionKernelImpl<
           'window timeout system input cannot name a participant seat',
         );
       }
-      if (forcedInput.seat !== participantId) {
+      if (derivedInput.seat !== participantId) {
         throw new SessionConflictError('timeout system input cannot impersonate another seat');
       }
     }
-    if (forcedInput.commit !== undefined
-      || forcedInput.reveal !== undefined
-      || forcedInput.verifiedPayload !== undefined) {
+    if (derivedInput.commit !== undefined
+      || derivedInput.reveal !== undefined
+      || derivedInput.verifiedPayload !== undefined) {
       throw new SessionConflictError(
         'timeout system input cannot carry commitment verification fields',
       );
@@ -1342,7 +1552,7 @@ class SessionKernelImpl<
         throw new SessionAdvanceError('terminal', 'session is already terminal');
       }
       const windowRef = draft.cursor;
-      const action = actionCopy(forcedInput);
+      const action = actionCopy(derivedInput);
       if (participantId !== null) action.seat ??= participantId;
       const canonical: CanonicalInput = {
         participantId,
@@ -1417,6 +1627,38 @@ class SessionKernelImpl<
         tick: draft.tick,
         lane,
         record: structuredClone(record),
+      }], [], undefined);
+    } catch (error) {
+      this.discardDraft(draft);
+      throw error;
+    }
+  }
+
+  prepareSeatSignature(input: SeatSignatureInput): Prepared<void> {
+    if (this.header.signaturePolicy === undefined) {
+      throw new SessionConflictError('session has no RFC-010 signature policy');
+    }
+    if (!isObjectRecord(input)) throw new TypeError('seat signature must be an object');
+    if (!this.options.seats.includes(input.participantId)) {
+      throw new SessionConflictError('seat signature names an unknown participant');
+    }
+    if (!Number.isSafeInteger(input.tick) || input.tick !== this.live.tick) {
+      throw new SessionConflictError('seat signature tick must equal the current session tick');
+    }
+    if (!Number.isSafeInteger(input.clientTime) || input.clientTime < 0) {
+      throw new TypeError('seat signature clientTime must be a non-negative safe integer');
+    }
+    signatureBytesFromBase64(input.prevChainHash, 'prevChainHash', 32);
+    signatureBytesFromBase64(input.sig, 'sig', 64);
+    const draft = this.forkLive();
+    try {
+      return this.makePrepared(draft, [{
+        kind: 'seat-signature',
+        tick: input.tick,
+        participantId: input.participantId,
+        clientTime: input.clientTime,
+        prevChainHash: input.prevChainHash,
+        sig: input.sig,
       }], [], undefined);
     } catch (error) {
       this.discardDraft(draft);
@@ -1521,13 +1763,13 @@ class SessionKernelImpl<
   }
 
   private digestState(state: KernelState<TState, TCommand, TView>): number {
-    return fnv1a(canonicalJson({
-      cursor: state.cursor,
-      tick: state.tick,
-      views: Object.fromEntries(
-        [...state.views.entries()].sort(([left], [right]) => left.localeCompare(right)),
-      ),
-    }));
+    const views = [...state.viewCanonical]
+      .sort(([left], [right]) => compareUnicodeCodePoints(left, right))
+      .map(([seat, canonicalView]) => `${canonicalJson(seat)}:${canonicalView}`)
+      .join(',');
+    return fnv1a(
+      `{"cursor":${state.cursor},"tick":${state.tick},"views":{${views}}}`,
+    );
   }
 
   digest(): number {
@@ -1659,7 +1901,9 @@ class SessionKernelImpl<
           this.validatedParticipantsForView(view),
         );
         for (const seat of this.options.seats) {
-          this.live.views.set(seat, this.viewFor(this.live.reducerState, seat));
+          const seatView = this.viewFor(this.live.reducerState, seat);
+          this.live.views.set(seat, seatView);
+          this.live.viewCanonical.set(seat, canonicalJson(seatView));
           this.live.viewRevisions.set(seat, (this.live.viewRevisions.get(seat) ?? 0) + 1);
         }
         this.evictReceipts(this.live);
@@ -1676,6 +1920,16 @@ class SessionKernelImpl<
           event.participantId,
           event.submissionId,
         ));
+      } else if (event.kind === 'seat-signature') {
+        if (!this.options.seats.includes(event.participantId)
+          || !Number.isSafeInteger(event.tick)
+          || event.tick < 0
+          || !Number.isSafeInteger(event.clientTime)
+          || event.clientTime < 0) {
+          throw new TypeError('transcript contains an invalid seat-signature event');
+        }
+        signatureBytesFromBase64(event.prevChainHash, 'prevChainHash', 32);
+        signatureBytesFromBase64(event.sig, 'sig', 64);
       }
       this.live.transitionRevision = Math.max(
         this.live.transitionRevision,
@@ -1732,6 +1986,11 @@ function replayInput(input: CanonicalInput, perm: readonly number[]): ReplayReso
     ...(action.commit === undefined ? {} : { commit: action.commit }),
     ...(action.reveal === undefined ? {} : { reveal: action.reveal }),
     ...(action.verifiedPayload === undefined ? {} : { verifiedPayload: action.verifiedPayload }),
+    ...(input.submissionId === null ? {} : { submissionId: input.submissionId }),
+    ...(input.canonicalCommand === undefined
+      ? {}
+      : { canonicalCommand: input.canonicalCommand }),
+    ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
     ...(input.clientTime === undefined ? {} : { clientTime: input.clientTime }),
     ...(input.prevChainHash === undefined ? {} : { prevChainHash: input.prevChainHash }),
     ...(input.sig === undefined ? {} : { sig: input.sig }),
@@ -1762,13 +2021,25 @@ function validateTimeoutAudit(
           || event.timeoutPolicyRef.length === 0)) {
         throw new TypeError('timeout audit event timeoutPolicyRef must be non-empty');
       }
+      if (header.timeoutPolicy === undefined) {
+        if (event.timeoutPolicyRef !== undefined || event.tick !== event.windowRef) {
+          throw new TypeError(
+            'timeout without a declared policy must identify the open tick',
+          );
+        }
+      } else if (event.timeoutPolicyRef !== GAOS_TIMEOUT_POLICY_REF
+        || event.tick !== event.windowRef + header.timeoutPolicy.windowTicks) {
+        throw new TypeError(
+          'timeout must occur at the declared header timeout-policy position',
+        );
+      }
       if (event.participantId !== null && !header.seats.includes(event.participantId)) {
         throw new TypeError('timeout audit participant must be a declared session seat');
       }
       const outcome = events[index + 1];
       if (outcome?.kind === 'rejection') {
         if (outcome.transitionRevision !== event.transitionRevision
-          || outcome.tick !== event.tick) {
+          || outcome.tick !== event.windowRef) {
           throw new TypeError(
             'timeout audit event must immediately precede its matching rejection',
           );
@@ -1778,7 +2049,7 @@ function validateTimeoutAudit(
       if (outcome?.kind !== 'resolution'
         || outcome.cause !== 'timeout'
         || outcome.transitionRevision !== event.transitionRevision
-        || outcome.tick !== event.tick
+        || outcome.tick !== event.windowRef
         || outcome.cursor !== event.windowRef) {
         throw new TypeError(
           'timeout audit event must immediately precede its matching resolution or rejection',
@@ -1805,7 +2076,7 @@ function validateTimeoutAudit(
   }
 }
 
-/** Purely project a terminal live transcript into portable replay v1.1. */
+/** Purely project a terminal live transcript into portable replay v1.1 or v1.2. */
 export function finalizeReplay<TLevel>(
   transcript: SessionTranscript<TLevel>,
   options: FinalizeOptions,
@@ -1872,6 +2143,20 @@ export function finalizeReplay<TLevel>(
           ? { hostTime: event.hostTime }
           : {}),
       });
+    } else if (event.kind === 'seat-signature') {
+      records.push({
+        kind: 'seat-signature',
+        n: records.length,
+        levelIndex: 0,
+        tick: event.tick,
+        participantId: event.participantId,
+        clientTime: event.clientTime,
+        prevChainHash: event.prevChainHash,
+        sig: event.sig,
+        ...(options.includeHostTime && event.hostTime !== undefined
+          ? { hostTime: event.hostTime }
+          : {}),
+      });
     } else if (event.kind === 'checkpoint') {
       records.push({
         kind: 'checkpoint',
@@ -1893,6 +2178,10 @@ export function finalizeReplay<TLevel>(
         submissionId: event.submissionId,
         commitmentId: event.commitmentId,
         scheme: event.scheme,
+        ...(event.canonicalCommand === undefined
+          ? {}
+          : { canonicalCommand: event.canonicalCommand }),
+        ...(event.cursor === undefined ? {} : { cursor: event.cursor }),
         ...(event.clientTime === undefined ? {} : { clientTime: event.clientTime }),
         ...(event.prevChainHash === undefined
           ? {}
@@ -1944,6 +2233,12 @@ export function finalizeReplay<TLevel>(
       levelIndex: 0,
     })),
     records,
+    ...(transcript.header.seatKeys === undefined
+      ? {}
+      : { seatKeys: structuredClone(transcript.header.seatKeys) }),
+    ...(transcript.header.signaturePolicy === undefined
+      ? {}
+      : { signaturePolicy: structuredClone(transcript.header.signaturePolicy) }),
     ...(transcript.header.timeoutPolicy === undefined
       ? {}
       : { timeoutPolicy: structuredClone(transcript.header.timeoutPolicy) }),
@@ -1984,6 +2279,8 @@ export function finalizeRunReplay<TLevel>(
   const game = canonicalJson(first.header.game);
   const dmath = canonicalJson(first.header.dmath ?? null);
   const timeoutPolicy = canonicalJson(first.header.timeoutPolicy ?? null);
+  const seatKeys = canonicalJson(first.header.seatKeys ?? null);
+  const signaturePolicy = canonicalJson(first.header.signaturePolicy ?? null);
   const levels = [];
   const actions = [];
   const records: ReplayRecord[] = [];
@@ -1999,6 +2296,10 @@ export function finalizeRunReplay<TLevel>(
     }
     if (canonicalJson(transcript.header.timeoutPolicy ?? null) !== timeoutPolicy) {
       throw new TypeError(`run transcript ${levelIndex} has a different timeout policy`);
+    }
+    if (canonicalJson(transcript.header.seatKeys ?? null) !== seatKeys
+      || canonicalJson(transcript.header.signaturePolicy ?? null) !== signaturePolicy) {
+      throw new TypeError(`run transcript ${levelIndex} has a different signature roster or policy`);
     }
     if (transcript.header.seedPolicy !== 'explicit') {
       throw new TypeError(
@@ -2060,6 +2361,12 @@ export function finalizeRunReplay<TLevel>(
     levels,
     actions,
     records,
+    ...(first.header.seatKeys === undefined
+      ? {}
+      : { seatKeys: structuredClone(first.header.seatKeys) }),
+    ...(first.header.signaturePolicy === undefined
+      ? {}
+      : { signaturePolicy: structuredClone(first.header.signaturePolicy) }),
     ...(first.header.timeoutPolicy === undefined
       ? {}
       : { timeoutPolicy: structuredClone(first.header.timeoutPolicy) }),

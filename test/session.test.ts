@@ -667,7 +667,6 @@ describe('./session kernel', () => {
       ...options(),
       cadence: { mode: 'ticks', rate: createTickRate(30) } as const,
       limits: { maxCatchUpTicks: 2 },
-      timeoutPolicy: { mode: 'ticks', maxTicks: 90 },
       hostTime: () => 1_785_032_663_000,
     };
     const kernel = createSessionKernel(tickOptions);
@@ -681,7 +680,6 @@ describe('./session kernel', () => {
         reason: 'elapsed',
         tick: 0,
         participantId: 'red',
-        timeoutPolicyRef: 'default',
       },
       { id: 'Action 1', index: 3, seat: 'red' },
     );
@@ -693,7 +691,7 @@ describe('./session kernel', () => {
     expect(timeout.events.every((event) => Number.isSafeInteger(event.hostTime))).toBe(true);
 
     const ordinary = finalizeReplay(kernel.liveTranscript(), { perm: [0] });
-    expect(ordinary.header.timeoutPolicy).toEqual({ mode: 'ticks', maxTicks: 90 });
+    expect(ordinary.header.timeoutPolicy).toBeUndefined();
     expect(ordinary.records?.every((record) => record.hostTime === undefined)).toBe(true);
     expect(ordinary.records?.find((record) => record.kind === 'timeout')).toMatchObject({
       kind: 'timeout',
@@ -701,7 +699,6 @@ describe('./session kernel', () => {
       windowRef: 0,
       participantId: 'red',
       reason: 'elapsed',
-      timeoutPolicyRef: 'default',
     });
 
     const timed = finalizeReplay(kernel.liveTranscript(), {

@@ -10,6 +10,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
+    "gaos": "./dist/gaos.js",
     "gaos-agent": "./dist/gaos-agent.js"
   },
   "exports": {
@@ -40,6 +41,7 @@
     "./schemas/gaos.replay-v1.schema.json": "./schemas/gaos.replay-v1.schema.json",
     "./fixtures/replay/gaos-replay-v1.golden.jsonl": "./fixtures/replay/gaos-replay-v1.golden.jsonl",
     "./fixtures/commitment/gaos.commit.sha256.v1.vectors.json": "./fixtures/commitment/gaos.commit.sha256.v1.vectors.json",
+    "./fixtures/signatures/gaos.submission.ed25519.v1.vectors.json": "./fixtures/signatures/gaos.submission.ed25519.v1.vectors.json",
     "./fixtures/dmath/dmath-1.vectors.json": "./fixtures/dmath/dmath-1.vectors.json"
   },
   "files": [
@@ -56,6 +58,7 @@
     "dmath:evidence": "npm run build && node scripts/generate-dmath-evidence.mjs",
     "dmath:browsers": "npm run build && node scripts/check-dmath-browsers.mjs",
     "dmath:workerd": "npm run build && node scripts/check-dmath-workerd.mjs",
+    "signatures:benchmark": "npm run build && node scripts/benchmark-signatures.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "prepare": "npm run build",

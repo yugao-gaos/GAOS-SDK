@@ -3,10 +3,38 @@
 GAOS uses the v0.x line to refine its contracts before v1.0. Products should
 review the migration notes when updating across minor versions.
 
-::: tip Latest release: v0.19.0
-Authoritative sessions now share replayable grouped resolutions, deterministic
-math, and commit–reveal integrity primitives.
+::: tip Current development: v0.20.0
+Portable replay now adds roster-bound Ed25519 submission chains and explicit
+`trusted` / `unverifiable` / `rejected` offline verdicts.
 :::
+
+## v0.20.0 — signed portable evidence
+
+Implementation started July 26, 2026; release remains migration-gated.
+
+- `gaos.replay` v1.2 validates and verifies
+  `gaos.submission.ed25519.v1`, with canonical command/cursor/time material for
+  chained submissions, order-independent roster hashing, roster-bound chain
+  genesis, and per-seat `signingTier.N`.
+- Commit/reveal and rejected reveal submissions require tier-1 signatures.
+  High-rate submissions can be covered by periodic signed chain heads recorded
+  in the durable `seat-signature` lane.
+- TypeScript and zero-dependency Python share RFC 8032 checks, deterministic
+  signing, three complete framed vectors, and independent chain verification.
+- Replay facts remain separate: `ok` is computation consistency,
+  `signatures.state` is `signed` / `partial` / `unsigned`, and `verdict` is
+  `trusted` / `unverifiable` / `rejected`.
+- `semantics` independently reports signed command and timeout action
+  reconstruction. Tick-bounded policies fix timeout position at
+  `windowRef + windowTicks`; wall-clock earliness is not claimed.
+- Offline `gaos verify` and `gaos-verify` commands compose signature facts with
+  a pinned product adapter. No GAOS service, account, or network is involved.
+- The session hot path reuses canonical seat-view bytes and one cloned delta
+  graph, removing the pre-pin serialization duplication without changing the
+  wire contract.
+
+[Trust and verification →](/trust-and-verification) ·
+[Portable replay →](/mechanisms/replay)
 
 ## v0.19.0 — authoritative sessions and integrity
 
