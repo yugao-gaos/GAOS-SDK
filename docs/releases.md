@@ -3,16 +3,13 @@
 For the public chronological changelog, see the
 [complete version history](/version-history).
 
-## v0.20.0 (unreleased) — session and integrity layer
+## v0.20.0 (unreleased)
 
-Prepared July 25, 2026 as v0.19.0; **folded into v0.20 on July 26, 2026 and
-never tagged.** The content below shipped and was verified; only the version
-number changed. Both first-party consumers migrate against a **commit pin**
-rather than a tag: the contract froze at `5ddd404`, and you should pin the
-current `main` head (same code, correct docs). See RFC-009 §4, which carries
-both the pin rule and the freeze rules that still apply to it.
-
-This layer is the optional authoritative session and integrity layer:
+In development on `main` (`package.json` reads `0.20.0-dev`). Adds portable,
+third-party-verifiable signature evidence — [RFC-010](/rfcs/rfc-010-submission-signatures-and-interest)
+Part A — on top of the v0.19.0 session layer. **Not released and not tagged.**
+Consumers mid-migration should stay on the `v0.19.0` tag until this ships and
+is announced (RFC-009 §4.3).
 
 - `gaos.replay` v1.2 assigns cryptographic meaning to the reserved integrity
   slots: canonical Ed25519 submission envelopes, roster-bound per-seat
@@ -38,7 +35,17 @@ This layer is the optional authoritative session and integrity layer:
   periodic heads through `prepareSeatSignature`;
 - the session hot path caches canonical seat views, reuses their bytes for
   unchanged checks and digests, snapshots each view once, and clones the heavy
-  prepared-delta graph once while preserving distinct published array shells;
+  prepared-delta graph once while preserving distinct published array shells.
+
+## v0.19.0
+
+Released July 25, 2026. Tagged `v0.19.0` (annotated, pointing at `5ddd404`) —
+**this is the migration baseline; pin the tag.** See RFC-009 §4 for the pin
+rule and the contract freeze that holds while both consumer migrations are in
+flight.
+
+This release adds the optional authoritative session and integrity layer:
+
 - `./session` prepared transitions enforce persist-before-publish ordering;
 - reducer drafts have explicit fork, discard, and retirement ownership;
 - accepted partial-window intents and receipts survive crash rehydration;

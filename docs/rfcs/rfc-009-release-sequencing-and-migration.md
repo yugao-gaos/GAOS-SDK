@@ -1,11 +1,13 @@
 # RFC-009 — Release sequencing: what v0.19 must contain so the migrations can happen
 
-Status: **implemented, untagged — contract frozen at `5ddd404`; pin `main` head (2026-07-26)** · Target: the baseline (folded into v0.20) and v0.20 · Breaking: no
+Status: **implemented and released — `v0.19.0`, annotated, on `origin`, pointing at `5ddd404`** · Target: scopes v0.19 (final) and v0.20 · Breaking: no
 
-> **v0.19 is not a release.** Its content shipped and was verified; the
-> version number was folded into v0.20 on 2026-07-26. Read every "v0.19"
-> below as "the baseline", and every "the tag" as "the pin `5ddd404`" — see
-> §4.
+> **Correction (2026-07-26).** An earlier revision of this section claimed
+> v0.19 was never tagged and instructed consumers to pin a commit instead.
+> **That was wrong** — the tag exists and is annotated. The claim was raised
+> by the TabletopLabs migration ([RFC-010 §D4](rfc-010-submission-signatures-and-interest.md))
+> and verified against `origin` before being reverted here. **v0.19.0 is a
+> real release; pin the tag.**
 
 Current disposition: all v0.19 release gates in §2 are implemented.
 `finalizeRunReplay` supplies derived-seed multi-level projection;
@@ -165,6 +167,14 @@ should measure this early**; if snapshot cost is prohibitive, the patch codec
 Pointer escaping, array semantics, codec versioning, size bounds) becomes the
 headline v0.20 item. Do not pre-build it — measure first.
 
+> **Answered (2026-07-26).** TabletopLabs measured it — see
+> [RFC-010 §E2](rfc-010-submission-signatures-and-interest.md). At 200
+> entities (an ordinary board-game table, not a stress case) a 20 Hz session
+> costs 3.86 MiB/s of egress for four seats, and the cost scales with **table
+> size** while the actual per-tick delta scales with **activity**. The two
+> diverge without bound. §3.3 resolves **in favour of building the patch
+> codec** in v0.20.
+
 ### 3.4 Also v0.20
 
 - the "one complete path" reference project (existing roadmap top item);
@@ -177,57 +187,49 @@ headline v0.20 item. Do not pre-build it — measure first.
 
 ## 4. Mechanics
 
-**Revision (2026-07-26): v0.19 is not tagged — it folds into v0.20.** Both
-consumers are first-party and both pin the SDK by commit (TabletopLabs
-already consumes it as a git submodule), so a tag whose only job was to be
-pinned buys nothing a SHA does not. The content ships; only the version
-number disappears.
+**How consumers pin.** `v0.19.0` is annotated, on `origin`, and points at
+`5ddd404` — the commit where the contract froze. Pin the **tag**. TabletopLabs
+consumes the SDK as an npm `github:` dependency
+(`github:yugao-gaos/GAOS-TurnBasedGrid-SDK#v0.19.0`); Arena pins the same tag.
+Neither consumes it as a git submodule.
 
-One thing this must not break. v0.20 is defined as *what the migrations
-teach*, so v0.20 cannot also be the thing the migrations start from. The
-baseline therefore becomes a **commit pin**, and every rule below that said
-"the tag" now attaches to that SHA.
+> **npm gotcha, reported by the TabletopLabs migration.** Editing the version
+> in `package.json` is *not* sufficient to move the pin: `npm install` reports
+> "up to date" and keeps the SHA already resolved in the lockfile.
+> Re-resolution must be forced with an explicit spec.
 
-**Which commit to pin.** The **contract** froze at `5ddd404` — that is the
-last commit touching `src/`, `python/`, or the schema. Everything after it
-through the fold is documentation and the version string. **Pin the current
-`main` head, not `5ddd404` literally**: identical code, correct docs, and a
-`package.json` that does not claim a version which will never publish. The
-claim is mechanically checkable, and a migrating agent should check it rather
-than trust this paragraph:
+The pin's integrity is mechanically checkable, and a migrating agent should
+check rather than trust this paragraph:
 
 ```bash
 git diff --name-only 5ddd404..<your-pin> -- src python schema   # must be empty
 ```
 
-If that command prints anything, the freeze has been violated and the pin is
-not a baseline. **The freeze discipline
-is the part that was load-bearing, not the tag**: if the contract moves under
-two mid-flight migrations, both rewrite. Keep the freeze, drop the tag.
+Anything printed means the contract moved. **The freeze is the load-bearing
+rule here, not the tag** — if the contract moves under two mid-flight
+migrations, both rewrite. A patch that legitimately uses the additive-optional
+exception (§4.3) will print, which is exactly why such a release must be
+announced rather than discovered.
 
-`package.json` moves to `0.20.0-dev` so nothing pins a version that will
-never be published.
-
-1. **Pin the baseline** once §2 items land (run composition, ack contract,
-   host obligations doc, N1–N5) — the current `main` head (contract frozen at
-   `5ddd404`; see the revision note above for why the head and not that SHA),
-   recorded in both consumers' lockfile/submodule.
-2. **Both migrations start on the pin**, independently, by their own agents.
+1. **Tag v0.19.0** once §2 items land (run composition, ack contract, host
+   obligations doc, N1–N5). Done — `5ddd404`. This is the migration baseline.
+2. **Both migrations start on the tag**, independently, by their own agents.
 3. **Feedback classification** during migration:
-   - *bug or missing detail in a shipped contract* → **additive commit on the
-     baseline line**, strictly non-breaking, followed by an *explicit,
-     announced re-pin* so the other migration moves deliberately rather than
-     discovering the change;
-   - *contract shape is wrong* → **v0.20**, never a reshape of the baseline —
-     both consumers are mid-flight against the pin and a moving contract
-     doubles their work;
+   - *bug or missing detail in a shipped contract* → **v0.19.x patch**,
+     strictly additive/non-breaking, released and **announced** so the other
+     migration re-pins deliberately rather than discovering the change;
+   - *contract shape is wrong* → **v0.20**, never a v0.19.x reshape — both
+     consumers are mid-flight against the tag and a moving contract doubles
+     their work;
    - *product-side only* → stays in the product.
+
+   Both migrations have now returned findings under this rule; they are
+   consolidated in [RFC-010 Part D and Part E](rfc-010-submission-signatures-and-interest.md).
 4. **Freeze during migration:** no changes to `SessionKernel`,
-   `SessionEvent`, `ObservationDelta`, or the `gaos.replay` v1.1 schema on the
-   baseline line. Additive optional fields are the only exception, and only
-   when a migration is blocked without them. **This rule does not weaken
-   because the baseline is a SHA instead of a tag** — it is the whole reason
-   the baseline exists.
+   `SessionEvent`, `ObservationDelta`, or the `gaos.replay` v1.1 schema in
+   v0.19.x. Additive optional fields are the only exception, and only when a
+   migration is blocked without them — RFC-010 §D1–§D3 are the exercised
+   cases.
 5. **v0.20 opens when both migrations are functionally complete** — not when
    they are perfect. Its scope is then written *from* their findings plus
    §3, and PredictionSession/adapter/codec decisions are made with evidence.
@@ -244,15 +246,13 @@ never be published.
   migration-informed (PredictionSession extraction, conformance kit, codec
   decision), so "migrations complete" is the gate that lets v0.20 be scoped
   honestly — followed by the work itself.
-- **What is v0.20 now that v0.19 folds into it?** Three strata, and only one
-  of them waits: (a) the shipped baseline content — already written and
-  verified, no further work; (b) **RFC-010 Part A (signatures)** — fully
-  specified, **zero migration dependency**, so it is built *in parallel with*
-  the migrations rather than after them; (c) the migration-informed items
-  above, plus RFC-010 Part B (interest), which now has its design questions
-  resolved but should still be validated against real migration traffic.
-  Folding therefore costs no schedule: (b) fills the window the migrations
-  occupy.
+- **What is in v0.20?** [RFC-010](rfc-010-submission-signatures-and-interest.md)
+  is now the v0.20 document: Part A (signatures) and Part B (interest), plus
+  Part E, the migration-derived scope both consumers returned. Part A has
+  **zero migration dependency** and is therefore built *in parallel with* the
+  migrations rather than after them.
+- **What lands before v0.20?** The v0.19.x additive patches in RFC-010 Part D
+  — two of them are migration-blocking, so they do not wait.
 
 The cross-language commitment framing checks, deeper crash/delta gates, and
 JSC/SpiderMonkey/workerd matrix originally listed here were accelerated into

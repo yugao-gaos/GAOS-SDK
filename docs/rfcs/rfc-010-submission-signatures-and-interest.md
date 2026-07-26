@@ -1021,3 +1021,235 @@ required explicit choice: `() => Date.now()` supplies UTC epoch milliseconds,
 while `'none'` omits the field. `performance.now()` is not an epoch clock.
 Ordering remains `tick`/`cursor`/`transitionRevision`; `hostTime` may move
 backwards after clock correction and MUST NOT be used for sorting.
+
+---
+
+# Part D — Baseline corrections returned by the migrations (v0.19.x)
+
+RFC-009 §4.3 asks each migrating consumer to classify what it finds as an
+additive v0.19.x fix, a v0.20 reshape, or product-side only. Part D is the
+first class; Part E is the second. Consolidated here from the consumers' own
+write-ups so v0.20 has one document.
+
+**Every claim below was re-verified against `v0.19.0` (`5ddd404`) before being
+accepted.** Where a consumer's reasoning and the code disagreed, the code
+won; where I could not reproduce a claim, it is marked as reported rather than
+confirmed.
+
+## D1 — `ObservationDelta` cannot be told apart from a repair envelope
+
+*Source: TabletopLabs. Class: additive, **migration-blocking**. Failure mode:
+silent state divergence.*
+
+`docs/session-and-integrity.md` requires a prediction client to treat a
+`viewRevision` gap as needing resync and forbids filling it by guessing. That
+demands the client answer "is this a resolution or a host-pushed repair?" — a
+repair legitimately jumps `viewRevision`, a resolution must not. **Nothing on
+the envelope answers it.**
+
+Verified: `ObservationDelta` carries `seat`, `transitionRevision`,
+`viewRevision`, `tick`, `codec`, `acknowledgements`, `rejections`, `body`,
+`viewDigest` — no discriminator. Rejection-only envelopes are identifiable
+(non-empty `rejections` + `unchanged` body), but **resolution and reconnect
+snapshot are not**, because a resolution can also carry zero acknowledgements.
+Confirmed at `src/session.ts:1196–1201`, where inputs with
+`participantId === null` are filtered out, so a timeout-only resolution
+acknowledges nothing; and `TickReducer.advance` accepts an empty input batch by
+design (RFC-006 §2).
+
+The field's own doc comment is where the ambiguity becomes visible: *"A
+reconnect snapshot applies no new input and therefore carries `[]`."* True —
+and insufficient, because it does not say that a resolution never does. At tick
+cadence the empty-acknowledgement resolution is the **common** case: a 20 Hz
+session with physics and timers changes its view most ticks while most ticks
+carry no player input.
+
+Neither inference is safe. "Empty ⇒ repair" accepts a post-gap resolution as a
+repair and skips gap detection — exactly the guessing the spec forbids.
+"Empty ⇒ resolution" resync-loops on every legitimate repair. Context does not
+rescue it either: `tick` is current in both, `viewRevision` is the question
+itself, and tracking "did I request a snapshot" fails because repair is
+**host**-initiated.
+
+**Fix — one additive optional field:**
+
+```ts
+export interface ObservationDelta<TView = TickView<unknown, unknown>> {
+  // …
+  /** How this envelope was produced. Absent is read as 'resolution'. */
+  origin?: 'resolution' | 'snapshot';
+}
+```
+
+Existing readers are unaffected. `snapshot()` sets `'snapshot'`; both
+resolution paths set `'resolution'` or omit it.
+
+**Assessed alternative — document a derivation instead of adding a field.**
+Rejected: there is no sound derivation. That absence *is* the finding, not a
+gap in the consumer's effort.
+
+## D2 — `SubmittedAction` has no product payload slot, and replay drops the workaround
+
+*Source: TabletopLabs. Class: additive, **migration-blocking for replay**.*
+
+`SubmittedAction` is typed for grid/zone games (`x`, `y`, `index`, `boardId`,
+`zoneId`, `seat`, `targets`, plus the commitment slots). A TabletopLabs input is
+an ECS entity id plus an arbitrary product payload. Nothing holds it, and
+`verifiedPayload` is the reveal path's output — borrowing it would collide with
+commit–reveal.
+
+A product-namespaced field on the action survives `structuredClone` and
+canonical JSON, so the live kernel, its digests, and its transcript are all
+correct. **It does not survive replay projection.** Verified: `replayInput`
+rebuilds each action field by field — `x`, `y`, `index`, `boardId`, `zoneId`,
+`seat`, `targets`, `commit`, `reveal`, `verifiedPayload` — and drops anything
+not enumerated.
+
+Consequence: a TabletopLabs artifact cannot be rechecked, because the recorded
+actions no longer determine the simulation. Since cross-product `gaos.replay`
+verification is the stated reason the kernel was extracted at all (RFC-006 §1),
+**a consumer that cannot produce a recheckable artifact has not integrated.**
+
+**Fix — one additive optional member, projected through `replayInput`:**
+
+```ts
+export interface SubmittedAction {
+  // …
+  /** Opaque product payload. The SDK never interprets it; it round-trips. */
+  payload?: JsonValue;
+}
+```
+
+Worth noting while this file is open: `replayInput` **already** projects
+`clientTime`, `prevChainHash`, and `sig`, so the Part A reservations are wired
+through the replay path and Part A needs no change here.
+
+## D3 — `./session` does not export the types its own API is written in
+
+*Source: TabletopLabs. Class: packaging, non-blocking.*
+
+Verified: `src/session.ts` re-exports exactly two things —
+`IntentCollectionError` and the `IntentErrorCode` type. It *imports*
+`TickReducer`, `SubmittedAction`, `ReplayGameRef`, `TickRate`, `TickView`,
+`JsonValue`, and `CommandSubmission` from `./engine` and `./protocol` and
+re-exports none of them, while `SessionKernelOptions` is declared in terms of
+all of them. Building one kernel means importing from three subpaths.
+
+The sharp edge is `createTickRate`, required to construct
+`cadence: { mode: 'ticks', rate }` and exported only from `./engine`.
+
+> **Reported, not reproduced:** TabletopLabs reports that importing it from
+> `./session` *typechecks* under `moduleResolution: bundler` and then throws
+> `createTickRate is not a function` at runtime. I confirmed the missing
+> re-export — the actionable defect, and the one that fixes the symptom either
+> way — but did not reproduce the typecheck-passes behaviour. Whoever
+> implements this should reproduce it before concluding the type layer is also
+> at fault.
+
+**Fix:** a re-export block on `./session` covering the types and values its
+public API references. Pure packaging, no semantics.
+
+## D4 — RFC-009 §4's claims about the baseline were wrong *(already corrected)*
+
+*Source: TabletopLabs. Class: documentation. No code impact.*
+
+Two factual errors in RFC-009 §4, both **verified as reported and already
+fixed** in that document:
+
+1. **The `v0.19.0` tag exists.** It is annotated, on `origin`, and points at
+   `5ddd404`. RFC-009 had claimed no tag existed and instructed consumers to
+   pin a commit instead; the reasoning offered for that advice — that pinning
+   `5ddd404` yields a `package.json` claiming a version which will never
+   publish — was false. The outcome was harmless, since head and tag are the
+   same code, but the reasoning would have sent the next migrating agent to the
+   wrong ref for a wrong reason.
+2. **TabletopLabs consumes the SDK as an npm `github:` dependency, not a git
+   submodule** — `github:yugao-gaos/GAOS-TurnBasedGrid-SDK#v0.19.0`. RFC-009
+   asserted a submodule.
+
+The consumer's operational note is worth keeping: editing the version in
+`package.json` does **not** move an npm `github:` pin — `npm install` reports
+"up to date" and keeps the lockfile's already-resolved SHA. Re-resolution must
+be forced with an explicit spec. This is now recorded in RFC-009 §4.
+
+*Method note: this finding came from verifying the pin rather than trusting the
+prose. That is the behaviour to keep.*
+
+---
+
+# Part E — v0.20 scope returned by the migrations
+
+Class 2 under RFC-009 §4.3: contract-shape questions and measurements that
+inform v0.20, explicitly **not** requested on the v0.19.x line.
+
+## E1 — `TickView` is grid-shaped; tick-paced products carry observations beside it
+
+*Source: TabletopLabs. Not requested on the baseline.*
+
+`TickView` requires `actions`, `status`, and `hud.actionsUsed`, and its optional
+richness is `grid`, `zones`, `targetChoices`. TabletopLabs' unit of observation
+is a privacy-filtered ECS world snapshot, so its adapter supplies `actions: []`,
+a `status` that is always `'playing'` until a product state machine says
+otherwise, `hud.actionsUsed` populated with the tick index because there is no
+action budget, and carries the real observation in a product extension field.
+The required surface is satisfied **vacuously**.
+
+The consumer explicitly did not ask for a baseline change here, citing RFC-009's
+own reasoning that a moving contract under two in-flight migrations doubles
+everyone's work. That restraint is correct and worth naming.
+
+**Disposition: hold for a second data point.** One consumer satisfying a
+contract vacuously is a smell; two is a shape problem. Revisit if Arena reports
+friction in the same place.
+
+## E2 — Snapshot cost measured; §3.3 resolves for the patch codec
+
+*Source: TabletopLabs. This is the measurement RFC-009 §3.3 asked for.*
+
+Measured on TabletopLabs' actual per-seat serializer (`serializeForRecipient`,
+the same path the join snapshot uses), at 20 Hz:
+
+| Table entities | Per-seat snapshot | Per seat | 4 seats |
+| --- | --- | --- | --- |
+| 50 | 12.6 KiB | 0.25 MiB/s | 0.99 MiB/s |
+| 200 | 49.5 KiB | 0.97 MiB/s | 3.86 MiB/s |
+| 500 | 123.6 KiB | 2.41 MiB/s | 9.66 MiB/s |
+
+200 entities is an ordinary board-game table, not a stress case, and 3.86 MiB/s
+of egress per room is not viable. The consumer's own caveats are recorded here
+because they are the right ones: these are uncompressed JSON figures and
+transport compression will reclaim a large fraction of a repetitive payload, and
+they come from a synthetic table rather than live play.
+
+Neither caveat changes the conclusion, and the reason is structural rather than
+numerical: **snapshot cost scales with table size while the real per-tick delta
+scales with activity, and those two curves diverge without bound.** Compression
+shrinks the constant; it does not couple the curves.
+
+**This settles RFC-009 §3.3 in favour of building the patch codec (RFC-006 §D4)
+in v0.20.**
+
+### E2a — This revises the §B5 priority call
+
+§B5 ranked **interest above the patch codec** for v0.20, on the v0.19
+measurement that bandwidth was survivable (74 MB/seat/10 min) while
+serialisation CPU was the binding constraint. E2 measures an ordinary table
+roughly 8× larger than that scenario and finds bandwidth is *not* survivable
+there.
+
+Corrected position: **they are not competitors, and ranking them was the wrong
+question.** They attack different halves of the same divergence —
+
+- **interest** stops sending what nobody asked for; it does nothing for a seat
+  legitimately interested in the whole table, which is the normal case for a
+  board game where everyone watches the same table;
+- **the patch codec** stops re-sending what did not change; it is the only one
+  of the two that decouples cost from table size.
+
+E2's structural argument bites precisely in the case interest cannot help, so
+the patch codec is load-bearing for tick-paced products in a way §B5 did not
+credit. Build both in v0.20; if only one, the codec.
+
+*Follow-up available: the consumer offers live traces once its authoritative
+host is deployed. Take them — the synthetic table is the caveat both sides
+flagged.*
