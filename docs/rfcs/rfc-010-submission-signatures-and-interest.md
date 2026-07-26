@@ -1,11 +1,19 @@
 # RFC-010 — Submission signatures, audit chains, and generic interest management
 
-Status: draft · Target: v0.20 · Breaking: no (additive; requires the v0.19
-field reservations) · Depends on: RFC-006, RFC-008, and **v0.19 T2 closed**
+Status: **design-complete (2026-07-26) — Part A ready to implement** · Target:
+v0.20 · Breaking: no (additive; requires the baseline field reservations) ·
+Depends on: RFC-006, RFC-008, and **baseline T2 closed**
 
 Two parts in one RFC because they couple at exactly one point: an interest
 scope change is a client-declared, signable submission (§B4), and it is the
 only place where a bandwidth optimisation becomes a security-relevant claim.
+
+> **All four §B7 open questions are resolved (2026-07-26)**, including the
+> scope-change lane, which turned out to rest on a false premise rather than a
+> genuine contradiction (§B7.1). Two resolutions changed Part A: chain genesis
+> now binds the roster (§A5.1 / §B7.4) and tier-3 `N` became per-seat (§A6 /
+> §B7.3). **Part A has no dependency on Part B** and is buildable in parallel
+> with the migrations (§B7.5).
 
 ---
 
@@ -65,7 +73,11 @@ prove *who* K is. Binding K to an account, a person, or an agent is product
 policy and stays out of the SDK, exactly as authentication does in RFC-006 §2.
 
 - The artifact header carries a **seat roster**: `seatKeys: [{ id, publicKey,
-  alg }]`.
+  alg, signingTier }]` — `signingTier` per §B7.3.
+- **Roster integrity is closed by the SDK; roster *authenticity* is not.**
+  §B7.4 binds `rosterHash` into every chain genesis, so key substitution
+  breaks all chains and is `rejected`. What remains product policy is proving
+  the roster names the intended people.
 - How a verifier decides the roster is authentic is product policy (Arena
   signs the roster with a service key; a third party may pin it; a casual
   host may publish it unsigned). The SDK reports *what the roster says* and
@@ -131,7 +143,19 @@ fields, in order:
 ### A5.1 Per-seat chain
 
 Each seat's submission includes the hash of **that seat's previous
-submission** in the same session (`prevChainHash`, zero for the first).
+submission** in the same session (`prevChainHash`).
+
+**Genesis binds the roster** (resolved in §B7.4). The first submission's
+`prevChainHash` is not zero but
+
+```
+H(domainTag ‖ sessionId ‖ seat ‖ rosterHash)
+```
+
+so that substituting any seat's public key invalidates **every** seat's chain
+— including chains the substituting host cannot re-forge. This makes roster
+tampering `rejected` rather than `unverifiable`, with no PKI required. It
+costs one hash per session, client-side.
 
 Per-seat rather than global, deliberately: the client can compute its own
 previous hash **locally**, with no extra round trip and no dependency on the
@@ -206,8 +230,11 @@ and adds a timing dependency; (c) the chain already gives **100 % coverage at
 O(1/N) cost**, because the signed head binds every intermediate submission.
 Sampling would be strictly worse in both coverage and complexity.
 
-`N` is product policy with an SDK default; the artifact records it so a
-verifier knows what coverage to expect.
+`N` is product policy with an SDK default, and is **per seat**, recorded in
+that seat's roster entry (resolved in §B7.3 — chains are per-seat, so `N` is a
+per-chain property). It **must be recorded, never inferred from observed
+signature spacing**: otherwise a verifier cannot distinguish `N = 100` from
+`N = 10` with 90 % of signatures suppressed by the host.
 
 ## A6b. Who verifies — and why hosts need not
 
@@ -328,6 +355,24 @@ ones.
   Python and vice versa (this is the claim that makes the format an interop
   boundary).
 - Performance: verification cost for a realistic run at each tier.
+
+Added by the §B7 resolutions:
+
+- **Roster substitution (§B7.4):** swap one seat's `publicKey` in a finished
+  artifact and assert **every** seat's chain fails — including seats the
+  attacker never touched — and that the verdict is `rejected`, not
+  `unverifiable`. Also assert the negative: a roster reordering that leaves
+  every `(id, publicKey, alg, signingTier)` tuple intact must **not** change
+  `rosterHash`, or honest hosts will produce spuriously rejected artifacts.
+- **Genesis binding:** two sessions identical in every respect except
+  `rosterHash` produce disjoint chains from the first submission onward.
+- **Signature suppression (§B7.3):** an artifact declaring `signingTier.N =
+  10` whose tier-3 signatures actually appear every 100 submissions is
+  detected. Assert the verifier reads the **declared** `N` from the roster and
+  never infers it from observed spacing.
+- **Per-seat `N`:** a roster mixing a densely-signed agent seat with a sparsely
+  signed human seat verifies, and each seat is judged against its own
+  declared tier.
 
 ## A9b. Verdict vocabulary and the public verification service
 
@@ -476,8 +521,12 @@ Like every other mechanism in the suite, the SDK owns the *machinery*
    composes *inside* the partition result. A violation is a leak, not a
    performance bug.
 2. **Interest must not affect determinism.** It changes what a seat
-   *receives*, never what the reducer computes. Two hosts with different
-   interest policies must produce identical transcripts.
+   *receives*, never what the reducer computes, and **a transcript's gameplay
+   projection is identical under any interest policy.** *(Corrected in
+   §B7.1 — the original wording, "two hosts with different interest policies
+   must produce identical transcripts", contradicted recording scope changes
+   at all. Client-declared scope is a recorded submission; host-side
+   narrowing is pure delivery and never enters the durable log.)*
 3. **Omission must be knowable.** A client must be able to distinguish "this
    did not change" from "this was outside my interest", or reconciliation
    will treat absence as no-change and silently diverge. Therefore the
@@ -529,18 +578,160 @@ first as a 0.19.x patch since it needs no contract change at all.
 - Cost: per-tick serialisation and bytes at several interest breadths, versus
   the v0.19 baseline table.
 
-## B7. Open questions (Part B)
+## B7. Resolved design questions (2026-07-26)
 
-1. Is interest declared per seat, or per (seat, client) — a player with two
-   devices may render different things?
-2. Does an interest scope change consume a gameplay window, or ride the
-   extension lane (structurally non-gameplay, per RFC-006 §D answer 2)?
-   Proposal: extension lane, since it must not affect reducer state — but
-   then it needs ordering guarantees the extension lane deliberately lacks.
-   This is the sharpest unresolved design question in Part B.
-3. Should tier-3 `N` be uniform or per-seat (an agent under evaluation might
-   warrant per-submission signing while a human player does not)?
-4. Does the seat roster itself need signing, or is that always product PKI?
+### B7.1 The scope-change lane — the apparent contradiction, dissolved
+
+The question as originally posed ("the extension lane deliberately lacks the
+ordering guarantees invariant 4 needs") **rests on a false premise, and it is
+the same conflation §B1 exists to undo, reappearing one level down.** Two
+different orderings were being treated as one:
+
+| | gameplay ordering | durable log ordering |
+|---|---|---|
+| means | position relative to reducer inputs | position in the committed event log |
+| extension lane | **absent, by construction** | **fully present** |
+| evidence | never reaches the reducer, carries no `SubmittedAction`, observation derivation cannot read it, advances neither `cursor` nor `viewRevision` (RFC-006 §D answer 2) | `prepareExtension` → `makePrepared` assigns `transitionRevision`; `commit()` throws `PreparedTransitionError('stale')` unless `baseTransitionRevision === live.transitionRevision` (`session.ts:1429`); rehydration enforces monotonicity (`:1554`) |
+
+Invariant 4 asks for a snapshot **"at a defined revision"** — that is *log*
+ordering, which the lane has. Invariant 2 forbids affecting the reducer —
+that is *gameplay* ordering, which the lane lacks. **The lane already
+provides exactly what invariant 4 needs and lacks exactly what invariant 2
+forbids.** The property that made this look dangerous is the property that
+makes it correct.
+
+**But neither option in the original question is the answer.** A third
+consideration decides it, and the question did not raise it: invariant 4 also
+requires that narrowing be *recorded so a later verifier knows why data
+stopped*. A generic `{ kind: 'extension', lane: string, record }` entry is
+opaque — a verifier would have to know a product's lane-naming conventions to
+locate scope changes at all. **Verifier legibility, not ordering, is what
+rules out the generic extension lane.**
+
+**Resolution — a third non-gameplay transition kind, `prepareInterest`**, with
+its own record kind in the transcript. It borrows from both existing
+non-gameplay lanes:
+
+- **from the extension lane** — structural reducer isolation: an interest
+  record is never a reducer input and cannot affect state, legality, or
+  observation *derivation*. Invariant 2 then holds **by construction rather
+  than by discipline**.
+- **from the rejection lane** — delta emission with split revisions:
+  `transitionRevision` advances to the scope-change transition while
+  `viewRevision` stays equal to the unchanged gameplay cursor, exactly as
+  RFC-006 already specifies for the rejection-only `ObservationDelta`.
+  Invariants 3 and 4 follow.
+
+This is **not new machinery.** The rejection-only delta already proves that a
+non-gameplay transition can emit a delta and carry its own revision without
+touching the cursor. Interest is the second instance of a pattern the kernel
+ships today — which is the strongest evidence available that the shape is
+right.
+
+**Consequent correction to invariant 2 (§B3).** As written — *"two hosts with
+different interest policies must produce identical transcripts"* — the
+invariant contradicts recording scope changes at all: if policies differ, the
+records differ. The fix is to separate the two things "interest policy"
+conflates:
+
+- **client-declared scope** is a *submission*: signed, recorded, ordered. Two
+  hosts fed identical client submissions produce identical interest records.
+- **host-side narrowing** on top of that declaration is *pure delivery*: it is
+  re-derivable, it is **not** a transition, and it **must not enter the
+  durable log**. A host may deliver less than a client asked for; it may never
+  record that it did so as session history.
+
+Invariant 2 therefore reads: **interest never affects reducer computation, and
+a transcript's gameplay projection is identical under any interest policy.**
+
+### B7.2 Interest is declared per `(seat, scopeId)` — not per client
+
+"Client" and "connection" are **host** concepts; the kernel's vocabulary is
+seats. Putting connections in the kernel would drag in connect/disconnect
+lifecycle, and those events are not deterministic.
+
+A seat may hold N named scopes; the kernel derives one delta stream per scope;
+the **host** binds connections to `scopeId`s. Default is one scope per seat,
+named by the seat id — so the single-device case costs nothing and the API has
+no second shape.
+
+This answers the two-device case properly. Per-seat-only would force the two
+devices to share the *union* of their interest, meaning the phone pays for the
+desktop's fidelity — precisely the waste Part B exists to remove.
+
+Signing (tier 2): a scope declaration is signed by the **seat** key — one key
+per seat, unchanged from §A3 — and carries its `scopeId`. Two devices on one
+seat share a key, which is correct: the property proven is *"this seat asked
+to see X"*, not *"this device asked"*. Invariant 1 holds trivially, since all
+scopes of a seat compose inside the same partition result and none can widen
+past it.
+
+### B7.3 Tier-3 `N` is per-seat, recorded in the roster
+
+`N` is a property of a **chain**, and chains are per-seat (§A5.1); a per-chain
+parameter stored in a global field is a type error waiting to happen. §A3
+already names the case that needs it — an evaluation driver under scrutiny
+warrants dense signing where a human on a phone does not — and client-side
+signing cost differs by an order of magnitude between those two. Uniform `N`
+remains expressible as "every seat has the same `N`", so nothing is lost.
+
+Recorded in the roster entry alongside the key: `{ id, publicKey, alg,
+signingTier }`. Everything a verifier needs about a seat then lives in one
+place.
+
+**`N` must be recorded, never inferred.** A verifier that derives `N` from
+observed signature spacing cannot distinguish `N = 100` from `N = 10` with 90 %
+of the signatures suppressed by the host. Recording it converts signature
+suppression from **invisible** into a **detectable violation** — this is a
+security property, not bookkeeping.
+
+### B7.4 The roster is not signed by the SDK — it is bound into chain genesis
+
+The §A3 line holds: binding a key to a person is product policy and stays out
+of the SDK. But roster *integrity* is load-bearing for every claim in Part A —
+a host that can rewrite `seatKeys` post-hoc can substitute a key it controls
+and forge that seat's entire chain. "Product PKI" alone leaves that open for
+every host that does not deploy PKI.
+
+The SDK closes it without any PKI, by making the roster **tamper-evident from
+inside the artifact**: the chain genesis stops being 32 zero bytes and becomes
+
+```
+prevChainHash[first submission] = H(domainTag ‖ sessionId ‖ seat ‖ rosterHash)
+```
+
+`rosterHash` must be **order-independent**, or two honest hosts that list the
+same seats in a different order produce incompatible chains. `canonicalJson`
+sorts object keys but preserves **array** order, so it is not sufficient
+alone:
+
+```
+rosterHash = SHA-256( canonicalJson( seatKeys sorted ascending by `id`
+                                     using the RFC-008 code-point collation ) )
+```
+
+Reusing the code-point collation already frozen in the baseline (not
+`Array.prototype.sort`'s UTF-16 order) keeps this consistent with the rest of
+the canonical form and with Python.
+
+Substituting any seat's key changes `rosterHash`, which invalidates **every
+seat's chain from its first submission onward** — including the chains of
+seats whose keys the host does not control, and which it therefore cannot
+re-forge. Roster substitution lands in `rejected`, not `unverifiable`. Cost:
+one hash per session, computed client-side, once.
+
+Residual, and unchanged: proving the roster names the *intended people* is
+still product PKI. The SDK proves the artifact was played under **the roster
+it carries** — not who those seats really were. That is the §A2/§A3 line
+restated, now with the substitution attack moved to the correct side of it.
+
+### B7.5 Consequence for sequencing — Part A does not wait for Part B
+
+§B4 establishes that client-declared interest is what makes tier-2 signing
+meaningful. With B7.1 and B7.2 resolved, that dependency is now **one-way and
+non-blocking**: tier 2 is fully specified, and simply has nothing to sign
+until Part B ships. **Part A is buildable today, in parallel with the
+migrations** (RFC-009 §5); tier 2 activates when interest lands.
 
 ---
 

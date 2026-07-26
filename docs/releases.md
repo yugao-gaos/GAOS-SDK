@@ -3,11 +3,15 @@
 For the public chronological changelog, see the
 [complete version history](/version-history).
 
-## v0.19.0
+## v0.20.0 (unreleased) — session and integrity layer
 
-Prepared July 25, 2026.
+Prepared July 25, 2026 as v0.19.0; **folded into v0.20 on July 26, 2026 and
+never tagged.** The content below shipped and was verified; only the version
+number changed. Both first-party consumers migrate against the commit pin
+`5ddd404` rather than a tag — see RFC-009 §4, which also carries the freeze
+rules that still apply to that pin.
 
-This release adds the optional authoritative session and integrity layer:
+This layer is the optional authoritative session and integrity layer:
 
 - `./session` prepared transitions enforce persist-before-publish ordering;
 - reducer drafts have explicit fork, discard, and retirement ownership;
