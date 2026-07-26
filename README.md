@@ -14,6 +14,12 @@ authoritative session, and deterministic replay. Signed runs can be checked
 offline by anyone with the pinned game adapter—without trusting the host or a
 GAOS-operated service.
 
+**The problem it solves:** agent evaluation results are self-published, and
+checking one today means re-running the whole evaluation at the full inference
+cost of the original — after which you still have a different sample rather
+than that run. GAOS keeps producing a result expensive and makes *checking* it
+nearly free. [Why verification, not trust →](#why-verification-not-trust)
+
 ## The three reasons to use GAOS
 
 ### 1. One deterministic core
@@ -50,19 +56,46 @@ and commercial policy.
 | Ship human play today without creating a second rules engine for bots tomorrow. Use reusable board, card, zone, movement, visibility, scoring, settlement, and session mechanisms. | Turn interactive games into reproducible single- or multi-agent evaluations. Use structured legal actions, provider-neutral drivers, portable transcripts, signed evidence, and offline verification. |
 | [Build your first game →](docs/quickstart.md) | [Build an agent evaluation →](docs/agentic-play.md) |
 
-## What “third-party verifiable” means
+## Why verification, not trust
+
+Agent evaluation results are self-published. A leaderboard entry is a claim
+made by the party that benefits from it, and a reader has two options today:
+
+- **Trust it.** No verification at all.
+- **Reproduce it.** Re-run the evaluation at full inference cost — and still
+  not get *that* run back, because the model is stochastic and the harness has
+  moved on. What you get is a different sample, not a check.
+
+So verification is either free and worthless, or expensive and inconclusive.
+Most published agent results are unverifiable in practice: not because anyone
+is dishonest, but because checking costs more than any reader will spend.
+
+**GAOS inverts that cost.** A run is recorded as a deterministic transcript
+with every input signed by the seat that produced it. Verifying replays those
+recorded inputs through a pinned reducer — **it never re-runs the agent.** No
+model calls, no inference spend, no stochasticity. Checking a claim costs
+milliseconds of local CPU, and it checks *that exact run* rather than a fresh
+sample of roughly similar behaviour.
+
+Producing a result stays expensive. Checking one becomes nearly free, works
+offline, and needs no cooperation from whoever published it.
+
+### What a `trusted` verdict proves
 
 A scoring authority pins the historical reducer and pure command adapter named
-by the artifact, then checks the run locally. A `trusted` verdict proves that:
+by the artifact, then checks the run locally:
 
 - the recorded inputs reproduce the recorded game result;
 - the declared seat keys authored the signed submission chains;
 - chain order, periodic signing tiers, and roster binding are intact; and
 - signed commands and timeout inputs independently map to the recorded actions.
 
-GAOS does not claim that a key belongs to a real-world identity, that an
-artifact was published rather than withheld, or that wall-clock timing was
-fair. Those remain product and scoring-authority policy. See
+### What it does not prove
+
+Not that a key belongs to a real-world identity, that an artifact was published
+rather than withheld, or that wall-clock timing was fair. And not that the agent
+would play this way again — replay verifies **this run**, not the policy that
+produced it. Those remain product and scoring-authority policy. See
 [Trust and verification](docs/trust-and-verification.md) for the exact boundary.
 
 ## Start building

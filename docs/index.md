@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Gaming AGI Open SDK
   text: One game core. Human play, agent evaluation, third-party proof.
-  tagline: Build deterministic games and interactive benchmarks whose signed results anyone can verify offline.
+  tagline: Agent evaluation results are self-published, and re-running one to check it costs the full inference bill—and still returns a different sample, not that run. GAOS keeps producing a result expensive and makes checking it nearly free.
   actions:
     - theme: brand
       text: Build a game
@@ -37,6 +37,32 @@ features:
   <span><strong>TypeScript + Python</strong></span>
   <span><strong>No verification service required</strong></span>
 </div>
+
+## Why verification, not trust
+
+A leaderboard entry is a claim made by the party that benefits from it, and a
+reader has two options today. **Trust it** — no verification at all. Or
+**reproduce it** — re-run the evaluation at full inference cost and still not
+get *that* run back, because the model is stochastic and the harness has moved
+on. What you get is a different sample, not a check.
+
+So verification is either free and worthless, or expensive and inconclusive.
+Most published agent results are unverifiable in practice: not because anyone
+is dishonest, but because checking costs more than any reader will spend.
+
+**GAOS inverts that cost.** A run is recorded as a deterministic transcript
+with every input signed by the seat that produced it. Verifying replays those
+recorded inputs through a pinned reducer — **it never re-runs the agent.** No
+model calls, no inference spend, no stochasticity. Checking costs milliseconds
+of local CPU, works offline, needs no cooperation from whoever published the
+result, and checks *that exact run* rather than a fresh sample of roughly
+similar behaviour.
+
+What a `trusted` verdict does **not** claim: that a key belongs to a
+real-world identity, that an artifact was published rather than withheld, that
+wall-clock timing was fair, or that the agent would play this way again —
+replay verifies **this run**, not the policy behind it.
+[Read the exact boundary →](/trust-and-verification)
 
 ## Built for two teams
 
