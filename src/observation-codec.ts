@@ -59,9 +59,23 @@ function compareCodePoints(left: string, right: string): number {
   return a.length - b.length;
 }
 
-function diffJson(previous: JsonValue, next: JsonValue): JsonPatchOperation[] {
+function diffJson(
+  previous: JsonValue,
+  next: JsonValue,
+  limit = Number.POSITIVE_INFINITY,
+): JsonPatchOperation[] | null {
   const operations: JsonPatchOperation[] = [];
+  let exceeded = false;
   const visit = (left: JsonValue, right: JsonValue, path: string): void => {
+    // Stop walking as soon as the patch cannot pay for itself. Without this the
+    // diff costs O(view) even when the result is discarded, which is the whole
+    // CPU regression: a 500-entity tick where everything moved spent 15.02 ms
+    // building a patch that was then thrown away for a 2.81 ms snapshot.
+    if (exceeded) return;
+    if (operations.length > limit) {
+      exceeded = true;
+      return;
+    }
     if (jsonEqual(left, right)) return;
     if (!objectValue(left) || !objectValue(right)) {
       operations.push({ op: 'replace', path, value: structuredClone(right) });
@@ -86,22 +100,31 @@ function diffJson(previous: JsonValue, next: JsonValue): JsonPatchOperation[] {
     }
   };
   visit(previous, next, '');
-  return operations;
+  return exceeded || operations.length > limit ? null : operations;
 }
 
 /** Deterministic RFC-6902 subset. Arrays are atomically replaced. */
 export function createJsonPatch(previous: JsonValue, next: JsonValue): JsonPatchOperation[] {
   assertJsonValue(previous, 'previous view');
   assertJsonValue(next, 'next view');
-  return diffJson(previous, next);
+  // No limit supplied, so the walk never abandons and the result is never null.
+  return diffJson(previous, next)!;
 }
 
 /** @internal Inputs have already passed the session canonical JSON boundary. */
+/**
+ * Build a patch, optionally abandoning the walk once it exceeds `maxOperations`.
+ *
+ * Returns `null` only when a limit was supplied and exceeded, so the caller can
+ * fall back to a snapshot *without having paid for the full diff*. Called with
+ * two arguments the behaviour is unchanged and the result is never `null`.
+ */
 export function createValidatedJsonPatch(
   previous: JsonValue,
   next: JsonValue,
-): JsonPatchOperation[] {
-  return diffJson(previous, next);
+  maxOperations?: number,
+): JsonPatchOperation[] | null {
+  return diffJson(previous, next, maxOperations);
 }
 
 /** Apply the safe RFC-6902 subset without mutating the prior snapshot. */

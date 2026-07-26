@@ -26,6 +26,7 @@ const SIZES = [50, 200, 500];
 const ACTIVITY = [1, 5, 20, 'all'];
 const ITERATIONS = 30;
 const WARMUP = 10;
+const MIN_REDUCTION = 4;
 
 function makeView(entities) {
   return {
@@ -81,8 +82,8 @@ for (const entities of SIZES) {
     const patchJson = canonicalJson(createValidatedJsonPatch(before, after));
     const v2Ms = timeIt(() => canonicalJson(createValidatedJsonPatch(before, after)));
 
-    // The kernel falls back to a snapshot when the patch is not smaller.
-    const fellBack = patchJson.length >= snapshotJson.length;
+    // Match the kernel rule: a patch ships only if it wins by MIN_REDUCTION.
+    const fellBack = patchJson.length * MIN_REDUCTION > snapshotJson.length;
     const wireBytes = fellBack ? snapshotJson.length : patchJson.length;
     const wireDeflated = fellBack ? deflated(snapshotJson) : deflated(patchJson);
 

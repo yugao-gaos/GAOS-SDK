@@ -203,12 +203,73 @@ describe('RFC-010 completed migration-informed scope', () => {
     });
   });
 
-  it('rejects the removed observation codec v1 configuration', async () => {
+  it('supports observation codec v1 as a snapshot-only emission mode', async () => {
+    const { options } = await signedOptions();
+    const kernel = createSessionKernel({ ...options, observationCodec: 'v1' });
+    const prepared = kernel.prepareIngest({
+      protocol: PROTOCOL_ID,
+      protocolVersion: PROTOCOL_VERSION,
+      sessionId: options.sessionId,
+      tickId: makeTickId(options.sessionId, 0),
+      revision: 0,
+      participantId: 'alpha',
+      submissionId: 'v1-mode',
+      command: { amount: 1 },
+    });
+    kernel.commit(prepared);
+    const advance = kernel.prepareAdvance();
+    const deltas = advance.deltas ?? [];
+    kernel.commit(advance);
+    expect(deltas.length).toBeGreaterThan(0);
+    for (const delta of deltas) {
+      expect(delta.codec).toBe('v1');
+      expect(delta.body.kind).not.toBe('patch');
+    }
+  });
+
+  it('rejects an unknown observation codec configuration', async () => {
     const { options } = await signedOptions();
     expect(() => createSessionKernel({
       ...options,
-      observationCodec: 'v1' as never,
-    })).toThrow(/observationCodec must be a v2 options object/);
+      observationCodec: 'v3' as never,
+    })).toThrow(/observationCodec must be 'v1' or a v2 options object/);
+  });
+
+  it('falls back to a snapshot when a patch does not win by the required margin', async () => {
+    const { options } = await signedOptions();
+    // minReduction 1 restores the old pure-byte rule; a huge value means no
+    // patch can ever clear the bar, so every body must be a snapshot.
+    const kernel = createSessionKernel({
+      ...options,
+      observationCodec: { version: 'v2', minReduction: 1_000_000 },
+    });
+    const prepared = kernel.prepareIngest({
+      protocol: PROTOCOL_ID,
+      protocolVersion: PROTOCOL_VERSION,
+      sessionId: options.sessionId,
+      tickId: makeTickId(options.sessionId, 0),
+      revision: 0,
+      participantId: 'alpha',
+      submissionId: 'margin',
+      command: { amount: 1 },
+    });
+    kernel.commit(prepared);
+    const advance = kernel.prepareAdvance();
+    const deltas = advance.deltas ?? [];
+    kernel.commit(advance);
+    expect(deltas.length).toBeGreaterThan(0);
+    for (const delta of deltas) {
+      expect(delta.codec).toBe('v2');
+      expect(delta.body.kind).not.toBe('patch');
+    }
+  });
+
+  it('rejects an invalid minReduction', async () => {
+    const { options } = await signedOptions();
+    expect(() => createSessionKernel({
+      ...options,
+      observationCodec: { version: 'v2', minReduction: 0 },
+    })).toThrow(/minReduction must be a finite number >= 1/);
   });
 
   it('preserves the v0.19 opaque timeout reservation for unsigned sessions', async () => {

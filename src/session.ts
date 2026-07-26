@@ -99,6 +99,16 @@ export interface ObservationCodecV2Options {
   version: 'v2';
   maxOperations?: number;
   maxBytes?: number;
+  /**
+   * Minimum snapshot:patch size ratio required to ship a patch. Default 4.
+   *
+   * A pure "is the patch smaller" test takes any marginal byte win at any CPU
+   * price: measured at 500 entities with every entity moving, a patch 7 %
+   * smaller than the snapshot cost 15.02 ms against the snapshot's 2.81 ms.
+   * Patching is only worth its CPU when it wins by a wide margin, so the
+   * default demands one. Set to 1 to restore the pure byte comparison.
+   */
+  minReduction?: number;
 }
 
 export interface CommandContext {
@@ -181,7 +191,15 @@ export interface SessionKernelOptions<
   limits?: SessionLimits;
   stateIsolation?: SessionStateIsolation<TState>;
   /** Optional bounds for the mandatory v2 patch codec. */
-  observationCodec?: ObservationCodecV2Options;
+  /**
+   * Observation delivery. Defaults to v2 (patches with snapshot fallback).
+   *
+   * `'v1'` emits a snapshot every tick. It is **not** deprecated: measured at
+   * 20 Hz it costs 1.7×–5.9× *less* CPU than v2, and transport compression
+   * reclaims ~10× of its bytes for free, so a large tick-paced table is often
+   * better served by v1 behind `permessage-deflate` than by patching.
+   */
+  observationCodec?: 'v1' | ObservationCodecV2Options;
   /** Product projection applied only after the seat's partitioned view exists. */
   interest?: InterestPolicy<TView>;
 }
@@ -338,7 +356,7 @@ export interface ObservationDelta<TView = TickView<unknown, unknown>> {
   transitionRevision: number;
   viewRevision: number;
   tick: number;
-  codec: 'v2';
+  codec: 'v1' | 'v2';
   /** How this envelope was produced. Absent is read as `resolution`. */
   origin?: 'resolution' | 'snapshot' | 'interest';
   /**
@@ -768,7 +786,7 @@ class SessionKernelImpl<
   private readonly limits: Required<SessionLimits>;
   private readonly header: SessionHeader<TLevel>;
   private readonly tickTimeoutPolicy: ReplayTickTimeoutPolicy | undefined;
-  private readonly observationCodec: Required<ObservationCodecV2Options>;
+  private readonly observationCodec: Required<ObservationCodecV2Options> | 'v1';
   /** O(1) permanent idempotency index, rebuilt from durable accepted events. */
   private readonly historicalSubmissionKeys = new Set<string>();
   private readonly historicalInterestCommands = new Map<string, string>();
@@ -865,16 +883,24 @@ class SessionKernelImpl<
       }
     }
     const observationCodec = options.observationCodec ?? { version: 'v2' };
-    if (!isObjectRecord(observationCodec) || observationCodec.version !== 'v2') {
-      throw new TypeError('observationCodec must be a v2 options object');
+    if (observationCodec === 'v1') {
+      this.observationCodec = 'v1';
+    } else {
+      if (!isObjectRecord(observationCodec) || observationCodec.version !== 'v2') {
+        throw new TypeError("observationCodec must be 'v1' or a v2 options object");
+      }
+      const maxOperations = observationCodec.maxOperations ?? 2_048;
+      const maxBytes = observationCodec.maxBytes ?? 65_536;
+      const minReduction = observationCodec.minReduction ?? 4;
+      if (!Number.isSafeInteger(maxOperations) || maxOperations <= 0
+        || !Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+        throw new RangeError('v2 observation codec bounds must be positive safe integers');
+      }
+      if (!Number.isFinite(minReduction) || minReduction < 1) {
+        throw new RangeError('minReduction must be a finite number >= 1');
+      }
+      this.observationCodec = { version: 'v2', maxOperations, maxBytes, minReduction };
     }
-    const maxOperations = observationCodec.maxOperations ?? 2_048;
-    const maxBytes = observationCodec.maxBytes ?? 65_536;
-    if (!Number.isSafeInteger(maxOperations) || maxOperations <= 0
-      || !Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
-      throw new RangeError('v2 observation codec bounds must be positive safe integers');
-    }
-    this.observationCodec = { version: 'v2', maxOperations, maxBytes };
     this.isolation = options.stateIsolation ?? {
       fork: (state: TState): TState => structuredClone(state),
     };
@@ -974,25 +1000,33 @@ class SessionKernelImpl<
     next: TView,
     unchanged: boolean,
   ): Pick<ObservationDelta<TView>, 'codec' | 'body'> {
+    const codec = this.observationCodec === 'v1' ? 'v1' : 'v2';
     if (unchanged) {
-      return {
-        codec: 'v2',
-        body: { kind: 'unchanged' },
-      };
+      return { codec, body: { kind: 'unchanged' } };
     }
     const snapshot = structuredClone(next);
+    if (this.observationCodec === 'v1') {
+      return { codec: 'v1', body: { kind: 'snapshot', view: snapshot } };
+    }
     try {
+      // The limit is passed *into* the walk so an oversized diff is abandoned
+      // rather than built and discarded; see observation-codec.ts.
       const operations = createValidatedJsonPatch(
         previous as unknown as JsonValue,
         next as unknown as JsonValue,
+        this.observationCodec.maxOperations,
       );
-      const patchBytes = new TextEncoder().encode(canonicalJson(
-        operations as unknown as JsonValue,
-      )).length;
-      const snapshotBytes = new TextEncoder().encode(canonicalSessionView(next)).length;
-      if (operations.length <= this.observationCodec.maxOperations
-        && patchBytes < Math.min(snapshotBytes, this.observationCodec.maxBytes)) {
-        return { codec: 'v2', body: { kind: 'patch', operations } };
+      if (operations !== null) {
+        const patchBytes = new TextEncoder().encode(canonicalJson(
+          operations as unknown as JsonValue,
+        )).length;
+        const snapshotBytes = new TextEncoder().encode(canonicalSessionView(next)).length;
+        // Require a wide win, not merely a smaller one: patching costs real CPU
+        // and a marginal byte saving does not repay it.
+        if (patchBytes <= this.observationCodec.maxBytes
+          && patchBytes * this.observationCodec.minReduction <= snapshotBytes) {
+          return { codec: 'v2', body: { kind: 'patch', operations } };
+        }
       }
     } catch {
       // Unsafe pointer keys or a non-beneficial representation use the

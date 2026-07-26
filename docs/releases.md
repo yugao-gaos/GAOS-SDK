@@ -16,13 +16,25 @@ artifact; repository tests alone do not satisfy RFC-010 §C4 adoption.
 
 ### Migration from v0.19
 
-Observation delivery intentionally moves to codec v2 with no v1 emission
-mode. Remove `observationCodec: 'v1'`; the option now only customizes v2 bounds.
-`ObservationDelta.codec` is always `'v2'`, and bodies may be `patch`,
-`snapshot`, or `unchanged`. Clients should pass envelopes through
-`applyObservationDelta` rather than switching on snapshot-only assumptions.
-Snapshot fallback remains mandatory when a patch is unsafe, over bounds, or
-not smaller.
+Observation delivery defaults to codec v2. `ObservationDelta.codec` is
+`'v1' | 'v2'` and bodies may be `patch`, `snapshot`, or `unchanged`, so clients
+should pass envelopes through `applyObservationDelta` rather than switching on
+snapshot-only assumptions.
+
+**`observationCodec: 'v1'` is retained and is not deprecated.** Measured at
+20 Hz, v1 costs **1.6×–5.9× less CPU** than v2 (see
+`npm run observations:benchmark`), and `permessage-deflate` reclaims roughly
+**10×** of its bytes for free — a 200-entity snapshot compresses 15,170 → 1,539
+bytes. Large tick-paced tables are frequently better served by v1 behind
+transport compression than by patching. **Enable transport compression before
+reaching for a codec**; it is the cheaper win on both axes.
+
+Snapshot fallback remains mandatory when a patch is unsafe or over bounds, and
+now also when it fails to win by `minReduction` (default **4×**). A patch that
+is merely *smaller* does not repay its CPU: at 500 entities with every entity
+moving, a patch 7 % smaller than the snapshot cost 13.8 ms against 2.66 ms.
+Note that v2 still pays the diff before falling back, so a table that changes
+wholesale every tick should select `'v1'` rather than rely on the fallback.
 
 Durable `SessionEvent.kind` also adds `interest` and `seat-signature`; exhaustive
 switches need arms for enabled RFC-010 lanes. A patch is an observation body,
@@ -59,7 +71,7 @@ will validate the release candidate before the tag.
 - client-declared interest is ordered per `(seat, scopeId)`, structurally
   constrained inside the partitioned view, tier-2 signed, replayed, and
   delivered with omission metadata;
-- observation codec v2 is mandatory and emits safe bounded JSON patches with
+- observation codec v2 is the default and emits safe bounded JSON patches with
   mandatory snapshot fallback and digest-checked reconstruction;
 - reducer legality runs before durable ingest, invalid views are typed/fail
   fast, action `payload` round-trips through replay, repair envelopes declare
