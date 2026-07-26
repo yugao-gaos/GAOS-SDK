@@ -267,3 +267,85 @@ This supersedes Round 2's recommendation to describe an unchanged v1 default:
 
 **Disposition:** accepted for the v0.20 release candidate. Both product repins
 must exercise patch application and snapshot fallback before tagging.
+
+---
+
+# Round 3 — the CPU arm, measured (`scripts/benchmark-observation-codec.mjs`)
+
+The byte-only benchmark could not settle RFC-009 §3.3, because it timed what v2
+*spends* without timing what it *saves*. The extended benchmark adds a v1 arm,
+a deflate column, and an activity sweep. Desktop, Node, synthetic view,
+20 Hz × 4 seats.
+
+## v2 costs more CPU than v1 in every single case
+
+| entities | changed | CPU v1 | CPU v2 | ratio | tick budget v1 → v2 |
+|---|---|---|---|---|---|
+| 200 | 1 | 1.20 ms | 2.47 ms | **2.06×** | 9.6 % → 19.7 % |
+| 200 | 5 | 1.27 ms | 2.77 ms | **2.18×** | 10.2 % → 22.1 % |
+| 200 | 20 | 1.37 ms | 2.36 ms | **1.72×** | 11.0 % → 18.9 % |
+| 200 | all | 0.98 ms | 5.75 ms | **5.85×** | 7.9 % → 46.0 % |
+| 500 | 1 | 2.61 ms | 5.73 ms | **2.20×** | 20.9 % → 45.8 % |
+| 500 | all | 2.81 ms | **15.02 ms** | **5.35×** | 22.4 % → **120.2 %** |
+
+**At 500 entities with everything moving, v2 encoding alone exceeds a 20 Hz
+tick budget on a fast desktop.** A Cloudflare DO isolate is materially slower.
+The v1 path in the same cell costs 22 %.
+
+This is the answer to §3.3, and it is the opposite of what the byte table
+implied: **we traded bandwidth for CPU, and CPU was the measured bottleneck.**
+
+## Transport compression alone solves the bandwidth problem, at lower CPU
+
+Deflate on the *v1 snapshot* at 200 entities: 15,170 → **1,539 bytes, 9.9× for
+free.** Per room that is 1.157 → **0.117 MiB/s**, which is already viable —
+achieved with no codec, and with the *cheaper* CPU path.
+
+| 200 entities, 5 changed | room egress | CPU/seat/tick |
+|---|---|---|
+| v1 raw | 1.157 MiB/s | 1.27 ms |
+| **v1 + deflate** | **0.117 MiB/s** | **1.27 ms** |
+| v2 raw | 0.030 MiB/s | 2.77 ms |
+| v2 + deflate | 0.009 MiB/s | 2.77 ms |
+
+v2 still wins on bytes — but against v1+deflate the remaining win is 0.108
+MiB/s, bought with **2.2× the CPU on the constrained resource**.
+
+## Defect — the fallback rule has no CPU term
+
+`fellBack: false` at 500/all: the patch is 35,514 B against a 38,420 B
+snapshot, so it is *technically* smaller and the codec ships it — **after
+spending 15.02 ms instead of 2.81 ms to save 7 % of the bytes.** The rule is a
+pure byte comparison (`patch < snapshot`), so it will always take a marginal
+byte win at any CPU price.
+
+**Fix:** require a margin, not merely "smaller" — fall back unless the patch is
+at least ~2–4× smaller. That single change removes the pathological cells from
+the table.
+
+## This revises my own advice
+
+Two turns ago I endorsed forcing v2 and deprecating v1, partly on the argument
+that *nobody opts into an optional performance flag*. The measurement says v2
+is **not strictly a win** — it is a trade, and it goes the wrong way on the
+resource that binds. Removing the v1 emission path removed the cheaper option.
+
+**Recommended:**
+
+1. **Restore v1 as an emission mode.** Keep v2 the default if you like, but a
+   500-entity tick-paced product needs the cheap path available.
+2. **Fix the fallback margin** (above) — cheapest fix, largest effect.
+3. **Enable transport compression and treat it as the primary bandwidth
+   answer.** It is ~10×, free, and CPU-neutral for us.
+4. **Re-measure on TabletopLabs' real views before finalising**, since these are
+   synthetic.
+
+## Caveats
+
+Synthetic view, not TTL's real ECS components. Per-message deflate with no
+context takeover — permessage-deflate with a shared window does better on a
+repetitive stream, which strengthens the compression case rather than weakening
+it. `canonicalJson` here is uncached, while the kernel now caches canonical
+seat views, which makes v1's real cost *lower* than measured and v2 look worse
+still. The robust result across all of these is the **v2/v1 ratio**, which is
+above 1 in every cell.
