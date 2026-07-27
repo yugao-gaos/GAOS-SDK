@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/finalize-v0.24-release-readiness",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "codex-mcp-6511-387efff9b3305956ceb923b07b33077a",
+  "branch": "orch/attempt/codex-finalize-v0.24-release-readiness",
+  "status": "claimed",
+  "claimed_at": "2026-07-27T19:32:34.250Z",
+  "lease_until": "2026-07-27T20:32:34.250Z"
+}
