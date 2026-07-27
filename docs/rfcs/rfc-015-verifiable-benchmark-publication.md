@@ -215,7 +215,7 @@ GAOS must provide a deployable reference template containing:
 - artifact download and local-verification instructions;
 - distinct trust labels from §5.
 
-Minimum entry shape:
+v0.22 already ships `LeaderboardEntry`. Its fields remain supported:
 
 ```ts
 interface LeaderboardEntry {
@@ -230,6 +230,26 @@ interface LeaderboardEntry {
   taskScores: Record<string, number>;
   uncertainty?: number;
   artifactDigest: string;
+  evidenceVerdict: 'trusted' | 'unverifiable' | 'rejected';
+  reproduced: boolean;
+  openSourceUrl?: string;
+}
+```
+
+Those two legacy summary fields have deliberately narrow meanings.
+`evidenceVerdict` is the historical replay, signature, chain, and semantic
+adoption verdict described in
+[Trust and verification](../trust-and-verification.md); it is not an overall
+trust decision. `reproduced` reports only organizer reproduction. Neither
+field implies identity, timing, publication, anchoring, availability,
+open-source, model-identity, or hidden-test facts.
+
+RFC-015 adds a versioned, additive entry shape rather than changing or removing
+the v0.22 contract:
+
+```ts
+interface LeaderboardEntryV2 extends LeaderboardEntry {
+  schema: 'gaos.leaderboard-entry.v2';
   verification: SubmissionVerificationFacts;
   eligibility?: {
     policyId: string;
@@ -237,9 +257,13 @@ interface LeaderboardEntry {
     decision: 'eligible' | 'ineligible' | 'pending';
     reasons: string[];
   };
-  openSourceUrl?: string;
 }
 ```
+
+The V2 `verification` facts are authoritative for the expanded claim set.
+Implementations may derive the legacy summaries from those facts when
+serializing a V2 entry, but must not derive the expanded facts from the two
+legacy fields.
 
 The template does not create an official GAOS ranking. A product must
 instantiate it with an explicit benchmark manifest, governance policy,
@@ -250,7 +274,9 @@ submission rules, and scoring interpretation.
 Runner, bundle, verifier, metrics, and leaderboard surfaces are additive. New
 wire objects and bundle contents require explicit schema ids and versions.
 Native GAOS evidence and externally adapted evidence remain unambiguous, as
-required by RFC-014.
+required by RFC-014. Existing `LeaderboardEntry` consumers continue to receive
+the v0.22 fields; expanded verification facts require the explicitly versioned
+V2 shape.
 
 v0.24 is complete only when:
 

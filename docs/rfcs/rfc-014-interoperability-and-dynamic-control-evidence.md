@@ -301,7 +301,7 @@ interface ExternalTrustPolicy {
   pinnedRootDigests?: string[];
   acceptedSchemas: string[];
   acceptedAlgorithms?: string[];
-  requireRevocationState?: 'valid' | 'not-revoked';
+  revocationPolicy?: 'ignore' | 'reject-revoked' | 'require-valid';
 }
 
 interface ExternalTrustResult {

@@ -3,7 +3,8 @@
   "git_user": "yugao-gaos <yu.gao@gaos.ca>",
   "session_id": "codex-mcp-70813-be43b9f905c673fdae61c2fe26e2a9d1",
   "branch": "orch/attempt/codex-define-product-supplied-external-trust-boundary-in-rfc-014-and-rfc-015",
-  "status": "claimed",
+  "status": "tested",
   "claimed_at": "2026-07-27T15:58:32.854Z",
-  "lease_until": "2026-07-27T16:58:32.854Z"
+  "lease_until": "2026-07-27T16:58:32.854Z",
+  "completed_at": "2026-07-27T16:01:56.202Z"
 }
