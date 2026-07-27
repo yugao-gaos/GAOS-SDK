@@ -1253,101 +1253,14 @@ such release over a habit of them.
 
 ---
 
-## D6 — `validateCommand` runs before cursor validation, inverting error precedence
+## D6, D7 — returned by the Arena v0.20 integration *(see RFC-011)*
 
-*Source: Arena, found while integrating **v0.20.0** (not v0.19). Class:
-additive/ordering, non-blocking. This is E3's own fix exposing an ordering
-question E3 did not settle.*
-
-Verified at `v0.20.0`, `prepareIngest` orders its checks:
-
-1. receipt / duplicate short-circuit — `src/session.ts:1334`
-2. **`validateCommand`** — `src/session.ts:1425`
-3. **`collectIntent`** (protocol, session, tickId, revision, participant) — `src/session.ts:1444`
-
-Step 1 is correctly first: an exact retry must replay rather than be
-re-validated. Steps 2 and 3 are inverted. A submission carrying a **stale
-cursor** *and* a command that is not playable in the current state reports the
-legality failure — because legality is evaluated against **current** state that
-the stale client never saw.
-
-That is the wrong answer for the client. A client at an old cursor is not
-sending an illegal command; it is sending one that was legal when it looked,
-and its real problem is that it is behind. `stale_tick` tells it to re-read and
-retry. "Not legal this turn" points at the wrong thing, and worse, it is
-**unstable**: the same stale retry reports a different error depending on what
-other seats did meanwhile, because legality is state-dependent and cursor
-validity is not.
-
-Arena had this precedence explicitly before the migration — its own comment
-read *"Stable cursor errors take precedence over game-specific command decoding
-and today's legal-command set."* Adopting `validateCommand` silently inverted
-it, turning a `409 stale_tick` into a `400`, caught by an existing regression
-test.
-
-**Proposal.** Move the `validateCommand` call after `collectIntent`. Cursor,
-session, and participant validity are cheap, state-independent, and
-unambiguous; legality should only be asked once the submission is established
-as current. The receipt short-circuit stays where it is. This also avoids
-running a state-dependent check for a submission that is about to be rejected
-anyway.
-
-Arena currently reorders host-side — on a reducer rejection it re-checks
-`submission.revision !== kernel.cursor()` and reports `stale_tick` instead.
-That workaround should become deletable.
-
----
-
-## D7 — a `validateCommand` rejection is only recoverable by parsing its message
-
-*Source: Arena, found while integrating **v0.20.0**. Class: additive, ergonomics.
-Sibling of D6 — both are rough edges on E3's new hook, not on E3's premise.*
-
-`prepareIngest` flattens every `validateCommand` failure into one string
-(`src/session.ts:1433-1439` at `v0.20.0`):
-
-```ts
-} catch (error) {
-  throw new IntentCollectionError(
-    'invalid_submission',
-    `command rejected by reducer (${error instanceof Error ? error.message : String(error)})`,
-  );
-}
-```
-
-Two things are lost. The **error object** — `IntentCollectionError`'s
-constructor is `(code, message)` with no `cause`, so the reducer's own type is
-gone; a product that throws a domain error such as `IllegalActionError` cannot
-recover it. And the **distinction from unrelated failures** — `invalid_submission`
-is also what malformed JSON, an unpaired surrogate, and an out-of-safe-range
-integer produce, so the code alone cannot tell "your command is not playable"
-from "your submission is malformed."
-
-Those map to different client answers. Arena returns 422 for an unplayable
-action and 400 for a bad one, and the only way it can currently tell them apart
-is to regex the SDK's own wrapper text:
-
-```ts
-if (err.code === 'invalid_submission' && err.message.includes('rejected by reducer')) {
-  const detail = /\(([\s\S]*)\)$/.exec(err.message)?.[1] ?? err.message;
-  return json({ error: detail }, detail.startsWith('unknown action ') ? 400 : 422);
-}
-```
-
-That is a host parsing a library's error prose to recover structure the library
-had and discarded — it silently breaks if the wrapper wording is ever reworded,
-and nothing in the type system says so.
-
-**Proposal**, either or both, both additive:
-
-1. Add an `illegal_command` member to `IntentErrorCode`, so a reducer rejection
-   is distinguishable from a malformed submission by code alone.
-2. Preserve the thrown value — `cause` on `IntentCollectionError` (or an
-   `original` field) — so products can branch on their own error types instead
-   of on message text.
-
-(1) alone fixes the common case; (2) is what lets a product keep its own
-taxonomy across the boundary.
+Two rough edges on Part E3's new `validateCommand` hook — its ordering
+relative to cursor validation, and the loss of the reducer's error type — were
+briefly recorded here. They are maintained in
+[RFC-011](rfc-011-arena-migration-findings.md) as A1 and A2 so the Arena
+consumer has one authoritative copy to revise; fold them back in here when
+accepted, as with the earlier returns.
 
 ---
 
