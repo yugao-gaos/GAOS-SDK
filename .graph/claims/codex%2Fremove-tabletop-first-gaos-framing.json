@@ -1,0 +1,10 @@
+{
+  "task_key": "codex/remove-tabletop-first-gaos-framing",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "019f9fe3-e31e-7ce0-8853-87b4c254da7c",
+  "branch": "orch/attempt/codex-remove-tabletop-first-gaos-framing",
+  "status": "tested",
+  "claimed_at": "2026-07-27T01:50:12.778Z",
+  "lease_until": "2026-07-27T02:50:12.778Z",
+  "completed_at": "2026-07-27T01:52:45.776Z"
+}
