@@ -198,3 +198,33 @@ order replay.
 GAOS deliberately uses signatures and hash chains, not a blockchain. External
 root anchoring could close truncation if a real cross-host leaderboard needs
 it; it is not part of the v1.2/v1.3 signed-evidence construction.
+
+## Planned external-trust boundary
+
+RFC-014 and RFC-015 propose interfaces for products that want stronger
+identity, timestamp, publication, or tail-anchoring claims. This is roadmap
+scope, not behavior supplied by the v1.2/v1.3 evidence formats described
+above.
+
+GAOS will not provide an external authority or its keys. The integrating
+product selects any identity provider, timestamp authority, transparency log,
+witness, certificate authority, or key-management service. The product
+supplies pinned public keys or certificate roots and verification policy to
+the SDK, owns service calls, rotation, revocation, account binding, and
+availability, and keeps private keys external. A signer integration is a
+callback; it does not transfer private-key custody to GAOS.
+
+A public key or certificate chain embedded in an artifact is enough to check
+whether that material signed the artifact, but not enough to trust the
+authority. Trust requires an exact product or independently obtained
+benchmark-manifest pin, or a valid certificate path to a product-pinned root.
+The planned verifier reports cryptographic validity, pin matching, certificate
+path, revocation state, and policy acceptance separately. Leaderboards must
+also keep replay, identity, time, publication, anchoring, availability,
+reproduction, source availability, model attestation, and hidden-test claims
+separate instead of collapsing them into one `trusted` flag.
+
+See [RFC-014](rfcs/rfc-014-interoperability-and-dynamic-control-evidence.md)
+for the provisional SDK boundary and
+[RFC-015](rfcs/rfc-015-verifiable-benchmark-publication.md) for manifest and
+leaderboard policy.

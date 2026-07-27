@@ -220,7 +220,128 @@ occupancy. RFC-013 supersedes that future direction for the ledger contracts;
 this RFC supersedes it for dynamic-control evidence only when the new formats
 ship.
 
-## 5 — Compatibility and release gate
+## 5 — Product-supplied external trust
+
+GAOS verifies cryptographic material but does not operate or select an
+identity provider, timestamp authority, transparency log, witness, certificate
+authority, or key-management service. A product chooses any such authority and
+supplies the trust configuration used by its host and offline verifier.
+
+The product owns:
+
+- authority and service selection, enrollment, and all network service calls;
+- trusted public keys and certificate roots;
+- key rotation, revocation data, and validity policy;
+- account-to-key binding and the meaning of identity claims;
+- availability, retention, and publication policy; and
+- the decision to require, accept, or reject each assurance level.
+
+Private keys remain in the client, product, hardware module, or external
+service that controls them. GAOS accepts signer callbacks; it does not require
+private-key import or custody.
+
+The following provisional contracts define the boundary. Exact names may
+change before the RFC ships, but the separation of responsibilities is
+normative:
+
+```ts
+type ExternalTrustPurpose =
+  | 'identity'
+  | 'timestamp'
+  | 'transparency'
+  | 'witness';
+
+interface ExternalKeyRef {
+  authorityId: string;
+  keyId: string;
+  purpose: ExternalTrustPurpose;
+}
+
+type ExternalPublicKey =
+  | {
+      format: 'jwk';
+      key: JsonWebKey;
+      certificateChain?: string[]; // DER certificates, base64 encoded
+    }
+  | {
+      format: 'spki';
+      key: string;                 // DER SubjectPublicKeyInfo, base64 encoded
+      certificateChain?: string[];
+    };
+
+interface ExternalTrustResolver {
+  resolveKey(ref: ExternalKeyRef): Promise<ExternalPublicKey | undefined>;
+  resolveRevocation?(ref: ExternalKeyRef): Promise<{
+    state: 'valid' | 'revoked' | 'unknown';
+    checkedAt?: string;
+    evidence?: ExternalAttestation;
+  }>;
+}
+
+interface ExternalSigner {
+  readonly key: ExternalKeyRef;
+  readonly algorithm: string;
+  sign(payload: Uint8Array): Promise<Uint8Array>;
+}
+
+interface ExternalAttestation {
+  schema: string;
+  authority: ExternalKeyRef;
+  subjectDigest: string;
+  algorithm: string;
+  issuedAt?: string;
+  expiresAt?: string;
+  payload: unknown;
+  signature: string;
+  certificateChain?: string[];
+}
+
+interface ExternalTrustPolicy {
+  pinnedKeys: ExternalKeyRef[];
+  pinnedRootDigests?: string[];
+  acceptedSchemas: string[];
+  acceptedAlgorithms?: string[];
+  requireRevocationState?: 'valid' | 'not-revoked';
+}
+
+interface ExternalTrustResult {
+  cryptographicallyValid: boolean;
+  authorityPinned: boolean;
+  certificatePathValid?: boolean;
+  revocationState?: 'valid' | 'revoked' | 'unknown' | 'not-checked';
+  policyAccepted: boolean;
+  authority?: ExternalKeyRef;
+  matchedPin?: string;
+  reasons: string[];
+}
+```
+
+Portable receipts and attestations carry the authority reference, signed
+subject digest, algorithm, signature, and any certificate path required for
+offline checking. The verifier resolves trust using product configuration or
+a benchmark manifest supplied independently of the artifact. An artifact may
+embed a public key or certificate chain so its signature can be checked, but
+embedded material is evidence, not a trust anchor. It is trusted only when it:
+
+1. exactly matches a product-pinned authority and key;
+2. matches a key pinned by the independently obtained benchmark manifest; or
+3. validates through a certificate path to a product-pinned root under the
+   product's declared policy.
+
+Replacing evidence and its embedded key must never create a trusted result.
+Unknown authorities, unpinned self-signed certificates, unavailable revocation
+state, and expired attestations remain distinct machine-readable facts. The
+SDK reports those facts and applies the supplied policy; it does not infer that
+an authority is trustworthy merely because a signature is valid.
+
+These interfaces permit offline verification from portable receipts. An
+online adapter may obtain or refresh a receipt, public key, certificate chain,
+or revocation response, but external protocols and credentials remain
+product-owned integration code. GAOS never performs authority discovery or
+calls an external trust service unless the product explicitly supplies an
+adapter that does so.
+
+## 6 — Compatibility and release gate
 
 This release is additive except for emitting a new explicitly versioned
 signature and evidence format when dynamic control is used. Existing reducers,
@@ -235,12 +356,16 @@ v0.23 is complete only when:
 3. all supported language clients decode the same golden fixtures;
 4. signature v2, handoffs, replay, checkpoint, and offline verification pass
    TypeScript/Python parity tests;
-5. compatibility tests prove old replay formats are unchanged.
+5. external trust fixtures prove that embedded keys are not trusted without a
+   product or manifest pin, while pinned keys and chains produce explicit
+   verification facts; and
+6. compatibility tests prove old replay formats are unchanged.
 
-## 6 — Out of scope
+## 7 — Out of scope
 
 RFC-014 does not add accounts, lobbies, matchmaking, a hosted multiplayer
 service, a renderer, editor extension, general UI framework, second simulation
-authority, mutable signed history, real-world identity proof, or mutable
+authority, mutable signed history, real-world identity proof, external trust
+service, certificate authority, transparency log, key custody, or mutable
 logical seat sets. The broader exclusions and product ownership rules in
 RFC-013 §2 and §8 remain in force.

@@ -95,3 +95,10 @@ dynamic-control evidence are planned for v0.23 in RFC-014. Runner
 resume/packing, portable submission verification, remaining qualified research
 tooling, and the neutral deployable leaderboard are planned for v0.24 in
 [RFC-015](/rfcs/rfc-015-verifiable-benchmark-publication).
+
+Those releases keep external trust product-owned. A product supplies pinned
+public keys or certificate roots, policy, and signer or service adapters to
+the SDK; GAOS does not select an authority, hold its private key, or operate
+its service. Keys embedded only in submitted evidence are not trust anchors.
+RFC-014 defines the provisional verification boundary, and RFC-015 requires
+benchmark manifests and leaderboards to preserve its independent facts.

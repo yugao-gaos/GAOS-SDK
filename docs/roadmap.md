@@ -43,7 +43,9 @@ planning and aggregation, and distinct evidence trust claims.
 next release target. It adds executable host conformance, complete host and
 engine integration guides, cross-language schemas/clients/golden fixtures,
 signed handoffs, signature-chain v2, replay and checkpoint integration,
-offline verification, and TypeScript/Python parity.
+offline verification, product-supplied external-trust interfaces, and
+TypeScript/Python parity. Products retain authority selection, service calls,
+trust roots, rotation, revocation, and private-key custody.
 
 ### v0.24 — RFC-015 verifiable benchmark publication
 
@@ -51,7 +53,9 @@ offline verification, and TypeScript/Python parity.
 portable evidence path. It adds the bounded-parallel resumable benchmark
 runner, agent backends, reproducible `.gaos-bench` bundle and independent
 verifier, remaining qualified research metrics/transforms, and a deployable
-neutral leaderboard starter.
+neutral leaderboard starter. Benchmark manifests pin product-chosen external
+authority policy, and leaderboard verification exposes separate facts instead
+of one universal trust flag.
 
 Each roadmap release has one authoritative RFC. A later release may depend on
 earlier contracts, but it must not silently absorb unfinished scope from
