@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gaos.dev/schemas/gaos.presentation-frame-v1.schema.json",
+  "title": "GAOS presentation frame v1",
+  "type": "object",
+  "required": ["tick", "transitionRevision", "view", "events"],
+  "properties": {
+    "tick": { "type": "integer", "minimum": 0 },
+    "transitionRevision": { "type": "integer", "minimum": 0 },
+    "view": {},
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "type"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "type": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "stateDigest": { "type": "string" },
+    "repair": { "type": "boolean" }
+  },
+  "additionalProperties": false
+}

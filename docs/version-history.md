@@ -3,10 +3,30 @@
 GAOS uses the v0.x line to refine its contracts before v1.0. Products should
 review the migration notes when updating across minor versions.
 
-::: tip Current release: v0.21.0
-Long-running authoritative sessions now have checkpoint/restore/compaction,
-reference prediction and hosting adapters, and portable `ended` evidence.
+::: tip Current release: v0.22.0
+RFC-013's first staged contracts add ecosystem hosting and presentation
+boundaries, controller epochs, research descriptors, and neutral benchmark
+planning.
 :::
+
+## v0.22.0: ecosystem and benchmark contracts
+
+Released July 27, 2026 as the first staged RFC-013 delivery.
+
+- Transport-neutral host and versioned presentation-frame contracts establish
+  stable boundaries for hosts and rendering engines.
+- `SeatControlLedger` records fixed logical seats, explicit vacancy,
+  consecutive controller epochs, atomic swaps, stale-authority rejection, and
+  checkpoint digest continuity without reinterpreting v1 signatures.
+- Machine-readable descriptors, explicit chance, observer and policy
+  contracts ship with legality, normalization, entropy, and win-rate checks.
+- Benchmark manifest validation, deterministic episode planning, weighted
+  aggregation, leaderboard entry types, and distinct trust claims keep
+  benchmark mechanics separate from product-owned meaning.
+- JSON Schemas and a golden presentation fixture begin cross-language
+  conformance.
+
+[Ecosystem bridges and benchmark contracts →](/ecosystem-bridges)
 
 ## v0.21.0: durable long-running sessions
 

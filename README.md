@@ -133,7 +133,7 @@ policy that produced it. Those remain product and scoring-authority policy. See
 ## Start building
 
 ```sh
-npm install 'git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.21.0'
+npm install 'git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.22.0'
 ```
 
 Choose the path that matches your project:
