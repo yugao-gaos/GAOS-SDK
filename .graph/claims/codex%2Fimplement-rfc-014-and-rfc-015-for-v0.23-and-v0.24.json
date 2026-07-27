@@ -3,7 +3,8 @@
   "git_user": "yugao-gaos <yu.gao@gaos.ca>",
   "session_id": "codex-mcp-6511-387efff9b3305956ceb923b07b33077a",
   "branch": "orch/attempt/codex-implement-rfc-014-and-rfc-015-for-v0.23-and-v0.24",
-  "status": "claimed",
+  "status": "tested",
   "claimed_at": "2026-07-27T17:49:12.732Z",
-  "lease_until": "2026-07-27T18:49:12.732Z"
+  "lease_until": "2026-07-27T18:49:12.732Z",
+  "completed_at": "2026-07-27T18:15:20.817Z"
 }
