@@ -1,20 +1,12 @@
 # Agentic play
 
-The SDK is agent-playable because agents can discover and operate a deterministic
-environment without a renderer, a particular model provider, or product-owned
-control code. This is the agent-facing half of Game-as-a-Benchmark: the same
-game rules used for human play become a structured evaluation environment.
+GAOS turns a product-owned reducer into a structured environment for local
+policies, model drivers, and MCP-capable agent CLIs. Agents reach the same
+rules and canonical actions as human players.
 
 ## Environment contract
 
-`AgentEnvironment` wraps any injected `TickReducer`. Each `step()` advances
-exactly one tick and returns:
-
-- the complete product observation, or the configured seat's redacted view;
-- action definitions and fully parameterized concrete legal actions;
-- the last reward and cumulative episode metrics;
-- separate `terminated` and `truncated` flags;
-- the seed, tick count, score, budget usage, and termination reason.
+`AgentEnvironment` advances one deterministic tick at a time:
 
 ```ts
 import { AgentEnvironment } from '@yugao-gaos/turn-based-grid-sdk/engine';
@@ -32,248 +24,81 @@ while (!tick.done) {
   const action = await chooseAction(tick.observation, tick.legalActions);
   tick = env.step(action);
 }
-
-const transcript = env.transcript();
 ```
 
-When `seat` is configured, the environment calls `reducer.viewFor` when that
-method exists, derives legal actions from the returned view, attaches the seat
-to reducer submissions, and rejects an explicit conflicting seat. It never
-uses the full view to enumerate a seat's legal actions.
+Each tick exposes the product observation, fully parameterized legal actions,
+reward, metrics, and separate termination and safety-truncation state.
+Seat-scoped environments use `reducer.viewFor` and never enumerate actions
+from the privileged full view.
 
-Levels and observations are snapshotted with `structuredClone` so later caller
-mutations cannot rewrite a transcript. Products with non-cloneable values can
-supply `snapshotLevel` and `snapshotObservation` in the environment options.
-Transcript version 1.3 includes the seat, the redacted initial observation,
-and the redacted observation following every applied tick. A product that
-wants a lower agent decision cadence holds or repeats actions in its own
-policy loop; the SDK does not define that product behavior.
-
-Products may inject reward shaping and custom action enumeration. The default
-reward is terminal stars, or `1` for a win without stars. For a decided
-multi-seat outcome it uses that seat's score when present, otherwise `1` for
-rank one and `0` for another rank. Reducer failure or a decided outcome is a
-normal termination; reaching `maxTicks` is a safety truncation.
+The product owns observations, legal-action meaning, reward policy, and agent
+decision cadence. GAOS owns the environment lifecycle, concrete-action
+validation, deterministic transcript, and safety bounds.
 
 ## Multi-agent episodes
 
 `MultiAgentEnvironment` runs independent seat policies against one reducer.
-Sequential participation applies the active seat's non-wait action and gives
-other seats the configured legal `wait`. Simultaneous participation collects
-one intent per seat and calls `reducer.advance` exactly once with canonical
-lexical seat ordering.
+Sequential play applies the active seat's action; simultaneous play collects
+one intent per seat and advances once in canonical seat order.
 
-Each policy receives only its seat's `viewFor` observation and concrete legal
-actions. `runMultiAgentEpisode` solicits policies concurrently; a missing
-policy contributes `wait`. The shared transcript stores redacted per-seat
-observations, canonical batches, and per-seat rewards/outcomes so an arena can
-replay and compare model-vs-model episodes without exposing another seat's
-hidden state.
+Each policy receives only its seat's redacted observation. The transcript
+stores canonical action batches, per-seat views, rewards, and outcomes without
+exposing another seat's hidden state.
 
-## Evaluation
+## Drivers and tools
 
-`runAgentEpisode` accepts synchronous or asynchronous policies.
-`evaluateAgentEpisodes` runs a deterministic case list and reports wins,
-failures, truncations, mean reward, and mean ticks.
-
-In a Game-as-a-Benchmark evaluation, these episodes are not detached test
-fixtures. They are runs of the same versioned game humans can play, expressed
-through canonical observations and actions.
-
-```ts
-const result = await evaluateAgentEpisodes(
-  cases,
-  ({ level, seed }) => new AgentEnvironment({ reducer, level, seed }),
-  (tick) => myAgent(tick.observation, tick.legalActions),
-);
-```
-
-For a scored or published evaluation, treat the evaluation driver as an
-ordinary session seat with an Ed25519 key. Sign its canonical submissions and
-publish the v1.3 replay, seat roster, declared signing tier, pinned historical
-adapter, and reported score together. A benchmark operator can then reproduce
-the computation and establish that the listed agent key authored the signed
-commands without trusting the submitter's database.
-
-Key-to-agent identity remains operator policy, and signatures do not prevent a
-colluding driver or host. Require the verifier's `trusted` verdict for scored
-runs; `unverifiable` means no signature evidence, not a failed agent.
-[Trust and verification](/trust-and-verification) covers key handling, chain
-heads, CLI use, and the honest limits.
-
-## Tool and MCP adapters
-
-`createAgentToolAdapter(environment)` exposes four provider-neutral operations:
+The provider-neutral tool adapter exposes:
 
 - `observe`
 - `act`
 - `reset`
 - `transcript`
 
-The adapter includes JSON input schemas and has no MCP, OpenAI, Anthropic, or
-other provider dependency. An MCP server or model tool API can register the
-definitions and forward calls to `adapter.call(name, input)`.
-
-## Keyed model drivers
-
-The `./agent` subpath includes a provider-neutral `AgentDriver` contract and
-an extensible `AgentDriverRegistry`. `runAgentDriverEpisode` connects any
-driver to `AgentEnvironment`, records each decision, and returns the normal
-deterministic transcript.
-
-```ts
-import {
-  AgentDriverRegistry,
-  createKeyedAgentDriver,
-  runAgentDriverEpisode,
-} from '@yugao-gaos/turn-based-grid-sdk/agent';
-
-const driver = createKeyedAgentDriver('anthropic', {
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-  model: 'your-model-id',
-  maxHistoryTurns: 8,
-  maxRetries: 2,
-  timeoutMs: 30_000,
-});
-
-const registry = new AgentDriverRegistry([driver]);
-const result = await runAgentDriverEpisode(
-  environment,
-  registry.require('anthropic'),
-  { guidance: ['Prefer the shortest winning route.'] },
-);
-```
-
-Built-in keyed providers are Anthropic, OpenAI, xAI, and OpenRouter. The
-OpenAI-compatible driver also accepts a custom base URL and headers. Provider
-registries can add or replace definitions without changing the episode loop.
-Provider calls use `fetch`, so tests can inject an offline implementation.
-Completed conversation history is bounded (eight exchanges by default), and HTTP
-429/5xx responses receive two abortable exponential-backoff retries. Both
-limits and the delay implementation are configurable. Model requests and API
-key checks have a 30-second deadline by default; `timeoutMs: 0` disables it.
-Caller cancellation, driver interruption, retry waits, and the deadline share
-one abort lifecycle.
-
-Model responses are parsed into the same `SubmittedAction` contract and
-must exactly match a concrete legal action before the reducer sees them. API
-keys are held only by driver instances, are redacted from request failures,
-and are not written to transcripts.
-
-## Installed agent CLIs
-
-The Node-only `./agent-cli` subpath owns reusable recipes for MCP-capable agent
-CLIs:
-
-- Claude Code
-- Ollama + Claude Code
-- Codex CLI
-- Cursor CLI
-- Grok CLI
-- OpenCode CLI
-
-The Ollama recipe uses Ollama's official `launch claude` integration: Ollama
-hosts the selected local model while Claude Code supplies the headless MCP
-agent loop. Install both Ollama and Claude Code, then select a model with
-`OLLAMA_MODEL` (default `qwen3.5`):
+The `./agent` entry point includes a driver registry and keyed HTTP drivers.
+The Node-only `./agent-cli` entry point launches MCP-capable CLIs such as
+Claude Code, Codex, Cursor, Grok, OpenCode, or Ollama-backed Claude Code.
 
 ```sh
-OLLAMA_MODEL=qwen3.5 gaos-agent spawn ollama \
-  --mcp-url http://127.0.0.1:9000/mcp \
-  --prompt "Complete the episode" \
-  --tools observe,act
-```
-
-The launch is keyless for local models. `ollama run` is intentionally not used
-because it is an interactive model prompt, not an MCP agent runtime.
-
-It can resolve executables, run non-token-consuming auth probes, build MCP
-configuration, parse transcript streams, and spawn each CLI in a temporary
-working directory. Product code supplies the MCP URL, prompt, server name,
-and allowed tool names:
-
-```ts
-import {
-  createDefaultCliAgentRegistry,
-  inspectCliAgent,
-  spawnCliAgent,
-} from '@yugao-gaos/turn-based-grid-sdk/agent-cli';
-
-const spec = createDefaultCliAgentRegistry().require('codex');
-console.log(await inspectCliAgent(spec));
-
-const process = spawnCliAgent(spec, {
-  mcpUrl: 'http://127.0.0.1:9000/mcp',
-  prompt: 'Complete this environment using observe and act.',
-  serverName: 'game',
-  toolNames: ['observe', 'act'],
-});
-
-const exit = await process.completion;
-```
-
-CLI configuration files are restricted to the temporary directory and are
-removed after exit. A caller can register another `CliAgentSpec`, or set
-`GAOS_AGENT_CLIS` to a JSON object with this shape:
-
-```json
-{
-  "my-agent": {
-    "label": "My Agent",
-    "bin": "my-agent",
-    "args": ["--mcp", "{mcpUrl}", "--prompt", "{prompt}"],
-    "files": { ".agent/config.json": "{\"server\":\"{serverName}\"}" }
-  }
-}
-```
-
-Supported placeholders are `{mcpUrl}`, `{prompt}`, `{serverName}`, and
-`{allowedTools}`.
-
-## `gaos-agent` executable
-
-The npm package installs `gaos-agent`:
-
-```sh
-# Discover and inspect integrations.
 gaos-agent drivers
 gaos-agent status codex
 
-# Validate a key without making a model call.
-export OPENAI_API_KEY=...
-gaos-agent check openai
-
-# Run a keyed episode. The module exports createEnvironment({ seed }).
 gaos-agent run openai \
   --module ./environment.mjs \
   --model your-model-id \
   --seed 42
 
-# Launch an already-authenticated CLI against any product-owned MCP server.
 gaos-agent spawn codex \
   --mcp-url http://127.0.0.1:9000/mcp \
   --prompt "Complete the episode" \
   --tools observe,act
 ```
 
-Keys are read only from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`,
-or `OPENROUTER_API_KEY`. The command intentionally has no API-key argument.
-An environment module is ordinary ESM:
+Model and CLI integrations must return a concrete legal
+`SubmittedAction` before the reducer sees it. Product code retains prompts,
+provider selection, authentication, takeover policy, and hosted MCP servers.
 
-```js
-import { AgentEnvironment } from '@yugao-gaos/turn-based-grid-sdk/engine';
-import { level, reducer } from './my-game.js';
+## From evaluation to evidence
 
-export function createEnvironment({ seed }) {
-  return new AgentEnvironment({ reducer, level, seed });
-}
-```
+An evaluation transcript is not automatically independently verifiable. For a
+published result, run the driver as an ordinary signed session seat and package
+the canonical submissions as `gaos.replay`.
+
+The verifier then needs:
+
+1. the replay artifact;
+2. the historical product reducer;
+3. the semantic mappings from signed commands to reducer actions; and
+4. an independently trusted identity for that verifier code.
+
+In v0.25, the scoring authority can supply a pinned adapter directly or resolve
+a product-owned verifier kit containing the reducer and semantic adapter.
+GAOS handles the package contract, integrity, resolution, caching, and
+restricted execution; products retain publication, retention, identity, and
+score-adoption policy.
 
 ## Python
 
-`ArenaEnv` exposes a Gymnasium-compatible environment API without requiring
-Gymnasium at runtime. It includes `action_definitions` and
-`concrete_actions`, and accepts a concrete action object directly:
+Python provides a Gymnasium-compatible `ArenaEnv` for hosted games:
 
 ```python
 from agilabs_arena import ArenaEnv, run_agent_episode
@@ -285,23 +110,9 @@ result = run_agent_episode(
 )
 ```
 
-`run_agent_episode` and `evaluate_agent_episodes` accept any duck-typed
-environment with Gymnasium-compatible `reset()` and `step()` methods, not only
-`ArenaEnv`. Python does not include the local TypeScript mechanism engine,
-reducer runtime, model drivers, or CLI launchers; see the
-[language capability matrix](/quickstart#choose-your-language).
+Python does not include the local TypeScript reducer engine, model drivers, or
+CLI launchers.
 
-## Evaluation actions versus semantic actions
-
-The environment does not require semantic action names. A product can expose
-descriptions for ordinary development while using opaque or permuted ids for
-evaluations. In both modes the SDK surfaces only actions that are legal in the
-current observation.
-
-## Product boundary
-
-The SDK owns the agent loop, driver contracts, provider transport, CLI launch
-mechanics, and deterministic interfaces. Products retain their prompts,
-levels, characters, abilities, objectives, reward policy, hosted session
-policy, coach rooms, human takeover, anti-cheat rules, authentication, and
-leaderboards.
+[Build a reducer →](/quickstart) ·
+[Read the Python boundary →](/python) ·
+[Understand verification →](/trust-and-verification)

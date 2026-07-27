@@ -1,121 +1,95 @@
-# Architecture map
+# Architecture and ownership
 
-GAOS implements Game-as-a-Benchmark through one authoritative reducer. A
-human-facing client, an autonomous agent, a solver, and a replay verifier
-consume the same rules instead of maintaining separate implementations.
+GAOS surrounds a product-owned deterministic reducer with reusable game,
+agent, session, evidence, and verification infrastructure.
 
-The ownership boundary remains deliberate: reusable behavior belongs in the
-SDK; authored meaning, benchmark methodology, and product policy stay with the
-integrating game or benchmark.
+```text
+                 product content and policy
+                            │
+                product-owned TickReducer
+                            │
+       ┌──────────────┬─────┴─────┬──────────────┐
+       │              │           │              │
+   human play    agent play   sessions      run evidence
+                                              │
+                                    historical verifier
+```
+
+The reducer is not supplied by GAOS. The SDK defines the contract through
+which a product's rules reach each consumer.
+
+## Ownership boundary
+
+| Product owns | GAOS owns |
+|---|---|
+| Reducer and semantic adapter | Reducer, environment, session, replay, and verifier contracts |
+| Characters, cards, terrain, levels, objectives, and game modes | Product-neutral mechanisms and deterministic ordering |
+| Legal-action and observation meaning | Concrete-action expansion and seat-scoped environment lifecycle |
+| Tasks, rewards, score meaning, held-out content, and capability claims | Transcript, evidence, signature, and verification formats |
+| Rendering, hosting, persistence, matchmaking, identity, and anti-cheat policy | Prepared session transitions, canonical inputs, and reconnect evidence |
+| Whether and how long historical verifier code is published | Verifier-kit export, identity, resolution, cache, and execution interfaces |
+| Which verifier digests are trusted | Integrity and authorization result reporting |
+
+The rule is simple: **the product defines meaning; GAOS standardizes reusable
+behavior and evidence around it.**
+
+## One reducer, several consumers
+
+`TickReducer<TLevel, TState, TView>` provides deterministic operations:
+
+```ts
+interface TickReducer<TLevel, TState, TView extends SessionView> {
+  init(level: TLevel, seed: number): TState;
+  advance(state: TState, inputs: readonly SubmittedAction[]): TState;
+  view(state: TState): TView;
+  viewFor?(state: TState, seat: string): TView;
+}
+```
+
+The same adapter can power:
+
+- a renderer or hosted API;
+- `AgentEnvironment` and `MultiAgentEnvironment`;
+- deterministic solvers and regression tests;
+- authoritative `SessionKernel` transitions; and
+- replay re-simulation.
+
+Products may compose GAOS mechanisms inside `advance`, but the product still
+owns the final reducer and its rules.
+
+## Verifiable evidence
+
+GAOS records canonical reducer inputs and results in portable replay artifacts.
+Signed submissions add seat-key authorship and per-seat chain evidence. A
+verifier then resolves the appropriate historical reducer and semantic adapter,
+re-simulates the run, and reports separate integrity, authorization, semantic,
+and adoption facts.
+
+The replay cannot authorize the verifier it names. A benchmark manifest,
+product catalog, or verifier-owned allowlist obtained independently must pin
+the accepted digest.
+
+v0.25 supports both directly supplied pinned adapters and product-owned
+verifier kits: content-addressed packages exported by the product and handled
+through GAOS packing, inspection, discovery, caching, and restricted-execution
+contracts.
 
 ## Package entry points
 
-| Entry point | Purpose | Runtime assumptions |
-| --- | --- | --- |
-| package root | hosted Arena adapter and Arena observation types | `fetch` |
-| `./protocol` | Tick-oriented adapters over the published v1 tick envelopes, cursors, idempotency, simultaneous intents, game registry | JSON-serializable values |
-| `./engine` | Game mechanisms, layouts, settlement, solver, replay, scoring, agent environment and tools | Injected world/reducer policy |
-| `./session` | Prepared authoritative transitions, durable intent collection, per-seat observations, replay finalization | Synchronous IO-free host integration |
-| `./agent` | Provider-neutral driver contract and keyed HTTP model drivers | `fetch` and a provider key |
-| `./agent-cli` | CLI discovery, launch recipes, MCP configuration, subprocess lifecycle | Node.js |
-| Python distribution | hosted client, Gymnasium-compatible environment API, evaluation helpers and portable replay utilities | Python 3.10+, standard library only at runtime |
+| Entry point | Purpose |
+|---|---|
+| package root | Hosted Arena client and wire types |
+| `./protocol` | Product-neutral tick protocol |
+| `./engine` | Mechanisms, reducers, agents, solvers, and replay |
+| `./session` | Authoritative transitions and evidence capture |
+| `./agent` | Provider-neutral and keyed model drivers |
+| `./agent-cli` | MCP-capable CLI launch integration |
+| Python distribution | Hosted client, evaluation helpers, and replay exchange |
 
-Choose the narrowest entry point your integration needs. A deterministic game
-engine should not need the hosted Arena adapter; an MCP server should not need
-to depend on a model provider.
+TypeScript contains the local mechanism engine and replay re-simulation.
+Python is the hosted and research integration surface; it does not duplicate
+the TypeScript reducer runtime.
 
-[Browse the capability map](/capabilities) for supported game shapes, or use
-the mechanism matrix below to locate the relevant engine module.
-
-The TypeScript and Python distributions are complementary, not equivalent.
-TypeScript owns the local mechanism engine, reducers, solvers, agent
-environments, replay re-simulation, model drivers, and CLI integrations.
-Python owns the hosted client, a Gymnasium-compatible API without a Gymnasium
-runtime dependency, duck-typed evaluation helpers, and portable replay
-parsing, validation, and serialization. See the
-[language capability matrix](/quickstart#choose-your-language).
-
-## Mechanism map
-
-| Concern | SDK mechanism | Product supplies |
-| --- | --- | --- |
-| Locations and layouts | stable container addressing; square, hex, and graph topology | boards, adjacency, terrain and container ids |
-| Tick order and lockstep | seat rotation, participation/outcome shapes, canonical input ordering and digests | phases, response policy, snapshots and serialization |
-| Information partitions | per-seat reducer views, zone/fog redaction, team sets and leak checks | secret state, visibility rules, memory and spectator delivery |
-| Zones and card play | immutable collection transfers, deals, keyword layers, response priority, targets, durations, phases and validation | card identity, rules, costs, legal responses and effects |
-| Portals | bounded heterogeneous transit, groups, capacity arbitration and atomic commit order | activation, placement, transformations, occupancy and arrival effects |
-| Patterns | maximal run and motif recognition over arbitrary layouts | token meaning, overlap policy, cascades and scoring |
-| Movement | simultaneous destinations, footprints, collisions, rotations, swaps, priority | terrain and static-blocker policy |
-| Tick consequences | ordered worklist, waves, coalescing, once-only work, deferral, convergence guard, causal trace | job meaning, mutations, stable keys and priorities |
-| Propagation | breadth-first once-per-identity chain reactions | neighbors and effects |
-| Projectiles and pushes | path advancement, flight passes, atomic push planning and commit order | collision, damage, landing and visuals |
-| Gates and triggers | latch/automatic transitions, authored-order one-shot triggering | sources, conditions, effects and persistence |
-| Rays and visibility | ordered ray traversal, Bresenham lines, line of sight, cone geometry | blockers, hits, damage and visibility policy |
-| Transport | link components, directed proposals, bounded runs and interlocks | power, occupancy and world mutation |
-| Decisions | generic behavior-tree traversal and shortest-path search | conditions, leaf actions and traversability |
-| Outcomes | star calculation and budget-failure precedence | thresholds and budgets |
-| Verification | seeded randomness, solving, portable JSONL envelopes, multi-level transcript re-simulation | reducer registry, levels and action schema |
-| Agent episodes | seat-redacted single- or multi-agent ticks, rewards and versioned transcripts | policy decision cadence, wait action, reward semantics and hosted execution |
-
-Read the [mechanism reference](/mechanisms/) for detailed contracts, ordering,
-examples, edge cases, and product responsibilities.
-
-## One deterministic core
-
-```text
-                  product content and policy
-                            |
-                     TickReducer adapter
-                            |
-          +-----------------+-----------------+
-          |                 |                 |
-       gameplay          solver/replay   AgentEnvironment
-          |                                   |
-      renderer/API                    tools + model drivers
-                                             |
-                                       MCP-capable CLIs
-```
-
-The reducer adapter prevents local agents, hosted sessions, replay verification,
-and ordinary gameplay from drifting into separate rule implementations.
-
-## SDK versus product ownership
-
-### SDK
-
-- deterministic algorithms and ordering;
-- reusable mechanism state transitions;
-- generic tick and agent lifecycle contracts;
-- replay, solver, scoring behavior, tools and integration adapters; and
-- provider and CLI extension points.
-
-### Product
-
-- characters, abilities, items, dialogue, levels, objectives and game modes;
-- board tokens, numeric tuning, thresholds and reward policy;
-- benchmark capability claims, task suites, held-out content, analytics and
-  publication methodology;
-- prompts, matchmaking, authentication, persistence and anti-cheat rules; and
-- rendering, animation, sound, seasonal content and server-only policy.
-
-The SDK may report that a ray stopped at a cell. The product decides whether
-that cell is a wall, a shield, a character, or a visual-only effect. The SDK
-may settle a trigger in authored order. The product decides what the condition
-means and which mutation follows.
-
-## Why this is agent-playable
-
-Agent support is part of the engine contract, not a UI automation layer:
-
-1. A seeded reducer produces deterministic observations and outcomes.
-2. The environment exposes complete, concrete legal actions.
-3. Seat-scoped agents receive only their redacted observation and legal actions.
-4. Illegal model output is rejected before reaching the reducer.
-5. Every decision can be recorded in a versioned environment transcript.
-   Products can package compatible runs as `gaos.replay` artifacts with pinned
-   game and adapter metadata for cross-platform exchange.
-6. The same cases can be evaluated across local policies, keyed models, or
-   MCP-capable CLIs.
-
-That makes agent play reproducible, provider-neutral, headless, and directly
-comparable with human or renderer-driven play.
+[Explore capabilities →](/capabilities) ·
+[Read the mechanism reference →](/mechanisms/) ·
+[Understand verification →](/trust-and-verification)

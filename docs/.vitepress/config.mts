@@ -2,7 +2,7 @@ import { defineConfig } from 'vitepress';
 
 export default defineConfig({
   title: 'Gaming AGI Open SDK',
-  description: 'The open-source Game-as-a-Benchmark SDK for deterministic games, agent evaluation, and signed runs any third party can validate offline.',
+  description: 'The open-source Game-as-a-Benchmark SDK for deterministic games, agent evaluation, and independently verifiable exact-run evidence.',
   base: '/GAOS-TurnBasedGrid-SDK/',
   cleanUrls: true,
   lastUpdated: true,
@@ -16,7 +16,7 @@ export default defineConfig({
     }],
     ['meta', {
       property: 'og:description',
-      content: 'Game-as-a-Benchmark infrastructure: one deterministic core for human play, agent evaluation, and signed runs validated offline.',
+      content: 'Game-as-a-Benchmark infrastructure: one product reducer for human play, agent evaluation, and independently verifiable exact-run evidence.',
     }],
     ['meta', {
       property: 'og:image',
@@ -26,13 +26,13 @@ export default defineConfig({
     ['meta', { property: 'og:image:height', content: '909' }],
     ['meta', {
       property: 'og:image:alt',
-      content: 'Gaming AGI Open SDK: Game-as-a-Benchmark infrastructure for human play, agent evaluation, and third-party proof.',
+      content: 'Gaming AGI Open SDK: Game-as-a-Benchmark infrastructure for human play, agent evaluation, and verifiable exact runs.',
     }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
     ['meta', { name: 'twitter:title', content: 'Gaming AGI Open SDK | Game-as-a-Benchmark' }],
     ['meta', {
       name: 'twitter:description',
-      content: 'Game-as-a-Benchmark evaluation with deterministic execution and third-party-verifiable runs.',
+      content: 'Game-as-a-Benchmark evaluation with deterministic execution and independently verifiable exact-run evidence.',
     }],
     ['meta', {
       name: 'twitter:image',
@@ -40,7 +40,7 @@ export default defineConfig({
     }],
     ['meta', {
       name: 'twitter:image:alt',
-      content: 'Gaming AGI Open SDK: Game-as-a-Benchmark infrastructure for human play, agent evaluation, and third-party proof.',
+      content: 'Gaming AGI Open SDK: Game-as-a-Benchmark infrastructure for human play, agent evaluation, and verifiable exact runs.',
     }],
   ],
   themeConfig: {
@@ -48,7 +48,7 @@ export default defineConfig({
     nav: [
       { text: 'Home', link: '/' },
       { text: 'Play demos', link: '/demos/' },
-      { text: 'Game-as-a-Benchmark', link: '/mission' },
+      { text: 'Why Game-as-a-Benchmark', link: '/mission' },
       {
         text: 'Build',
         items: [
@@ -62,7 +62,7 @@ export default defineConfig({
       {
         text: 'About',
         items: [
-          { text: 'Game-as-a-Benchmark mission', link: '/mission' },
+          { text: 'Why Game-as-a-Benchmark', link: '/mission' },
           { text: 'Roadmap', link: '/roadmap' },
           { text: 'Version history', link: '/version-history' },
         ],
@@ -84,10 +84,10 @@ export default defineConfig({
       {
         text: 'Start here',
         items: [
-          { text: 'Game-as-a-Benchmark thesis', link: '/mission' },
+          { text: 'Why Game-as-a-Benchmark', link: '/mission' },
           { text: 'Capability map', link: '/capabilities' },
           { text: 'Quickstart', link: '/quickstart' },
-          { text: 'Architecture map', link: '/architecture' },
+          { text: 'Architecture and ownership', link: '/architecture' },
           { text: 'Real-time games', link: '/high-frequency' },
           { text: 'Terminology', link: '/terminology' },
         ],
@@ -167,6 +167,7 @@ export default defineConfig({
           { text: 'RFC-013: v0.22 foundations', link: '/rfcs/rfc-013-ecosystem-bridges-and-benchmark-tooling' },
           { text: 'RFC-014: v0.23 interoperability', link: '/rfcs/rfc-014-interoperability-and-dynamic-control-evidence' },
           { text: 'RFC-015: v0.24 benchmark publication', link: '/rfcs/rfc-015-verifiable-benchmark-publication' },
+          { text: 'RFC-016: v0.25 verifier kits', link: '/rfcs/rfc-016-product-owned-verifier-kits' },
           { text: 'RFC-014/015 implementation gate', link: '/rfcs/implementation-review-rfc014-rfc015' },
           { text: 'Batch implementation review', link: '/rfcs/implementation-review' },
         ],
@@ -183,7 +184,7 @@ export default defineConfig({
     },
     outline: { level: [2, 3], label: 'On this page' },
     footer: {
-      message: 'Game-as-a-Benchmark: one core for human play, agent evaluation, and third-party verification.',
+      message: 'Game-as-a-Benchmark: one product reducer for human play, agent evaluation, and verifiable exact runs.',
       copyright: 'Gaming AGI Open SDK',
     },
   },

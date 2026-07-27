@@ -1,190 +1,84 @@
-# Reusable game-mechanism engine
+# Reusable mechanism engine
 
-Import the engine through the dedicated package subpath:
+The `./engine` entry point provides deterministic, product-neutral algorithms
+that a product can compose inside its own reducer.
 
 ```ts
 import {
-  budgetFailure,
-  recheckTranscript,
   resolveMoves,
-  scoreStars,
+  runSettlementCascade,
   solveLevel,
 } from '@yugao-gaos/turn-based-grid-sdk/engine';
 ```
 
-This page defines the engine's ownership boundary and composition model. For
-the exact rules, examples, edge cases, and integration checklist for every
-mechanism, use the [complete mechanism reference](/mechanisms/).
+## Boundary
 
-## Ownership boundary
+GAOS mechanisms own:
 
-The SDK owns deterministic, product-neutral behavior:
+- canonical ordering and deterministic failure behavior;
+- mutation-free planning and explicit commit order;
+- convergence bounds and causal traces; and
+- reusable state transitions over injected product data.
 
-- simultaneous movement collision resolution, including footprints, movement
-  chains, rotations, swaps, and priority;
-- deterministic multi-wave tick settlement through an explicit consequence
-  worklist, including convergence guards, next-tick deferral, and causal traces;
-- breadth-first chain reactions, path-projectile advancement, bounded full-flight
-  passes, and all-or-nothing push-chain planning/commit ordering;
-- latching and automatic gate transitions, including occupancy-safe closing;
-- authored-order one-shot triggers with product-owned conditions and effects;
-- ordered ray traversal with product-owned collision and terminal policy;
-- selector/condition/leaf behavior-tree evaluation over product-owned node
-  schemas, conditions, actions, and world state;
-- ordered arrival-rule dispatch, neutral multi-resource claim arbitration,
-  directed transport proposals/runs, connected link sources, and bounded
-  transport/state interlocks, plus product-defined resource balances and atomic
-  requirement/effect transactions;
-- square, axial-hex, and graph layouts; layout-parameterized pathfinding,
-  line-of-sight, and field geometry; and generic keyed movement;
-- deterministic sequential tick order, multi-seat participation/outcome
-  contracts, maximal run/motif recognition, canonical lockstep input ordering,
-  rollback re-simulation, and state digests;
-- per-seat observations, independent zone identity/order visibility, board fog,
-  team visibility conventions, spectator policy types, and leak assertions;
-- ordered, bag, and slotted zones with atomic transfer, shuffle, draw, and deal
-  operations; keyword layers, response priority, declarative targets,
-  durations, phases, and deck/loadout validation;
-- bounded portal transit across heterogeneous containers, including atomic
-  groups, destination capacity arbitration, transformations, and arrivals;
-- seeded random draws and permutations;
-- star scoring and an AI action-limit runtime guardrail;
-- breadth-first minimum-action solving over an injected deterministic reducer;
-- transcript re-simulation, optional tick gaps, and deterministic per-level run
-  seeds;
-- provider-neutral seat-aware single- and multi-agent episode lifecycles,
-  concrete action validation, per-seat rewards, safety truncation,
-  transcripts, and batch evaluation.
+The product owns:
 
-The product owns content and policy:
+- its reducer and semantic adapter;
+- game entities, rules content, conditions, and effects;
+- legal actions, observations, scoring meaning, and tuning; and
+- persistence, rendering, hosting, and publication policy.
 
-- character, card, token, trait, ability, and loadout identity and meaning;
-- game-type registration and the mapping from a game type to rules;
-- authored boards, graphs, decks, levels, thresholds, budgets, dialogue, and
-  objectives;
-- authentication, persistence, matchmaking, seasons, and server-only rules.
+A mechanism may report that a ray stopped or a movement claim lost. The product
+decides whether the cause represents a wall, character, shield, cost, or visual
+event.
 
-The dividing rule is: the SDK implements **how a reusable mechanism behaves**;
-the product decides **which content uses it, where it is enabled, and with what
-values**.
+## Mechanism families
 
-Tick settlement is described in [Deterministic tick settlement](settlement.md).
-One submitted tick may resolve through several same-tick waves before the SDK
-returns control to the caller.
+The engine includes:
 
-Geometry APIs accept callbacks for cell existence and blocking. The SDK owns
-the algorithm; the product retains its terrain tokens, traversal capabilities,
-projectile collision effects, and visibility policy.
+- square, hex, graph, and collection layouts;
+- zones, cards, information partitions, teams, and spectators;
+- simultaneous movement, resource claims, portals, and arrivals;
+- settlement waves, chain reactions, projectiles, pushes, gates, triggers,
+  rays, and transport;
+- seeded randomness, scoring helpers, behavior trees, and solving; and
+- agent environments, transcript re-simulation, and replay helpers.
 
-## Reusable mechanisms
-
-The engine subpath ships mechanisms directly. Products inject world access and
-effects instead of copying their control flow:
-
-```ts
-import {
-  advancePathProjectiles,
-  arbitrateResourceClaims,
-  commitPushChain,
-  evaluateBehaviorTree,
-  planPushChain,
-  proposeDirectedTransport,
-  resolveArrival,
-  resolveChainReaction,
-  resolveFlightPasses,
-  resolveGateTransition,
-  resolveInterlock,
-  resolveLatchedTriggers,
-  resolveTransportRun,
-  traverseGridRay,
-} from '@yugao-gaos/turn-based-grid-sdk/engine';
-```
-
-These functions do not assign meaning to tokens. For example,
-`resolveChainReaction` guarantees breadth-first, once-per-identity propagation;
-the product decides what a node represents, which effects it applies, and which
-neighboring nodes it triggers. `advancePathProjectiles` owns one-cell travel
-semantics while the product supplies collision decisions and commits damage,
-landing, removal, and presentation events.
-
-`planPushChain` is mutation-free. `commitPushChain` then writes farthest-first
-and emits arrivals nearest-first, preventing overwrites while retaining causal
-animation order. Transport similarly separates reusable directed proposals and
-bounded run/interlock behavior from product occupancy, power, and terrain rules.
-Gate transitions accept only abstract open/closed state, activation, and
-occupancy; products retain their source lookup, board tokens, and visual events.
-Latched triggers similarly retain authored order while products provide condition
-evaluation, latch persistence, effect application, and presentation payloads.
-`traverseGridRay` visits a supplied finite or open-ended cell iterable in order,
-numbers steps from one, and distinguishes a callback-requested stop from path
-exhaustion. Products retain blocker lookup, collision, damage, mutation, and
-presentation policy.
-
-Behavior trees use a typed adapter so the SDK never owns product node types or
-actions:
-
-```ts
-const order = evaluateBehaviorTree(context, productTree, {
-  inspect(node) {
-    if ('sel' in node) return { kind: 'selector', children: node.sel };
-    if ('if' in node) {
-      return {
-        kind: 'condition', condition: node.if,
-        then: node.then, else: node.else,
-      };
-    }
-    return { kind: 'leaf' };
-  },
-  test: (ctx, condition) => productConditionHolds(ctx, condition),
-  evaluateLeaf: (ctx, node) => productActionFor(ctx, node),
-});
-```
-
-Selectors return the first non-null result. A condition evaluates only its
-chosen branch, and returns null when false without an else branch. Products
-retain target selection, order reuse, behavior composition, spawning, and all
-world/entity rules.
+Use the [mechanism reference](/mechanisms/) for the contract, example, edge
+cases, and product responsibilities of each family.
 
 ## Reducer adapter
 
-Session, lockstep, and replay infrastructure depend on
-`TickReducer<TLevel, TState, TView>` rather than a Zonoid registry. A product
-adapter provides three pure operations:
+Infrastructure depends on `TickReducer`, not on a product registry:
 
 ```ts
-interface TickReducer<TLevel, TState, TView extends SessionView = TickView> {
+interface TickReducer<TLevel, TState, TView extends SessionView> {
   init(level: TLevel, seed: number): TState;
   advance(state: TState, inputs: readonly SubmittedAction[]): TState;
   view(state: TState): TView;
   viewFor?(state: TState, seat: string): TView;
-  replayMetrics?(state: TState): { actionsUsed: number };
 }
 ```
 
-This keeps campaign lookup, level schemas, and character catalogs outside the
-SDK while allowing the reusable algorithms to execute the product reducer.
-A product may interpret ticks however its rules require. The SDK only advances
-ticks; it does not model product-level ticks.
+The product may interpret a tick as a turn, simultaneous intent window, or
+fixed-rate step. The SDK advances the reducer without assigning product-level
+meaning.
 
-`ActionReducer` is the 0.x compatibility shape for integrations that still
-apply one input at a time. New integrations use `TickReducer.advance`, which
-accepts zero, one, or many canonically ordered inputs.
+The same adapter can power ordinary play, `AgentEnvironment`, authoritative
+sessions, solvers, and replay re-simulation. This is how GAOS avoids a separate
+agent or verification rules engine while leaving the rules themselves under
+product ownership.
 
-The same reducer adapter powers `AgentEnvironment` and
-`MultiAgentEnvironment` when its view extends the action-capable `TickView`.
-Non-grid reducers may extend the smaller `SessionView` for hosted sessions and
-deterministic replay, supplying `replayMetrics` because their observation has
-no `hud.actionsUsed`. A product therefore needs no second gameplay
-implementation merely to use the generic infrastructure.
+## Historical verification
 
-## Scoring configuration
+Published evidence must remain connected to the reducer version that produced
+it. v0.25 verifiers can load an explicitly supplied historical adapter or a
+product-owned, content-addressed verifier kit containing the historical
+reducer and semantic mappings.
 
-The scoring formula lives here, but the numbers do not:
+GAOS standardizes kit identity and execution. The product still decides
+whether to publish the code and how long to retain it, and an independent
+policy decides whether to trust its digest.
 
-```ts
-scoreStars(actionsUsed, { three: level.stars.three, two: level.stars.two });
-```
-
-AI action limits are runtime guardrails independent of product economy. Products
-define resources such as energy and compose their costs or grants into actions,
-triggers, pickups, and other mechanisms through [resource transactions](mechanisms/resources.md).
+[See the full ownership map →](/architecture) ·
+[Build a reducer →](/quickstart) ·
+[Browse mechanisms →](/mechanisms/)
