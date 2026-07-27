@@ -17,7 +17,7 @@ GAOS-operated service.
 **The problem it solves:** agent evaluation results are self-published, and
 checking one today means re-running the whole evaluation at the full inference
 cost of the original — after which you still have a different sample rather
-than that run. GAOS keeps producing a result expensive and makes *checking* it
+than that run. GAOS keeps producing a result expensive and makes validation
 nearly free. [Why verification, not trust →](#why-verification-not-trust)
 
 ## The three reasons to use GAOS

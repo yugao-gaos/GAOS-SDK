@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Gaming AGI Open SDK
   text: One game core. Human play, agent evaluation, third-party proof.
-  tagline: Agent evaluation results are self-published, and re-running one to check it costs the full inference bill—and still returns a different sample, not that run. GAOS keeps producing a result expensive and makes checking it nearly free.
+  tagline: Agent evaluation results are self-published, and re-running one to check it costs the full inference bill—and still returns a different sample, not that run. GAOS keeps producing a result expensive and makes validation nearly free.
   actions:
     - theme: brand
       text: Build a game
