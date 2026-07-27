@@ -3,6 +3,21 @@
 For the public chronological changelog, see the
 [complete version history](/version-history).
 
+## v0.22.0
+
+Released July 27, 2026. This is the first staged RFC-013 delivery: portable
+host and presentation boundaries, auditable controller epochs, formal game and
+policy descriptors, and neutral benchmark manifest planning.
+
+### Migration from v0.21
+
+All new TypeScript APIs are additive. Existing fixed-roster sessions and
+`gaos.replay` v1.0–v1.3 artifacts retain their existing interpretation.
+`SeatControlLedger` is a separate authority schedule in this stage; it does not
+upgrade or reinterpret `gaos.submission.ed25519.v1` evidence.
+
+See [ecosystem bridges and benchmark contracts](/ecosystem-bridges).
+
 ## v0.21.0
 
 Released July 26, 2026. This release implements RFC-011 A1/A2 and RFC-012

@@ -43,6 +43,45 @@ export {
   type TickEnvelope,
   type TickResult,
 } from './protocol.js';
+export {
+  RFC013_HOST_CONFORMANCE_SCENARIOS,
+  presentationFrameFromObservation,
+  type HostedSession,
+  type HostArtifact,
+  type HostCreateInput,
+  type HostObservation,
+  type HostSeatControl,
+  type HostSubmission,
+  type PresentationEvent,
+  type PresentationFrame,
+  type Rfc013HostConformanceScenario,
+  type SessionHostDriver,
+} from './ecosystem.js';
+export {
+  SeatControlLedger,
+  type PreparedSeatControl,
+  type SeatControlAuthorization,
+  type SeatControlChange,
+  type SeatControlCheckpoint,
+  type SeatControlEpoch,
+  type SeatController,
+  type SeatControllerKind,
+} from './seat-control.js';
+export {
+  aggregateBenchmarkScores,
+  assertBenchmarkManifest,
+  planBenchmarkEpisodes,
+  type BenchmarkAggregate,
+  type BenchmarkEpisodePlan,
+  type BenchmarkIdentity,
+  type BenchmarkManifest,
+  type BenchmarkScoring,
+  type BenchmarkSubmissionPolicy,
+  type BenchmarkTask,
+  type BenchmarkTaskScore,
+  type EvidenceTrustClaims,
+  type LeaderboardEntry,
+} from './benchmark.js';
 
 /** Namespaced hosted-Arena concurrency extension. */
 export const ARENA_CONTROL_EXTENSION = 'agilabs.arena' as const;

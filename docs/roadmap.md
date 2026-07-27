@@ -28,8 +28,11 @@ bounded patch observations, pre-ingest legality, durable checkpoint and
 compaction, reference prediction/host adapters, and the recovery seams needed
 by Arena and TabletopLabs. Generic infrastructure accepts non-grid
 `SessionView` observations while action discovery retains the compatible
-`TickView` surface. RFC-013 ecosystem bridges and benchmark integrations
-remain future v0.22+ work.
+`TickView` surface. v0.22 begins RFC-013 with host/presentation boundaries,
+controller-epoch infrastructure, formal research contracts, and deterministic
+benchmark manifest primitives. Cross-language clients, v2 control signatures,
+the full runner and bundle verifier, and the leaderboard starter remain staged
+v0.22+ work.
 
 ### Stable bridge contracts
 

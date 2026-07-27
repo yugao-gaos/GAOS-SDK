@@ -1,6 +1,7 @@
 # RFC-013 — Ecosystem bridges, dynamic seat control, and verifiable benchmark tooling
 
-Status: **proposed for staged v0.22+ delivery** · Target: v0.22 and later ·
+Status: **accepted for staged v0.22+ delivery; foundations shipped in
+v0.22.0** · Target: v0.22 and later ·
 Compatibility: additive APIs plus a new evidence/signature format for dynamic
 seat control; existing sessions and artifacts remain supported · Depends on:
 RFC-006, RFC-010, RFC-012

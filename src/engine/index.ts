@@ -143,6 +143,21 @@ export {
   type SubmissionSigningTier,
 } from './submission-signatures.js';
 export {
+  assertGameDescriptor,
+  policyEntropy,
+  sampleActionDistribution,
+  validateActionDistribution,
+  validateChanceOutcomes,
+  winRate,
+  type ChanceOutcome,
+  type GameDescriptor,
+  type GameHistory,
+  type GameObserver,
+  type Policy,
+  type PolicyChoice,
+  type WinRateEstimate,
+} from './research.js';
+export {
   changeResource,
   commitResourceTransaction,
   defineResources,

@@ -1,0 +1,17 @@
+{
+  "tick": 12,
+  "transitionRevision": 19,
+  "view": {
+    "status": "playing",
+    "activeSeat": "alpha"
+  },
+  "events": [
+    {
+      "id": "session-1:19:move:unit-7",
+      "type": "move",
+      "entityId": "unit-7",
+      "to": [3, 4]
+    }
+  ],
+  "stateDigest": "example-diagnostic-digest"
+}
