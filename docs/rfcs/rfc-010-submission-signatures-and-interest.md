@@ -16,10 +16,8 @@ and C is what must be documented alongside them.
 Parts D and E are the *earned* scope: the two consumer migrations' return
 channels under RFC-009 §4.3, consolidated here. **D** is what lands on the
 v0.19.x line (four items, three of them migration-blocking); **E** is what
-v0.20 should take on. The former RFC-011 (Arena) and RFC-012 (TabletopLabs)
-are retired into these parts — see the consolidated scope table at the end.
-RFC-011 has since **reopened** for what Arena's v0.20 integration returned; its
-findings are maintained there, not duplicated here.
+v0.20 should take on. Each consumer's own write-up is retired into these parts
+as it is accepted — see the consolidated scope table at the end.
 
 > **All four §B7 open questions are resolved (2026-07-26)**, including the
 > scope-change lane, which turned out to rest on a false premise rather than a
