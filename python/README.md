@@ -32,7 +32,7 @@ TypeScript. Reducer re-simulation requires the TypeScript engine plus the
 product-owned historical adapter declared in
 `artifact["header"]["game"]["adapter"]`.
 
-`gaos.replay` v1.2 adds zero-dependency Ed25519 signing and synchronous
+`gaos.replay` v1.3 retains zero-dependency Ed25519 signing and synchronous
 verification. Python matches the TypeScript complete-preimage fixture:
 
 ```python

@@ -19,7 +19,8 @@ from .signatures import (
 )
 
 GAOS_REPLAY_FORMAT_ID = "gaos.replay"
-GAOS_REPLAY_FORMAT_VERSION = "1.2"
+GAOS_REPLAY_FORMAT_VERSION = "1.3"
+GAOS_REPLAY_SIGNED_FORMAT_VERSION = "1.2"
 GAOS_REPLAY_UNSIGNED_FORMAT_VERSION = "1.1"
 GAOS_REPLAY_LEGACY_FORMAT_VERSION = "1.0"
 GAOS_REPLAY_MIME = "application/vnd.gaos.replay+jsonl"
@@ -82,6 +83,13 @@ def _valid_u32(value: Any) -> bool:
 def _is_grouped_version(value: Any) -> bool:
     return value in (
         GAOS_REPLAY_UNSIGNED_FORMAT_VERSION,
+        GAOS_REPLAY_SIGNED_FORMAT_VERSION,
+        GAOS_REPLAY_FORMAT_VERSION,
+    )
+
+def _has_v12_integrity_semantics(value: Any) -> bool:
+    return value in (
+        GAOS_REPLAY_SIGNED_FORMAT_VERSION,
         GAOS_REPLAY_FORMAT_VERSION,
     )
 
@@ -474,12 +482,14 @@ def validate_replay_artifact(value: Any) -> list[str]:
     if header.get("formatVersion") not in (
         GAOS_REPLAY_LEGACY_FORMAT_VERSION,
         GAOS_REPLAY_UNSIGNED_FORMAT_VERSION,
+        GAOS_REPLAY_SIGNED_FORMAT_VERSION,
         GAOS_REPLAY_FORMAT_VERSION,
     ):
         problems.append(
             "header.formatVersion must be "
             f"{GAOS_REPLAY_LEGACY_FORMAT_VERSION}, "
-            f"{GAOS_REPLAY_UNSIGNED_FORMAT_VERSION}, or "
+            f"{GAOS_REPLAY_UNSIGNED_FORMAT_VERSION}, "
+            f"{GAOS_REPLAY_SIGNED_FORMAT_VERSION}, or "
             f"{GAOS_REPLAY_FORMAT_VERSION}"
         )
     if (
@@ -515,7 +525,7 @@ def validate_replay_artifact(value: Any) -> list[str]:
     for field in ("signaturePolicy", "timeoutPolicy", "extensions"):
         if field in header and not isinstance(header[field], dict):
             problems.append(f"header.{field} must be an object")
-    if header.get("formatVersion") == GAOS_REPLAY_FORMAT_VERSION:
+    if _has_v12_integrity_semantics(header.get("formatVersion")):
         has_roster = "seatKeys" in header
         has_policy = "signaturePolicy" in header
         if has_roster != has_policy:
@@ -656,13 +666,23 @@ def validate_replay_artifact(value: Any) -> list[str]:
                     {"status", "stars", "actionsUsed", "extensions"},
                     f"level {index} result",
                 ))
-                if result.get("status") not in ("won", "failed"):
-                    problems.append(f"level {index} result.status must be won or failed")
+                allowed_statuses = (
+                    ("won", "failed", "ended")
+                    if header.get("formatVersion") == GAOS_REPLAY_FORMAT_VERSION
+                    else ("won", "failed")
+                )
+                if result.get("status") not in allowed_statuses:
+                    suffix = " or ended" if len(allowed_statuses) == 3 else ""
+                    problems.append(
+                        f"level {index} result.status must be won or failed{suffix}"
+                    )
                 stars = result.get("stars")
                 if "stars" not in result:
                     problems.append(
                         f"level {index} result.stars must be a finite number or null"
                     )
+                if result.get("status") == "ended" and stars is not None:
+                    problems.append(f"level {index} ended result.stars must be null")
                 elif stars is not None and (
                     isinstance(stars, bool)
                     or not isinstance(stars, (int, float))
@@ -807,7 +827,7 @@ def validate_replay_artifact(value: Any) -> list[str]:
                     problems.append(
                         f"action {_message_value(number)} {field} must be a non-negative safe integer"
                     )
-            if header.get("formatVersion") == GAOS_REPLAY_FORMAT_VERSION:
+            if _has_v12_integrity_semantics(header.get("formatVersion")):
                 problems.extend(_validate_v12_integrity_fields(
                     action,
                     f"action {_message_value(number)}",
@@ -905,7 +925,8 @@ def validate_replay_artifact(value: Any) -> list[str]:
         if not _is_grouped_version(header.get("formatVersion")):
             problems.append(
                 "records require header.formatVersion "
-                f"{GAOS_REPLAY_UNSIGNED_FORMAT_VERSION} or "
+                f"{GAOS_REPLAY_UNSIGNED_FORMAT_VERSION}, "
+                f"{GAOS_REPLAY_SIGNED_FORMAT_VERSION}, or "
                 f"{GAOS_REPLAY_FORMAT_VERSION}"
             )
         if not isinstance(records, list):
@@ -1036,7 +1057,7 @@ def validate_replay_artifact(value: Any) -> list[str]:
                         permutation,
                         action_record=True,
                     ))
-                    if header.get("formatVersion") == GAOS_REPLAY_FORMAT_VERSION:
+                    if _has_v12_integrity_semantics(header.get("formatVersion")):
                         problems.extend(_validate_v12_integrity_fields(
                             record,
                             f"record {index} action",
@@ -1056,8 +1077,9 @@ def validate_replay_artifact(value: Any) -> list[str]:
                                 permutation,
                             ))
                             if (
-                                header.get("formatVersion")
-                                == GAOS_REPLAY_FORMAT_VERSION
+                                _has_v12_integrity_semantics(
+                                    header.get("formatVersion")
+                                )
                                 and isinstance(replay_input, dict)
                             ):
                                 problems.extend(_validate_v12_integrity_fields(
@@ -1081,8 +1103,9 @@ def validate_replay_artifact(value: Any) -> list[str]:
                                 permutation,
                             ))
                             if (
-                                header.get("formatVersion")
-                                == GAOS_REPLAY_FORMAT_VERSION
+                                _has_v12_integrity_semantics(
+                                    header.get("formatVersion")
+                                )
                                 and isinstance(system_input, dict)
                             ):
                                 problems.extend(_validate_v12_integrity_fields(
@@ -1159,7 +1182,7 @@ def validate_replay_artifact(value: Any) -> list[str]:
                         problems.append(
                             f"timeout {index} timeoutPolicyRef must be a non-empty string"
                         )
-                    if header.get("formatVersion") == GAOS_REPLAY_FORMAT_VERSION:
+                    if _has_v12_integrity_semantics(header.get("formatVersion")):
                         timeout_policy = header.get("timeoutPolicy")
                         if timeout_policy is None:
                             if "timeoutPolicyRef" in record:
@@ -1194,9 +1217,12 @@ def validate_replay_artifact(value: Any) -> list[str]:
                     if not isinstance(record.get("record"), dict):
                         problems.append(f"extension {index} record must be an object")
                 elif kind == "interest":
-                    if header.get("formatVersion") != GAOS_REPLAY_FORMAT_VERSION:
+                    if not _has_v12_integrity_semantics(
+                        header.get("formatVersion")
+                    ):
                         problems.append(
                             f"interest {index} requires formatVersion "
+                            f"{GAOS_REPLAY_SIGNED_FORMAT_VERSION} or "
                             f"{GAOS_REPLAY_FORMAT_VERSION}"
                         )
                     problems.extend(_validate_v12_integrity_fields(
@@ -1250,7 +1276,7 @@ def validate_replay_artifact(value: Any) -> list[str]:
                             f"checkpoint {index} digest must be an unsigned 32-bit integer"
                         )
                 elif kind == "commit-mismatch":
-                    if header.get("formatVersion") == GAOS_REPLAY_FORMAT_VERSION:
+                    if _has_v12_integrity_semantics(header.get("formatVersion")):
                         problems.extend(_validate_v12_integrity_fields(
                             record,
                             f"commit-mismatch {index}",
@@ -1307,7 +1333,7 @@ def validate_replay_artifact(value: Any) -> list[str]:
                         problems.append(
                             f"seat-signature {index} participantId must be a non-empty string"
                         )
-                    if header.get("formatVersion") == GAOS_REPLAY_FORMAT_VERSION:
+                    if _has_v12_integrity_semantics(header.get("formatVersion")):
                         if not _valid_non_negative_integer(record.get("clientTime")):
                             problems.append(
                                 f"seat-signature {index} clientTime must be a non-negative safe integer"
@@ -1477,7 +1503,7 @@ def recheck_replay_signatures(artifact: dict[str, Any]) -> dict[str, Any]:
 
     header = artifact.get("header", {})
     if (
-        header.get("formatVersion") != GAOS_REPLAY_FORMAT_VERSION
+        not _has_v12_integrity_semantics(header.get("formatVersion"))
         or "seatKeys" not in header
         or "signaturePolicy" not in header
     ):

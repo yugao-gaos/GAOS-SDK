@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/v0.20.0/schemas/gaos.replay-v1.schema.json",
+  "$id": "https://raw.githubusercontent.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/v0.21.0/schemas/gaos.replay-v1.schema.json",
   "title": "GAOS portable replay v1",
-  "description": "Schema for a decoded gaos.replay v1 artifact. v1.0 stores actions, v1.1 adds grouped audit records, and v1.2 assigns RFC-010 signature semantics.",
+  "description": "Schema for a decoded gaos.replay v1 artifact. v1.0 stores actions, v1.1 adds grouped audit records, v1.2 assigns RFC-010 signature semantics, and v1.3 adds replayable ended results.",
   "type": "object",
   "additionalProperties": false,
   "required": ["header", "actions"],
@@ -76,7 +76,7 @@
         "properties": {
           "header": {
             "properties": {
-              "formatVersion": { "const": "1.2" }
+              "formatVersion": { "enum": ["1.2", "1.3"] }
             },
             "required": ["formatVersion"]
           }
@@ -186,6 +186,38 @@
               "not": {
                 "properties": { "kind": { "const": "interest" } },
                 "required": ["kind"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "header": {
+            "properties": {
+              "formatVersion": { "enum": ["1.0", "1.1", "1.2"] }
+            },
+            "required": ["formatVersion"]
+          }
+        },
+        "required": ["header"]
+      },
+      "then": {
+        "properties": {
+          "header": {
+            "properties": {
+              "levels": {
+                "items": {
+                  "properties": {
+                    "result": {
+                      "properties": {
+                        "status": { "enum": ["won", "failed"] }
+                      }
+                    }
+                  }
+                }
               }
             }
           }
@@ -365,11 +397,22 @@
       "additionalProperties": false,
       "required": ["status", "stars", "actionsUsed"],
       "properties": {
-        "status": { "enum": ["won", "failed"] },
+        "status": { "enum": ["won", "failed", "ended"] },
         "stars": { "type": ["number", "null"] },
         "actionsUsed": { "type": "integer", "minimum": 0 },
         "extensions": { "$ref": "#/$defs/jsonObject" }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "status": { "const": "ended" } },
+            "required": ["status"]
+          },
+          "then": {
+            "properties": { "stars": { "const": null } }
+          }
+        }
+      ]
     },
     "level": {
       "type": "object",
@@ -417,7 +460,7 @@
       "properties": {
         "kind": { "const": "header" },
         "format": { "const": "gaos.replay" },
-        "formatVersion": { "enum": ["1.0", "1.1", "1.2"] },
+        "formatVersion": { "enum": ["1.0", "1.1", "1.2", "1.3"] },
         "sessionId": { "type": "string", "minLength": 1 },
         "game": { "$ref": "#/$defs/gameRef" },
         "seed": {

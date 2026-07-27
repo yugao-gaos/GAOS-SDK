@@ -56,7 +56,7 @@ database row. A creator platform can emit the same `gaos.replay` JSONL as a
 hosted Arena run, allowing either result to be parsed, routed to its pinned
 historical reducer, and verified by shared tooling. That is the benchmark
 mission in operational form: a game authored in one product can be checked by
-independent, protocol-compatible tooling. With `gaos.replay` v1.2, seat keys,
+independent, protocol-compatible tooling. With `gaos.replay` v1.3, seat keys,
 submission signatures, and per-seat chains additionally establish which listed
 key authored the signed commands. They do not bind that key to a real person,
 prove wall-clock time, prevent collusion, or rule out tail truncation; those

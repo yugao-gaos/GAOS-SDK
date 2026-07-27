@@ -179,8 +179,12 @@ export function solveLevel<TLevel, TState, TView extends TickView<unknown, unkno
   const keyOf = options.stateKey ?? defaultStateKey;
   const actionsFor = options.actions ?? enumerateActions;
   const start = reducer.init(level, options.seed ?? 1);
-  if (reducer.view(start).status === 'won') {
+  const initialStatus = reducer.view(start).status;
+  if (initialStatus === 'won') {
     return { min: 0, capped: false, explored: 1, actions: [] };
+  }
+  if (initialStatus !== 'playing') {
+    return { min: null, capped: false, explored: 1, actions: null };
   }
   let frontier: Array<{ state: TState; nodeId: number }> = [{ state: start, nodeId: 0 }];
   const seen = new Set<string>([stateFingerprint(keyOf(start))]);
@@ -239,7 +243,7 @@ export function solveLevel<TLevel, TState, TView extends TickView<unknown, unkno
         if (view.status === 'won') {
           return { min: depth, capped: false, explored, actions: pathTo(parentId, action) };
         }
-        if (view.status === 'failed') continue;
+        if (view.status !== 'playing') continue;
         const fingerprint = stateFingerprint(keyOf(nextState));
         if (!seen.has(fingerprint)) {
           seen.add(fingerprint);

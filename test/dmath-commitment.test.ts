@@ -233,7 +233,7 @@ describe('gaos.commit.sha256.v1', () => {
     )).toThrow(RangeError);
   });
 
-  it('independently rechecks mismatch audit material in replay v1.1', () => {
+  it('independently rechecks mismatch audit material in replay v1.3', () => {
     interface AuditState { phase: number; actionsUsed: number }
     const auditReducer: TickReducer<{}, AuditState> = {
       init: () => ({ phase: 0, actionsUsed: 0 }),
@@ -298,6 +298,8 @@ describe('gaos.commit.sha256.v1', () => {
           tick: binding.windowRef + 1,
           participantId: binding.seat,
           submissionId: 'bad-reveal',
+          canonicalCommand: '{"kind":"bad-reveal"}',
+          cursor: 1,
           commitmentId: 0,
           scheme: COMMITMENT_SCHEME,
           attemptedReveal: { salt, payload: { wrong: true } },

@@ -1,6 +1,6 @@
 # RFC-012 — SDK gaps after the TabletopLabs migration completed
 
-Status: **revised for v0.21 review (2026-07-26)** · Target: v0.21 ·
+Status: **implemented in v0.21 (2026-07-26)** · Target: v0.21 ·
 Compatibility: §1 requires an explicit replay-format evolution; the remaining
 items are additive APIs, modules, diagnostics, or documentation · Depends on:
 RFC-006, RFC-009 · Source: the completed TabletopLabs migration and its

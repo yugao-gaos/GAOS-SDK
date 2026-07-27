@@ -1,0 +1,2 @@
+{"format":"gaos.replay","formatVersion":"1.3","game":{"adapter":{"id":"creator/open-session/reducer","version":"commit:def456"},"id":"creator/open-session","version":"1.0.0"},"kind":"header","levels":[{"id":"room","index":0,"level":{"room":"demo"},"result":{"actionsUsed":1,"stars":null,"status":"ended"},"seed":7}],"perm":[0],"seed":7,"seedPolicy":"explicit","sessionId":"room-7","totals":{"totalActionsUsed":1,"totalStars":0}}
+{"canonicalId":"Action 1","kind":"action","levelIndex":0,"n":0,"wireId":"Action 1"}

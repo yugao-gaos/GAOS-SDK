@@ -3,10 +3,33 @@
 GAOS uses the v0.x line to refine its contracts before v1.0. Products should
 review the migration notes when updating across minor versions.
 
-::: tip Current release: v0.20.0
-Portable replay now adds roster-bound Ed25519 submission chains and explicit
-`trusted` / `unverifiable` / `rejected` offline verdicts.
+::: tip Current release: v0.21.0
+Long-running authoritative sessions now have checkpoint/restore/compaction,
+reference prediction and hosting adapters, and portable `ended` evidence.
 :::
+
+## v0.21.0: durable long-running sessions
+
+Released July 26, 2026 after the Arena and TabletopLabs v0.20 migrations
+identified the remaining authoritative-session gaps.
+
+- Canonical integrity-checked checkpoints capture reducer state and the full
+  live protocol surface; restore accepts only a contiguous durable event tail.
+- Explicitly confirmed compaction bounds in-memory history while preserving
+  permanent submission identity through a host history index. Old reconnect
+  watermarks return `resync_required`.
+- `PredictionSession` implements deterministic optimistic reconciliation, and
+  `./session-host` supplies a serialized persist-before-publish lane,
+  publication retry, and event-store conformance tests.
+- `nextDeadline()` exposes tick-window scheduling; declared seats remain
+  immutable while occupancy and spectators stay product/host state.
+- Cursor precedence and reducer rejection typing complete RFC-011 A1/A2.
+- `SessionView.status` adds `ended`; `gaos.replay` v1.3 exports it with
+  `stars: null`, while v1.0/v1.1/v1.2 remain compatible.
+- Participation diagnostics now name both declared and supplied seat sets.
+
+[Sessions and integrity →](/session-and-integrity) ·
+[Portable replay →](/mechanisms/replay)
 
 ## v0.20.0: signed portable evidence
 

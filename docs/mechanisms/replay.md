@@ -13,6 +13,8 @@ records. A v1.2 stream uses the same grouped shape and assigns cryptographic
 meaning to the reserved roster, submission-chain, and `seat-signature` fields.
 It also records signed tier-2 `interest` declarations. Product actions may
 carry an opaque JSON `payload`, which survives projection and recheck.
+A v1.3 stream retains those semantics and adds the terminal level result
+`ended` for sessions that complete without claiming a win or loss.
 
 ```jsonl
 {"format":"gaos.replay","formatVersion":"1.0","game":{"adapter":{"id":"creator/demo/reducer","version":"commit:abc123"},"id":"creator/demo","version":"1.0.0"},"kind":"header","levels":[{"id":"intro","index":0,"level":{"goal":3},"result":{"actionsUsed":2,"stars":3,"status":"won"},"seed":2654435731}],"perm":[0,1],"seed":42,"seedPolicy":"gaos.run-level-seed.v1","sessionId":"run-42","totals":{"totalActionsUsed":2,"totalStars":3}}
@@ -31,8 +33,9 @@ artifact is suitable for hashing, signing, and object storage.
 
 The header pins everything shared tooling needs before reducer execution:
 
-- `format` and `formatVersion`: unsigned producers emit `gaos.replay` / `1.1`;
-  a configured signing roster emits `1.2`;
+- `format` and `formatVersion`: current producers emit `gaos.replay` / `1.3`
+  whether signed or unsigned; validators continue to accept v1.0, v1.1, and
+  v1.2 under their original rules;
 - a stable game id/version and historical adapter id/version;
 - the run seed and either explicit seeds or
   `gaos.run-level-seed.v1` derivation;
@@ -50,6 +53,12 @@ the verifier supplies a trusted registry callback.
 Every level stores its seed even when the run uses
 `gaos.run-level-seed.v1`. This makes a segment independently inspectable while
 letting validation detect a seed that disagrees with the declared derivation.
+
+Level results use `playing`, `won`, `lost`, or, in v1.3 only, `ended`.
+`ended` means the deterministic session lifecycle finished without a
+win/loss classification and requires `stars: null`. `totalStars` remains
+defined only for a won run. Older format versions reject `ended`; no existing
+artifact is reinterpreted.
 
 ## Creating and transporting an artifact
 
@@ -165,7 +174,7 @@ records, implementation mistakes, corruption, and simple tampering, but a
 host can still fabricate, reattribute, or delete a plausible audit story.
 `checked.ok` means replay consistency; it does not prove that audit records
 are true. Leaderboard admission and other trust decisions must not depend on
-unauthenticated v1.1 audit records. In v1.2, RFC-010 authenticates submitted
+unauthenticated v1.1 audit records. In v1.2 and v1.3, RFC-010 authenticates submitted
 commit/reveal material with Ed25519 and binds all chained submissions per seat.
 This closes host-only fabrication and reattribution of signed mismatch
 material. In ticks mode the signed stream can also constrain timeout position.
@@ -188,8 +197,8 @@ round-trips
 `seatKeys`, signature and timeout policies, `clientTime`, submission
 chain/signature fields, and the periodic `seat-signature` record carrier.
 The v1.1 verifier deliberately assigns them no cryptographic meaning. The
-v1.2 verifier requires canonical padded Base64, a fixed scheme, complete chain
-metadata, mandatory signed `clientTime`, roster-bound genesis, and the
+v1.2/v1.3 verifier requires canonical padded Base64, a fixed scheme, complete
+chain metadata, mandatory signed `clientTime`, roster-bound genesis, and the
 declared per-seat periodic tier.
 
 Run the complete check offline:

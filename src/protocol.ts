@@ -233,14 +233,16 @@ export type IntentErrorCode =
   | 'stale_tick'
   | 'unknown_participant'
   | 'invalid_submission'
+  | 'illegal_command'
   | 'conflicting_intent';
 
 export class IntentCollectionError extends Error {
   constructor(
     public readonly code: IntentErrorCode,
     message: string,
+    public override readonly cause?: unknown,
   ) {
-    super(message);
+    super(message, { cause });
     this.name = 'IntentCollectionError';
   }
 }

@@ -1,6 +1,6 @@
 # RFC-011 — Arena's open asks of the SDK
 
-Status: **accepted in part for v0.21 — A1/A2 remain; A3/A4 were already
+Status: **implemented in v0.21 — A1/A2 shipped; A3/A4 were already
 documented in v0.20; A5 requests no SDK change** · Target: v0.21 for A1/A2 ·
 Breaking: no (error ordering and additive error structure) · Depends on:
 RFC-006, RFC-009, RFC-010

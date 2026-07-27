@@ -21,7 +21,7 @@ export class AgentEnvironmentError extends Error {
   }
 }
 
-export type AgentTerminationReason = 'won' | 'failed' | 'decided' | 'tick_limit';
+export type AgentTerminationReason = 'won' | 'failed' | 'ended' | 'decided' | 'tick_limit';
 
 export interface AgentMetrics {
   /** Authoritative reducer ticks advanced in this episode. */
