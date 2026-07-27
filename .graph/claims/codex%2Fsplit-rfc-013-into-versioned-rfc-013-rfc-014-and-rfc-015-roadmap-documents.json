@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/split-rfc-013-into-versioned-rfc-013-rfc-014-and-rfc-015-roadmap-documents",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "codex-mcp-59108-cc987da0e6ebce2fc6a42291fc0f7469",
+  "branch": "orch/attempt/codex-split-rfc-013-into-versioned-rfc-013-rfc-014-and-rfc-015-roadmap-documents",
+  "status": "claimed",
+  "claimed_at": "2026-07-27T15:39:46.943Z",
+  "lease_until": "2026-07-27T16:39:46.943Z"
+}
