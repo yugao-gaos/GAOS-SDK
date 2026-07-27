@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/publish-gaos-v0.25.0-release",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "codex-mcp-27461-e28d618cc716249375c8ca5338f2327b",
+  "branch": "orch/attempt/codex-publish-gaos-v0.25.0-release",
+  "status": "claimed",
+  "claimed_at": "2026-07-27T22:29:54.643Z",
+  "lease_until": "2026-07-27T23:29:54.643Z"
+}
