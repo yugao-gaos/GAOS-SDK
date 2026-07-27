@@ -1253,6 +1253,51 @@ such release over a habit of them.
 
 ---
 
+## D6 — `validateCommand` runs before cursor validation, inverting error precedence
+
+*Source: Arena, found while integrating **v0.20.0** (not v0.19). Class:
+additive/ordering, non-blocking. This is E3's own fix exposing an ordering
+question E3 did not settle.*
+
+Verified at `v0.20.0`, `prepareIngest` orders its checks:
+
+1. receipt / duplicate short-circuit — `src/session.ts:1334`
+2. **`validateCommand`** — `src/session.ts:1425`
+3. **`collectIntent`** (protocol, session, tickId, revision, participant) — `src/session.ts:1444`
+
+Step 1 is correctly first: an exact retry must replay rather than be
+re-validated. Steps 2 and 3 are inverted. A submission carrying a **stale
+cursor** *and* a command that is not playable in the current state reports the
+legality failure — because legality is evaluated against **current** state that
+the stale client never saw.
+
+That is the wrong answer for the client. A client at an old cursor is not
+sending an illegal command; it is sending one that was legal when it looked,
+and its real problem is that it is behind. `stale_tick` tells it to re-read and
+retry. "Not legal this turn" points at the wrong thing, and worse, it is
+**unstable**: the same stale retry reports a different error depending on what
+other seats did meanwhile, because legality is state-dependent and cursor
+validity is not.
+
+Arena had this precedence explicitly before the migration — its own comment
+read *"Stable cursor errors take precedence over game-specific command decoding
+and today's legal-command set."* Adopting `validateCommand` silently inverted
+it, turning a `409 stale_tick` into a `400`, caught by an existing regression
+test.
+
+**Proposal.** Move the `validateCommand` call after `collectIntent`. Cursor,
+session, and participant validity are cheap, state-independent, and
+unambiguous; legality should only be asked once the submission is established
+as current. The receipt short-circuit stays where it is. This also avoids
+running a state-dependent check for a submission that is about to be rejected
+anyway.
+
+Arena currently reorders host-side — on a reducer rejection it re-checks
+`submission.revision !== kernel.cursor()` and reports `stale_tick` instead.
+That workaround should become deletable.
+
+---
+
 # Part E — v0.20 scope returned by the migrations
 
 Class 2 under RFC-009 §4.3: contract-shape questions and measurements that
