@@ -223,6 +223,24 @@ describe('RFC-014 release gate', () => {
       },
       commands: [{ envelope, signature }],
     }).valid).toBe(false);
+    const fabricatedHead = Buffer.alloc(32, 9).toString('base64');
+    const fabricatedStates = structuredClone(signatureStates);
+    fabricatedStates[0]!.lastSignedChainHead = fabricatedHead;
+    fabricatedStates[0]!.lastPeriodicSignature = await signEd25519Base64(
+      outgoing.privateKey,
+      periodicSignaturePreimageV2({ ...periodicEnvelope, chainHead: fabricatedHead }),
+    );
+    expect(verifyDynamicControlEvidenceV2({
+      format: 'gaos.dynamic-control-evidence.v2',
+      sessionId: 'session',
+      checkpoint: {
+        format: 'gaos.dynamic-control-checkpoint.v2',
+        sessionId: 'session',
+        control: ledger.checkpoint(),
+        signatureStates: fabricatedStates,
+      },
+      commands: [{ envelope, signature }],
+    }).valid).toBe(false);
     const stale = structuredClone(envelope);
     stale.transitionRevision = 1;
     expect(verifyDynamicControlEvidenceV2({
@@ -351,6 +369,12 @@ describe('RFC-014 release gate', () => {
       { ...policy, pinnedKeys: [] },
       resolver,
     )).authorityPinned).toBe(false);
+    expect((await verifyExternalAttestation(
+      attestation,
+      'artifact-a',
+      { ...policy, pinnedKeys: [], pinnedRootDigests: ['root-digest'] },
+      resolver,
+    )).policyAccepted).toBe(false);
     expect(await verifyExternalAttestation(
       attestation,
       'artifact-a',
@@ -543,7 +567,7 @@ describe('RFC-014 release gate', () => {
     }).expected;
     const temporary = mkdtempSync(join(tmpdir(), 'gaos-clients-'));
     const cppBinary = join(temporary, 'gaos-cpp-client');
-    execFileSync('/usr/bin/c++', [
+    execFileSync(process.env.GAOS_CXX ?? 'c++', [
       '-std=c++17',
       fileURLToPath(new URL('../examples/clients/cpp/run_fixture.cpp', import.meta.url)),
       '-o',
@@ -554,7 +578,7 @@ describe('RFC-014 release gate', () => {
       import.meta.url,
     ));
     const artifacts = join(temporary, 'dotnet');
-    execFileSync('/usr/local/bin/dotnet', [
+    execFileSync(process.env.GAOS_DOTNET ?? 'dotnet', [
       'build', project, '--artifacts-path', artifacts, '--nologo',
     ]);
     const commands: [string, string[]][] = [
@@ -566,11 +590,11 @@ describe('RFC-014 release gate', () => {
         fixturePath,
       ]],
       [cppBinary, [fixturePath]],
-      ['/usr/local/bin/dotnet', [
+      [process.env.GAOS_DOTNET ?? 'dotnet', [
         join(artifacts, 'bin/GaosPresentation/debug/GaosPresentation.dll'),
         fixturePath,
       ]],
-      ['/opt/homebrew/bin/godot', [
+      [process.env.GAOS_GODOT ?? 'godot', [
         '--headless',
         '--script',
         fileURLToPath(new URL(

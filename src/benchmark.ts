@@ -795,7 +795,7 @@ export async function verifyBenchmarkBundle(
           contentDigest,
           {
             pinnedKeys: requirement.keyIds === undefined
-              ? [attestation.authority]
+              ? []
               : requirement.keyIds.map((keyId) => ({
                 authorityId: requirement.authorityId,
                 keyId,

@@ -1,8 +1,9 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   packBenchmarkRun,
+  benchmarkBundleFiles,
   runBenchmark,
   verifyBenchmarkBundle,
   type BenchmarkAgentAdapter,
@@ -90,6 +91,10 @@ async function writePackageDirectory(
 }
 
 async function readPackageDirectory(path: string): Promise<BenchmarkBundle> {
+  const actual = await enumeratePackageFiles(path);
+  for (const required of ['manifest.json', 'submission.json', 'scores.json', 'verification.json', 'README.md']) {
+    if (!actual.has(required)) throw new TypeError(`package is missing ${required}`);
+  }
   const manifest = JSON.parse(
     await readFile(resolve(path, 'manifest.json'), 'utf8'),
   ) as BenchmarkManifest;
@@ -109,9 +114,15 @@ async function readPackageDirectory(path: string): Promise<BenchmarkBundle> {
     }>;
   };
   const episodes: BenchmarkBundleEpisode[] = [];
+  const expected = new Set([
+    'manifest.json', 'submission.json', 'scores.json', 'verification.json', 'README.md',
+  ]);
   for (const metadata of scoreFile.episodes) {
+    const relative = `episodes/${encodeURIComponent(metadata.id)}.gaos-replay.jsonl`;
+    if (expected.has(relative)) throw new TypeError(`duplicate episode file ${relative}`);
+    expected.add(relative);
     const replayText = await readFile(
-      resolve(path, `episodes/${encodeURIComponent(metadata.id)}.gaos-replay.jsonl`),
+      resolve(path, relative),
       'utf8',
     );
     const replay: BenchmarkBundleEpisode['replay'] =
@@ -121,13 +132,18 @@ async function readPackageDirectory(path: string): Promise<BenchmarkBundle> {
     const { replayEncoding: _encoding, ...episode } = metadata;
     episodes.push({ ...episode, replay });
   }
+  const extras = [...actual].filter((name) => !expected.has(name));
+  const missing = [...expected].filter((name) => !actual.has(name));
+  if (extras.length || missing.length) {
+    throw new TypeError(`package file set mismatch; extra=${extras.join(',')} missing=${missing.join(',')}`);
+  }
   const {
     schema,
     contentDigest,
     manifestDigest,
     ...submission
   } = submissionFile;
-  return {
+  const bundle: BenchmarkBundle = {
     schema,
     contentDigest,
     manifest,
@@ -136,6 +152,35 @@ async function readPackageDirectory(path: string): Promise<BenchmarkBundle> {
     episodes,
     scores: scoreFile.aggregate,
   };
+  const canonical = benchmarkBundleFiles(bundle);
+  for (const [relative, contents] of Object.entries(canonical)) {
+    if (await readFile(resolve(path, relative), 'utf8') !== contents) {
+      throw new TypeError(`package file is not canonical: ${relative}`);
+    }
+  }
+  return bundle;
+}
+
+async function enumeratePackageFiles(root: string): Promise<Set<string>> {
+  const result = new Set<string>();
+  async function visit(directory: string, prefix: string): Promise<void> {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (entry.name === '.' || entry.name === '..' || entry.name.includes('\0')) {
+        throw new TypeError('unsafe package path');
+      }
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const absolute = resolve(directory, entry.name);
+      const stat = await lstat(absolute);
+      if (stat.isSymbolicLink()) throw new TypeError(`package contains symlink ${relative}`);
+      if (stat.isDirectory()) await visit(absolute, relative);
+      else if (stat.isFile()) {
+        if (result.has(relative)) throw new TypeError(`duplicate package path ${relative}`);
+        result.add(relative);
+      } else throw new TypeError(`unsupported package entry ${relative}`);
+    }
+  }
+  await visit(root, '');
+  return result;
 }
 
 /** Filesystem CLI for deterministic benchmark run/resume/pack/verify. */

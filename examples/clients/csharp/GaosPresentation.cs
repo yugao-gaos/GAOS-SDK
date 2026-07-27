@@ -33,6 +33,7 @@ public static class Program
         int revision = -1, tick = -1, x = 0, y = 0;
         string entityId = "";
         var acknowledged = new List<string>();
+        bool repairRequired = false;
         foreach (var message in document.RootElement.GetProperty("messages").EnumerateArray())
         {
             var type = message.GetProperty("type").GetString();
@@ -44,11 +45,16 @@ public static class Program
                 entityId = entity.GetProperty("id").GetString()!;
                 x = entity.GetProperty("x").GetInt32();
                 y = entity.GetProperty("y").GetInt32();
+                repairRequired = false;
             }
             else if (type == "patch")
             {
                 if (message.GetProperty("baseTransitionRevision").GetInt32() != revision)
-                    throw new InvalidDataException("patch base does not match durable state");
+                {
+                    repairRequired = true;
+                    continue;
+                }
+                if (repairRequired) continue;
                 var patch = message.GetProperty("patch");
                 revision = message.GetProperty("transitionRevision").GetInt32();
                 tick = message.GetProperty("tick").GetInt32();
@@ -58,6 +64,8 @@ public static class Program
             }
             else if (type == "acknowledgement")
                 acknowledged.Add(message.GetProperty("submissionId").GetString()!);
+            else if (type == "digest-mismatch")
+                repairRequired = true;
         }
         Console.WriteLine(JsonSerializer.Serialize(new {
             transitionRevision = revision, tick, entityId, x, y, acknowledged

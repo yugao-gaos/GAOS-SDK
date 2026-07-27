@@ -285,6 +285,7 @@ export function verifyDynamicControlEvidenceV2(
   }
   const epochFacts: EpochVerificationFact[] = [];
   const commandHeads = new Map<string, string>();
+  const reconstructedHeads = new Map<string, Set<string>>();
   const commandCounts = new Map<string, number>();
   const states = new Map<string, DynamicControlEpochSignatureStateV2>();
   const rawStates = Array.isArray(checkpoint?.signatureStates)
@@ -378,6 +379,7 @@ export function verifyDynamicControlEvidenceV2(
             reasons.push(`signature state genesis does not match ${key}`);
           }
           commandHeads.set(key, genesisHash);
+          reconstructedHeads.set(key, new Set([genesisHash]));
         } catch (error) {
           reasons.push(error instanceof Error ? error.message : `invalid epoch genesis for ${key}`);
         }
@@ -432,7 +434,9 @@ export function verifyDynamicControlEvidenceV2(
       )) {
         throw new TypeError('signed command signature is invalid');
       }
-      commandHeads.set(key, submissionChainHashV2(command.envelope));
+      const nextHead = submissionChainHashV2(command.envelope);
+      commandHeads.set(key, nextHead);
+      reconstructedHeads.get(key)?.add(nextHead);
       commandCounts.set(key, (commandCounts.get(key) ?? 0) + 1);
     } catch (error) {
       commandsValid = false;
@@ -466,6 +470,8 @@ export function verifyDynamicControlEvidenceV2(
         || state.lastPeriodicClientTime === undefined
         || state.lastPeriodicSignature === undefined
         || epoch.controller?.publicKey === undefined) {
+        periodicValid = false;
+      } else if (!reconstructedHeads.get(key)?.has(state.lastSignedChainHead)) {
         periodicValid = false;
       } else {
         try {

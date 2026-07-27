@@ -13,10 +13,11 @@ export function startLeaderboardServer({
   port = 0,
 } = {}) {
   if (!database || !objects) throw new TypeError('database and objects are required');
-  mkdirSync(dirname(database), { recursive: true });
+  const postgres = /^postgres(?:ql)?:\/\//.test(database);
+  if (!postgres) mkdirSync(dirname(database), { recursive: true });
   mkdirSync(objects, { recursive: true });
   const schema = readFileSync(
-    new URL('./sqlite.sql', import.meta.url),
+    new URL(postgres ? './postgresql.sql' : './sqlite.sql', import.meta.url),
     'utf8',
   );
   sql(database, schema);
@@ -41,14 +42,15 @@ export function startLeaderboardServer({
           return json(response, 400, { error: 'artifact digest mismatch' });
         }
         assertEntry(entry);
+        const pending = pendingVerification();
         writeFileSync(join(objects, entry.artifactDigest), artifact, { flag: 'wx' });
         const transaction = `BEGIN;
 INSERT INTO benchmark_submissions VALUES (
 ${quote(entry.submissionId)},${quote(entry.benchmarkId)},${quote(entry.benchmarkVersion)},
 ${quote(entry.modality)},${quote(entry.agentName)},${Number(entry.aggregateScore)},
 ${entry.uncertainty == null ? 'NULL' : Number(entry.uncertainty)},${quote(entry.artifactDigest)},
-${quote(entry.evidenceVerdict)},${entry.reproduced ? 1 : 0},
-${quote(JSON.stringify(entry.verification))},${quote(JSON.stringify(entry.eligibility ?? null))}
+${quote('unverifiable')},0,
+${quote(JSON.stringify(pending))},NULL
 );
 ${Object.entries(entry.taskScores).map(([task, score]) =>
     `INSERT INTO benchmark_task_scores VALUES (${quote(entry.submissionId)},${quote(task)},${Number(score)});`).join('\n')}
@@ -98,6 +100,27 @@ ORDER BY aggregate_score DESC, submission_id ASC;`);
 WHERE submission_id=${quote(rows[0].submission_id)};`);
         return json(response, 200, rows[0]);
       }
+      if (request.method === 'POST' && url.pathname === '/api/verifier/complete') {
+        const body = JSON.parse(await readBody(request));
+        assertVerification(body.verification);
+        if (!['trusted', 'unverifiable', 'rejected'].includes(body.evidenceVerdict)) {
+          throw new TypeError('invalid evidence verdict');
+        }
+        const running = sqlJson(database, `SELECT submission_id FROM verifier_queue
+WHERE submission_id=${quote(body.submissionId)} AND status='running';`);
+        if (running.length !== 1) return json(response, 409, { error: 'job is not running' });
+        sql(database, `BEGIN;
+UPDATE benchmark_submissions SET
+ evidence_verdict=${quote(body.evidenceVerdict)},
+ reproduced=${body.reproduced === true ? 1 : 0},
+ verification_json=${quote(JSON.stringify(body.verification))},
+ eligibility_json=${quote(JSON.stringify(body.eligibility ?? null))}
+WHERE submission_id=${quote(body.submissionId)}
+ AND EXISTS (SELECT 1 FROM verifier_queue WHERE submission_id=${quote(body.submissionId)} AND status='running');
+UPDATE verifier_queue SET status='completed' WHERE submission_id=${quote(body.submissionId)} AND status='running';
+COMMIT;`);
+        return json(response, 200, { submissionId: body.submissionId, published: true });
+      }
       return json(response, 404, { error: 'not found' });
     } catch (error) {
       return json(response, 400, { error: error instanceof Error ? error.message : 'request failed' });
@@ -108,7 +131,10 @@ WHERE submission_id=${quote(rows[0].submission_id)};`);
 }
 
 function sql(database, statement) {
-  const result = spawnSync('/usr/bin/sqlite3', [database], {
+  const postgres = /^postgres(?:ql)?:\/\//.test(database);
+  const result = spawnSync(
+    postgres ? (process.env.GAOS_PSQL ?? 'psql') : (process.env.GAOS_SQLITE3 ?? 'sqlite3'),
+    postgres ? [database, '-v', 'ON_ERROR_STOP=1', '-At'] : [database], {
     input: statement,
     encoding: 'utf8',
   });
@@ -116,7 +142,17 @@ function sql(database, statement) {
   return result.stdout;
 }
 function sqlJson(database, statement) {
-  const result = spawnSync('/usr/bin/sqlite3', ['-json', database], {
+  if (/^postgres(?:ql)?:\/\//.test(database)) {
+    const trimmed = statement.trim();
+    if (trimmed.includes(';') && !/^SELECT[\s\S]*;?$/i.test(trimmed)) {
+      sql(database, statement);
+      return [];
+    }
+    const query = trimmed.replace(/;$/, '');
+    const output = sql(database, `SELECT COALESCE(json_agg(row_to_json(q)),'[]'::json) FROM (${query}) q;`);
+    return JSON.parse(output.trim() || '[]');
+  }
+  const result = spawnSync(process.env.GAOS_SQLITE3 ?? 'sqlite3', ['-json', database], {
     input: statement,
     encoding: 'utf8',
   });
@@ -150,6 +186,9 @@ function assertEntry(entry) {
     || Object.values(entry.taskScores).some(score => !Number.isFinite(score))) {
     throw new TypeError('scores must be finite');
   }
+  assertVerification(entry.verification);
+}
+function assertVerification(verification) {
   const states = new Set(['verified', 'unverified', 'failed', 'not-required', 'not-observed']);
   const fields = [
     'replay', 'signatures', 'semantics', 'evidenceComplete',
@@ -157,11 +196,22 @@ function assertEntry(entry) {
     'hiddenTestCompliant', 'accountIdentityAttested', 'timeAttested',
     'publicationLogged', 'tailAnchored', 'availabilityObserved',
   ];
-  if (fields.some(field => !states.has(entry.verification?.[field]))
-    || !Array.isArray(entry.verification?.externalAuthorities)
-    || !Array.isArray(entry.verification?.reasons)) {
+  if (fields.some(field => !states.has(verification?.[field]))
+    || !Array.isArray(verification?.externalAuthorities)
+    || !Array.isArray(verification?.reasons)) {
     throw new TypeError('invalid independent verification facts');
   }
+}
+function pendingVerification() {
+  return {
+    replay: 'not-observed', signatures: 'not-observed', semantics: 'not-observed',
+    evidenceComplete: 'not-observed', organizerReproduced: 'not-observed',
+    implementationOpen: 'not-observed', modelIdentityAttested: 'not-observed',
+    hiddenTestCompliant: 'not-observed', accountIdentityAttested: 'not-observed',
+    timeAttested: 'not-observed', publicationLogged: 'not-observed',
+    tailAnchored: 'not-observed', availabilityObserved: 'not-observed',
+    externalAuthorities: [], reasons: ['pending independent verification'],
+  };
 }
 function readBody(request) {
   return new Promise((resolve, reject) => {
@@ -181,7 +231,7 @@ function json(response, status, value) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const currentDatabase = process.env.GAOS_DB ?? './leaderboard.sqlite';
+  const currentDatabase = process.env.GAOS_DATABASE_URL ?? process.env.GAOS_DB ?? './leaderboard.sqlite';
   const server = startLeaderboardServer({
     database: currentDatabase,
     objects: process.env.GAOS_OBJECTS ?? './leaderboard-objects',

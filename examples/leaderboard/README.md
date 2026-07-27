@@ -9,7 +9,9 @@ GAOS_OBJECTS=./data/objects \
 PORT=8787 node server.mjs
 ```
 
-Apply `postgresql.sql` when replacing the included SQLite adapter. Both preserve aggregate
+Set `GAOS_DATABASE_URL=postgresql://...` to select the runtime PostgreSQL
+adapter (`GAOS_PSQL` may name a non-default `psql` executable). SQLite uses
+`GAOS_DB` and the PATH-resolved `sqlite3` command. Both schemas are idempotent and preserve aggregate
 and per-task scores, uncertainty, artifact identity, eligibility, and the
 complete independent verification-fact object.
 
@@ -20,3 +22,7 @@ bundleBase64}`; `GET /api/submissions` filters by `benchmarkId`,
 `benchmarkVersion`, and `modality`; and `POST /api/verifier/dequeue` leases the
 next verification job. Never collapse the verification facts into a
 single trust badge.
+
+Submission trust claims are never published directly: new entries are stored
+as pending/not-observed. A verifier must lease the job and POST independently
+derived facts to `/api/verifier/complete` before they become visible.

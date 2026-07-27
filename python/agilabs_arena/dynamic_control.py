@@ -372,6 +372,7 @@ def verify_dynamic_control_evidence_v2(
 
     commands_valid = control_valid
     command_heads: dict[str, str] = {}
+    reconstructed_heads: dict[str, set[str]] = {}
     command_counts: dict[str, int] = {}
     signature_states: dict[str, dict[str, Any]] = {}
     raw_states = checkpoint.get("signatureStates")
@@ -430,6 +431,7 @@ def verify_dynamic_control_evidence_v2(
                     commands_valid = False
                     continue
                 command_heads[key] = genesis_hash
+                reconstructed_heads[key] = {genesis_hash}
                 if state.get("genesisHash") != genesis_hash:
                     reasons.append(
                         f"signature state genesis does not match {key}"
@@ -490,6 +492,7 @@ def verify_dynamic_control_evidence_v2(
             ):
                 raise ValueError("signed command signature is invalid")
             command_heads[key] = submission_chain_hash_v2(envelope)
+            reconstructed_heads.setdefault(key, set()).add(command_heads[key])
             command_counts[key] = command_counts.get(key, 0) + 1
         except (KeyError, TypeError, ValueError) as error:
             commands_valid = False
@@ -525,6 +528,8 @@ def verify_dynamic_control_evidence_v2(
         if has_periodic:
             periodic_valid = (
                 all(field in state for field in periodic_fields)
+                and state["lastSignedChainHead"]
+                in reconstructed_heads.get(key, set())
                 and bool(epoch.get("controller", {}).get("publicKey"))
                 and _verify_periodic(
                     epoch["controller"]["publicKey"],

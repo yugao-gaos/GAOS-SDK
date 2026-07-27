@@ -53,6 +53,7 @@ int main(int argc, char** argv) {
   int revision = -1, tick = -1, x = 0, y = 0;
   std::string entity_id;
   std::vector<std::string> acknowledged;
+  bool repair_required = false;
   for (const auto& message : message_objects(read_all(argv[1]))) {
     const auto type = string_field(message, "type");
     if (type == "snapshot") {
@@ -61,9 +62,13 @@ int main(int argc, char** argv) {
       tick = int_field(message, "tick");
       entity_id = string_field(view, "id");
       x = int_field(view, "x"); y = int_field(view, "y");
+      repair_required = false;
     } else if (type == "patch") {
-      if (int_field(message, "baseTransitionRevision") != revision)
-        throw std::runtime_error("patch base does not match durable state");
+      if (int_field(message, "baseTransitionRevision") != revision) {
+        repair_required = true;
+        continue;
+      }
+      if (repair_required) continue;
       const auto patch = object_field(message, "patch");
       revision = int_field(message, "transitionRevision");
       tick = int_field(message, "tick");
@@ -71,6 +76,8 @@ int main(int argc, char** argv) {
       x = int_field(patch, "x"); y = int_field(patch, "y");
     } else if (type == "acknowledgement") {
       acknowledged.push_back(string_field(message, "submissionId"));
+    } else if (type == "digest-mismatch") {
+      repair_required = true;
     }
   }
   std::cout << "{\"transitionRevision\":" << revision << ",\"tick\":" << tick

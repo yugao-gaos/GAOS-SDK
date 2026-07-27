@@ -46,7 +46,13 @@ export class LeaderboardService {
       throw new TypeError(`duplicate leaderboard submission ${entry.submissionId}`);
     }
     await this.objects.put(entry.artifactDigest, bundle.slice());
-    this.entries.set(entry.submissionId, structuredClone(entry));
+    this.entries.set(entry.submissionId, {
+      ...structuredClone(entry),
+      evidenceVerdict: 'unverifiable',
+      reproduced: false,
+      verification: pendingVerificationFacts(),
+      eligibility: undefined,
+    });
     await this.queue.enqueue(entry.submissionId, entry.artifactDigest);
   }
 
@@ -78,6 +84,18 @@ export class LeaderboardService {
     if (entry === undefined) return undefined;
     return (await this.objects.get(entry.artifactDigest))?.slice();
   }
+}
+
+function pendingVerificationFacts(): SubmissionVerificationFacts {
+  return {
+    replay: 'not-observed', signatures: 'not-observed', semantics: 'not-observed',
+    evidenceComplete: 'not-observed', organizerReproduced: 'not-observed',
+    implementationOpen: 'not-observed', modelIdentityAttested: 'not-observed',
+    hiddenTestCompliant: 'not-observed', accountIdentityAttested: 'not-observed',
+    timeAttested: 'not-observed', publicationLogged: 'not-observed',
+    tailAnchored: 'not-observed', availabilityObserved: 'not-observed',
+    externalAuthorities: [], reasons: ['pending independent verification'],
+  };
 }
 
 export function assertIndependentVerificationFacts(

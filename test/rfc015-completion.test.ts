@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -366,7 +366,9 @@ describe('RFC-015 release gate', () => {
     expect(service.list({ benchmarkVersion: '1', modality: 'text' })).toHaveLength(1);
     expect(service.metadata('s1')).toMatchObject({
       artifactDownload: '/api/submissions/s1/artifact',
-      entry: { verification: { replay: 'verified', organizerReproduced: 'not-observed' } },
+      entry: { evidenceVerdict: 'unverifiable', verification: {
+        replay: 'not-observed', reasons: ['pending independent verification'],
+      } },
     });
     expect(await service.artifact('s1')).toEqual(serviceBundle);
     expect(queued).toEqual(['s1']);
@@ -426,7 +428,7 @@ describe('RFC-015 release gate', () => {
       expect(await (await fetch(`${base}/api/submissions/http-1`)).json())
         .toMatchObject({
           artifactDownload: '/api/submissions/http-1/artifact',
-          entry: { verification: { replay: 'verified' } },
+          entry: { evidenceVerdict: 'unverifiable', verification: { replay: 'not-observed' } },
         });
       expect(Buffer.from(await (await fetch(
         `${base}/api/submissions/http-1/artifact`,
@@ -441,9 +443,32 @@ describe('RFC-015 release gate', () => {
       expect(await (await fetch(`${base}/api/verifier/dequeue`, {
         method: 'POST',
       })).json()).toBeNull();
+      expect((await fetch(`${base}/api/verifier/complete`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          submissionId: 'http-1',
+          evidenceVerdict: 'trusted',
+          reproduced: true,
+          verification: facts(),
+        }),
+      })).status).toBe(200);
+      expect(await (await fetch(`${base}/api/submissions/http-1`)).json())
+        .toMatchObject({ entry: {
+          evidenceVerdict: 'trusted', reproduced: true,
+          verification: { replay: 'verified' },
+        } });
     } finally {
       await new Promise<void>((resolve, reject) =>
         server.close((error) => error ? reject(error) : resolve()));
+      const restarted = startLeaderboardServer({
+        database: join(directory, 'leaderboard.sqlite'),
+        objects: join(directory, 'objects'),
+        port: 0,
+      });
+      await new Promise<void>((resolve) => restarted.once('listening', resolve));
+      await new Promise<void>((resolve, reject) =>
+        restarted.close((error) => error ? reject(error) : resolve()));
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -518,6 +543,15 @@ export async function verifyEpisode(episode) {
       ], io)).toBe(0);
       expect(errors).toEqual([]);
       expect(JSON.parse(output.at(-1)!)).toMatchObject({ valid: true });
+      writeFileSync(join(bundlePath, 'extra.txt'), 'smuggled');
+      expect(await runBenchmarkCli([
+        'benchmark', 'verify', bundlePath, '--manifest', manifestPath, '--adapter', adapterPath,
+      ], io)).toBe(2);
+      unlinkSync(join(bundlePath, 'extra.txt'));
+      symlinkSync(join(bundlePath, 'README.md'), join(bundlePath, 'alias'));
+      expect(await runBenchmarkCli([
+        'benchmark', 'verify', bundlePath, '--manifest', manifestPath, '--adapter', adapterPath,
+      ], io)).toBe(2);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

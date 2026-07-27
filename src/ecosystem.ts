@@ -3,6 +3,10 @@ import type {
   ObservationDelta,
   SnapshotResult,
 } from './session.js';
+import {
+  InMemorySessionEventStore,
+  runEventStoreConformance,
+} from './session-host.js';
 
 export const RFC013_HOST_CONFORMANCE_SCENARIOS = [
   'byte-identical retry',
@@ -120,6 +124,9 @@ function assertFixture(condition: unknown, message: string): asserts condition {
  * booleans.
  */
 export async function runReferenceHostConformance(): Promise<HostConformanceReport> {
+  const eventStoreFacts = new Map((await runEventStoreConformance(
+    () => new InMemorySessionEventStore(),
+  )).map((fact) => [fact.name, fact.passed]));
   return runHostConformance({
     runtime: 'gaos-reference-node',
     adapterVersion: '1.0.0',
@@ -127,13 +134,11 @@ export async function runReferenceHostConformance(): Promise<HostConformanceRepo
       const host = new ReferenceConformanceFixture();
       switch (scenario) {
         case 'byte-identical retry':
-          assertFixture(host.ingest('a', '{"move":1}') === 'new', 'first ingest failed');
-          assertFixture(host.ingest('a', '{"move":1}') === 'retry', 'retry was not idempotent');
+          assertFixture(eventStoreFacts.get('byte-identical retry'), 'event-store retry failed');
           break;
         case 'conflicting event reuse':
-          host.ingest('a', 'one');
-          try { host.ingest('a', 'two'); } catch { return { passed: true }; }
-          throw new Error('conflicting bytes were accepted');
+          assertFixture(eventStoreFacts.get('conflicting event reuse'), 'event-store conflict failed');
+          break;
         case 'crash before persistence':
           try { host.ingest('a', 'one', 'before'); } catch { /* expected */ }
           assertFixture(host.durable.size === 0 && host.revision === 0, 'pre-persist crash mutated state');
