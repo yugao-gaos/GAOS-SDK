@@ -18,6 +18,8 @@ channels under RFC-009 §4.3, consolidated here. **D** is what lands on the
 v0.19.x line (four items, three of them migration-blocking); **E** is what
 v0.20 should take on. The former RFC-011 (Arena) and RFC-012 (TabletopLabs)
 are retired into these parts — see the consolidated scope table at the end.
+RFC-011 has since **reopened** for what Arena's v0.20 integration returned; its
+findings are maintained there, not duplicated here.
 
 > **All four §B7 open questions are resolved (2026-07-26)**, including the
 > scope-change lane, which turned out to rest on a false premise rather than a
@@ -1250,17 +1252,6 @@ additive-optional exception, so the freeze check will legitimately print
 `src/session.ts`. The announcement must say so explicitly rather than let the
 check read as a violation — which is itself the argument for preferring one
 such release over a habit of them.
-
----
-
-## D6, D7 — returned by the Arena v0.20 integration *(see RFC-011)*
-
-Two rough edges on Part E3's new `validateCommand` hook — its ordering
-relative to cursor validation, and the loss of the reducer's error type — were
-briefly recorded here. They are maintained in
-[RFC-011](rfc-011-arena-migration-findings.md) as A1 and A2 so the Arena
-consumer has one authoritative copy to revise; fold them back in here when
-accepted, as with the earlier returns.
 
 ---
 
