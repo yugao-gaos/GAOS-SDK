@@ -1,0 +1,36 @@
+{
+  "schema": "gaos.presentation-client-fixture.v1",
+  "messages": [
+    {
+      "schema": "gaos.observation.v1",
+      "type": "snapshot",
+      "transitionRevision": 4,
+      "tick": 10,
+      "view": { "entities": [{ "id": "unit-1", "x": 2, "y": 3 }] },
+      "digest": "snapshot-4",
+      "futureOptionalField": { "preserve": true }
+    },
+    {
+      "schema": "gaos.receipt.v1",
+      "type": "acknowledgement",
+      "submissionId": "move-1"
+    },
+    {
+      "schema": "gaos.observation.v1",
+      "type": "patch",
+      "baseTransitionRevision": 4,
+      "transitionRevision": 5,
+      "tick": 11,
+      "patch": { "entityId": "unit-1", "x": 3, "y": 3 },
+      "digest": "snapshot-5"
+    }
+  ],
+  "expected": {
+    "transitionRevision": 5,
+    "tick": 11,
+    "entityId": "unit-1",
+    "x": 3,
+    "y": 3,
+    "acknowledged": ["move-1"]
+  }
+}

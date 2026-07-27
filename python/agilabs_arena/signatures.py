@@ -9,6 +9,7 @@ from typing import Any
 
 
 SUBMISSION_SIGNATURE_SCHEME = "gaos.submission.ed25519.v1"
+SUBMISSION_SIGNATURE_SCHEME_V2 = "gaos.submission.ed25519.v2"
 SUBMISSION_SIGNATURE_ALGORITHM = "Ed25519"
 _DOMAIN_TAG = SUBMISSION_SIGNATURE_SCHEME.encode()
 _PERIODIC_DOMAIN_TAG = f"{SUBMISSION_SIGNATURE_SCHEME}.periodic".encode()
@@ -400,3 +401,101 @@ def verify_ed25519_base64(
         )
     except (TypeError, ValueError):
         return False
+
+
+def _canonical_v2_preimage(domain: str, value: dict[str, Any]) -> bytes:
+    from .replay import canonical_json
+
+    return f"{domain}\n{canonical_json(value)}".encode("utf-8")
+
+
+def _assert_v2_digest(value: str, label: str, allow_hex: bool = False) -> None:
+    if (
+        allow_hex
+        and isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    ):
+        return
+    signature_bytes_from_base64(value, label, 32)
+
+
+def submission_epoch_genesis_hash_v2(genesis: dict[str, Any]) -> str:
+    """First chain head for one dynamic controller epoch."""
+
+    _u64(genesis["epoch"], "epoch")
+    for label in ("sessionId", "seat", "controllerId"):
+        _utf8(genesis[label], label)
+    signature_bytes_from_base64(genesis["publicKey"], "publicKey", 32)
+    _assert_v2_digest(genesis["transitionDigest"], "transitionDigest", True)
+    if "previousEpochDigest" in genesis:
+        _assert_v2_digest(
+            genesis["previousEpochDigest"],
+            "previousEpochDigest",
+            True,
+        )
+    if "previousChainHead" in genesis:
+        _assert_v2_digest(genesis["previousChainHead"], "previousChainHead")
+    return signature_bytes_to_base64(hashlib.sha256(_canonical_v2_preimage(
+        f"{SUBMISSION_SIGNATURE_SCHEME_V2}.genesis",
+        genesis,
+    )).digest())
+
+
+def submission_preimage_v2(envelope: dict[str, Any]) -> bytes:
+    """Canonical command preimage bound to a controller epoch and revision."""
+
+    for label in (
+        "epoch",
+        "transitionRevision",
+        "cursor",
+        "tick",
+        "clientTime",
+    ):
+        _u64(envelope[label], label)
+    for label in ("sessionId", "seat", "submissionId"):
+        _utf8(envelope[label], label)
+    _assert_v2_digest(envelope["prevChainHash"], "prevChainHash")
+    return _canonical_v2_preimage(
+        f"{SUBMISSION_SIGNATURE_SCHEME_V2}.command",
+        envelope,
+    )
+
+
+def submission_chain_hash_v2(envelope: dict[str, Any]) -> str:
+    """Hash one v2 command into the next epoch-local chain head."""
+
+    return signature_bytes_to_base64(
+        hashlib.sha256(submission_preimage_v2(envelope)).digest()
+    )
+
+
+def controller_handoff_preimage_v2(handoff: dict[str, Any]) -> bytes:
+    """Canonical voluntary handoff preimage signed by both controllers."""
+
+    if handoff.get("schema") != "gaos.controller-handoff.v2":
+        raise TypeError("unsupported controller handoff schema")
+    _u64(handoff["outgoingEpoch"], "outgoingEpoch")
+    _u64(handoff["incomingEpoch"], "incomingEpoch")
+    _u64(
+        handoff["effectiveTransitionRevision"],
+        "effectiveTransitionRevision",
+    )
+    if handoff["incomingEpoch"] != handoff["outgoingEpoch"] + 1:
+        raise TypeError("handoff epochs must be consecutive")
+    _assert_v2_digest(handoff["outgoingChainHead"], "outgoingChainHead")
+    signature_bytes_from_base64(
+        handoff["incomingPublicKey"],
+        "incomingPublicKey",
+        32,
+    )
+    return _canonical_v2_preimage(
+        f"{SUBMISSION_SIGNATURE_SCHEME_V2}.handoff",
+        handoff,
+    )
+
+
+def sign_submission_v2(seed: bytes, envelope: dict[str, Any]) -> str:
+    """Sign one dynamic-controller submission."""
+
+    return sign_ed25519_base64(seed, submission_preimage_v2(envelope))

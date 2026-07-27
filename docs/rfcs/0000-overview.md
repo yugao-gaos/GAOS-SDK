@@ -60,7 +60,7 @@ The ecosystem sequence is likewise dependency-driven. RFC-013 is the shipped
 v0.22 contract foundation. RFC-014 makes those boundaries interoperable and
 extends portable evidence to changing controllers in v0.23. RFC-015 consumes
 that evidence in the resumable benchmark runner, independent bundle verifier,
-and neutral publication starter planned for v0.24.
+and neutral publication starter shipped in v0.24.
 
 The [batch implementation review](implementation-review.md) maps every
 normative requirement and test-plan fixture to its shipped API and evidence.

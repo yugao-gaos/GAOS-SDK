@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gaos.dev/schemas/gaos.receipt-v1.schema.json",
+  "title": "GAOS command receipt",
+  "type": "object",
+  "required": ["schema", "submissionId", "status"],
+  "properties": {
+    "schema": { "const": "gaos.receipt.v1" },
+    "submissionId": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["acknowledged", "rejected"] },
+    "reason": { "type": "string" }
+  },
+  "additionalProperties": true
+}

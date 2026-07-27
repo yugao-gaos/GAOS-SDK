@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gaos.dev/schemas/gaos.evidence-verdict-v2.schema.json",
+  "title": "GAOS independent evidence verdict facts",
+  "type": "object",
+  "required": ["schema", "valid", "commandsValid", "controlHistoryValid", "epochs", "reasons"],
+  "properties": {
+    "schema": { "const": "gaos.evidence-verdict.v2" },
+    "valid": { "type": "boolean" },
+    "commandsValid": { "type": "boolean" },
+    "controlHistoryValid": { "type": "boolean" },
+    "epochs": { "type": "array", "items": { "type": "object" } },
+    "reasons": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gaos.dev/schemas/gaos.benchmark-bundle-v1.schema.json",
+  "title": "GAOS benchmark bundle",
+  "type": "object",
+  "required": ["schema", "manifest", "manifestDigest", "submission", "episodes", "scores"],
+  "properties": {
+    "schema": { "const": "gaos.benchmark-bundle.v1" },
+    "manifest": { "type": "object" },
+    "manifestDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "submission": { "type": "object" },
+    "episodes": { "type": "array", "items": { "type": "object" } },
+    "scores": { "type": "object" }
+  },
+  "additionalProperties": false
+}

@@ -37,20 +37,20 @@ in v0.22. It ships host and presentation boundaries, controller-epoch
 infrastructure, formal research contracts, deterministic benchmark manifest
 planning and aggregation, and distinct evidence trust claims.
 
-### v0.23 — RFC-014 interoperability and dynamic-control evidence
+### v0.23 — RFC-014 interoperability and dynamic-control evidence (implemented)
 
-[RFC-014](/rfcs/rfc-014-interoperability-and-dynamic-control-evidence) is the
-next release target. It adds executable host conformance, complete host and
+[RFC-014](/rfcs/rfc-014-interoperability-and-dynamic-control-evidence) is
+implemented. It adds executable host conformance, complete host and
 engine integration guides, cross-language schemas/clients/golden fixtures,
 signed handoffs, signature-chain v2, replay and checkpoint integration,
 offline verification, product-supplied external-trust interfaces, and
 TypeScript/Python parity. Products retain authority selection, service calls,
 trust roots, rotation, revocation, and private-key custody.
 
-### v0.24 — RFC-015 verifiable benchmark publication
+### v0.24 — RFC-015 verifiable benchmark publication (implemented)
 
-[RFC-015](/rfcs/rfc-015-verifiable-benchmark-publication) follows on the
-portable evidence path. It adds the bounded-parallel resumable benchmark
+[RFC-015](/rfcs/rfc-015-verifiable-benchmark-publication) completes the
+portable evidence path with the bounded-parallel resumable benchmark
 runner, agent backends, reproducible `.gaos-bench` bundle and independent
 verifier, remaining qualified research metrics/transforms, and a deployable
 neutral leaderboard starter. Benchmark manifests pin product-chosen external

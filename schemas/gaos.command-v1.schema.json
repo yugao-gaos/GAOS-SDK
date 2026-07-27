@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gaos.dev/schemas/gaos.command-v1.schema.json",
+  "title": "GAOS command",
+  "type": "object",
+  "required": ["schema", "submissionId", "seat", "command"],
+  "properties": {
+    "schema": { "const": "gaos.command.v1" },
+    "submissionId": { "type": "string", "minLength": 1 },
+    "seat": { "type": "string", "minLength": 1 },
+    "command": {}
+  },
+  "additionalProperties": true
+}

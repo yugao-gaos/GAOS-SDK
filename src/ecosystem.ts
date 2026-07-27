@@ -27,6 +27,57 @@ export const RFC013_HOST_CONFORMANCE_SCENARIOS = [
 export type Rfc013HostConformanceScenario =
   typeof RFC013_HOST_CONFORMANCE_SCENARIOS[number];
 
+export const HOST_CONFORMANCE_VERSION = 'gaos.host-conformance.v1' as const;
+export const RFC014_HOST_CONFORMANCE_SCENARIOS =
+  RFC013_HOST_CONFORMANCE_SCENARIOS;
+
+export interface HostConformanceAdapter {
+  runtime: string;
+  adapterVersion: string;
+  run(
+    scenario: Rfc013HostConformanceScenario,
+  ): Promise<{ passed: boolean; details?: JsonValue }>;
+}
+
+export interface HostConformanceReport {
+  schema: typeof HOST_CONFORMANCE_VERSION;
+  runtime: string;
+  adapterVersion: string;
+  passed: boolean;
+  scenarios: readonly {
+    scenario: Rfc013HostConformanceScenario;
+    passed: boolean;
+    details?: JsonValue;
+  }[];
+}
+
+/** Execute the transport-neutral fixture names and emit portable result facts. */
+export async function runHostConformance(
+  adapter: HostConformanceAdapter,
+): Promise<HostConformanceReport> {
+  if (!adapter.runtime || !adapter.adapterVersion) {
+    throw new TypeError('conformance adapter runtime and version must be non-empty');
+  }
+  const scenarios = [];
+  for (const scenario of RFC014_HOST_CONFORMANCE_SCENARIOS) {
+    const result = await adapter.run(scenario);
+    scenarios.push({
+      scenario,
+      passed: result.passed,
+      ...(result.details === undefined
+        ? {}
+        : { details: structuredClone(result.details) }),
+    });
+  }
+  return {
+    schema: HOST_CONFORMANCE_VERSION,
+    runtime: adapter.runtime,
+    adapterVersion: adapter.adapterVersion,
+    passed: scenarios.every(({ passed }) => passed),
+    scenarios,
+  };
+}
+
 export interface PresentationFrame<TView, TEvent> {
   tick: number;
   transitionRevision: number;

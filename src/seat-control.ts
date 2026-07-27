@@ -60,6 +60,13 @@ export interface SeatControlCheckpoint {
   transitionRevision: number;
   seats: readonly string[];
   epochs: readonly SeatControlEpoch[];
+  prepared?: readonly SeatControlPreparedCheckpoint[];
+}
+
+export interface SeatControlPreparedCheckpoint {
+  baseTransitionRevision: number;
+  nextTransitionRevision: number;
+  epochs: readonly SeatControlEpoch[];
 }
 
 const preparedSeatControl: unique symbol = Symbol('gaos.prepared-seat-control');
@@ -107,6 +114,7 @@ export class SeatControlLedger {
   private history = new Map<string, SeatControlEpoch[]>();
   private readonly owner = {};
   private readonly prepared = new WeakMap<PreparedSeatControl, PreparedState>();
+  private readonly activePrepared = new Set<PreparedSeatControl>();
 
   constructor(
     private readonly sessionId: string,
@@ -248,6 +256,7 @@ export class SeatControlLedger {
       [preparedSeatControl]: undefined,
     };
     this.prepared.set(result, { owner: this.owner, completed: false, next });
+    this.activePrepared.add(result);
     return result;
   }
 
@@ -261,6 +270,7 @@ export class SeatControlLedger {
       throw new TypeError('stale prepared seat-control transition');
     }
     state.completed = true;
+    this.activePrepared.delete(prepared);
     this.history = state.next;
     this.revision = prepared.nextTransitionRevision;
   }
@@ -272,6 +282,11 @@ export class SeatControlLedger {
     }
     if (state.completed) throw new TypeError('prepared seat-control transition already completed');
     state.completed = true;
+    this.activePrepared.delete(prepared);
+  }
+
+  preparedTransitions(): readonly PreparedSeatControl[] {
+    return [...this.activePrepared];
   }
 
   checkpoint(): SeatControlCheckpoint {
@@ -282,6 +297,15 @@ export class SeatControlLedger {
       transitionRevision: this.revision,
       seats: this.seats(),
       epochs: [...this.history.values()].flatMap((epochs) => structuredClone(epochs)),
+      ...(this.activePrepared.size === 0
+        ? {}
+        : {
+          prepared: [...this.activePrepared].map((prepared) => ({
+            baseTransitionRevision: prepared.baseTransitionRevision,
+            nextTransitionRevision: prepared.nextTransitionRevision,
+            epochs: structuredClone(prepared.epochs),
+          })),
+        }),
     };
   }
 
@@ -365,6 +389,49 @@ export class SeatControlLedger {
     }
     ledger.history = rebuilt;
     ledger.revision = checkpoint.transitionRevision;
+    if (checkpoint.prepared !== undefined) {
+      for (const pending of checkpoint.prepared) {
+        if (pending.baseTransitionRevision !== ledger.revision
+          || pending.nextTransitionRevision !== ledger.revision + 1
+          || pending.epochs.length === 0) {
+          throw new TypeError('invalid prepared seat-control transition');
+        }
+        const next = copyHistory(rebuilt);
+        const seen = new Set<string>();
+        for (const epoch of pending.epochs) {
+          if (seen.has(epoch.seat)) {
+            throw new TypeError(`duplicate prepared epoch for ${epoch.seat}`);
+          }
+          seen.add(epoch.seat);
+          const history = next.get(epoch.seat);
+          const previous = history?.[history.length - 1];
+          if (history === undefined
+            || previous === undefined
+            || epoch.epoch !== previous.epoch + 1
+            || epoch.effectiveTransitionRevision !== pending.nextTransitionRevision
+            || epoch.previousEpochDigest !== previous.digest) {
+            throw new TypeError(`invalid prepared epoch continuity for ${epoch.seat}`);
+          }
+          const { digest, ...base } = epoch;
+          if (digest !== epochDigest(base)) {
+            throw new TypeError(`invalid prepared epoch digest for ${epoch.seat}`);
+          }
+          history.push(structuredClone(epoch));
+        }
+        const restored: PreparedSeatControl = {
+          baseTransitionRevision: pending.baseTransitionRevision,
+          nextTransitionRevision: pending.nextTransitionRevision,
+          epochs: structuredClone(pending.epochs),
+          [preparedSeatControl]: undefined,
+        };
+        ledger.prepared.set(restored, {
+          owner: ledger.owner,
+          completed: false,
+          next,
+        });
+        ledger.activePrepared.add(restored);
+      }
+    }
     return ledger;
   }
 }

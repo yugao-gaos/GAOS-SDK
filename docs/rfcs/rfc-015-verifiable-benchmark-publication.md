@@ -1,6 +1,6 @@
 # RFC-015 — Verifiable benchmark execution and publication
 
-Status: **proposed** · Target: v0.24 · Compatibility: additive benchmark
+Status: **implemented** · Target: v0.24 · Compatibility: additive benchmark
 packages, CLI, artifact, and reference application · Depends on:
 [RFC-013](rfc-013-ecosystem-bridges-and-benchmark-tooling.md),
 [RFC-014](rfc-014-interoperability-and-dynamic-control-evidence.md)
