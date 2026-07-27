@@ -80,6 +80,40 @@ observations unless a separate trusted authority attests them. Parallelism and
 resume must not change the authored episode plan, episode identities, or
 aggregate result.
 
+### 3.1 Product-pinned authority policy
+
+A benchmark manifest may require external attestations defined by RFC-014, but
+it must pin the policy used to evaluate them. At minimum, each requirement
+declares:
+
+```ts
+interface BenchmarkAuthorityRequirement {
+  claim:
+    | 'identity'
+    | 'time'
+    | 'publication'
+    | 'tail-anchor'
+    | 'model-identity'
+    | 'hidden-test';
+  purpose: 'identity' | 'timestamp' | 'transparency' | 'witness';
+  authorityId: string;
+  keyIds?: string[];
+  pinnedRootDigests?: string[];
+  acceptedSchemas: string[];
+  acceptedAlgorithms?: string[];
+  revocationPolicy?: 'ignore' | 'reject-revoked' | 'require-valid';
+  required: boolean;
+}
+```
+
+The independently obtained manifest is product configuration and may establish
+trust. A copy carried only inside the submitted bundle cannot establish its
+own trust; it must match the benchmark id, version, and digest pinned by the
+product or verifier invocation. Products own authority selection, service
+calls, credential handling, key rotation and revocation, account policy, and
+availability. The GAOS runner and verifier consume their keys, certificate
+roots, receipts, and policies through the RFC-014 interfaces.
+
 ## 4 — Portable submission bundle
 
 The portable bundle has an explicitly versioned format:
@@ -105,7 +139,10 @@ Independent verification must:
 5. recompute aggregate scores;
 6. verify submission and dynamic-control chains when required;
 7. reject missing or duplicate required episodes;
-8. emit one machine-readable verdict with per-episode facts.
+8. verify requested external attestations against the independently supplied
+   manifest and product trust roots; and
+9. emit machine-readable, independent verification facts for each episode and
+   submission.
 
 Packing must be reproducible: canonical metadata and episode ordering must
 produce a stable artifact digest independent of filesystem traversal order.
@@ -113,8 +150,8 @@ The verifier must not require a GAOS-operated service.
 
 ## 5 — Trust claims
 
-All submission and leaderboard surfaces must preserve the five independent
-RFC-013 claims:
+All submission and leaderboard surfaces must preserve independent facts,
+including the five RFC-013 claims:
 
 - evidence verified;
 - organizer reproduced;
@@ -124,8 +161,44 @@ RFC-013 claims:
 
 Evidence verification establishes only that recorded inputs reproduce recorded
 outcomes and scores. The other four claims require metadata or an external
-authority. No single checkmark, `verified` boolean, or visual badge may imply
-all five.
+authority. External attestations add further independent facts such as
+identity attested, time attested, publication logged, tail anchored, and
+availability observed.
+
+No single `trusted` or `verified` boolean, verdict, checkmark, or visual badge
+may compose these facts or imply all of them. Policy adoption is a separate
+product decision. A proposed machine-readable shape is:
+
+```ts
+type VerificationState =
+  | 'verified'
+  | 'unverified'
+  | 'failed'
+  | 'not-required'
+  | 'not-observed';
+
+interface SubmissionVerificationFacts {
+  replay: VerificationState;
+  signatures: VerificationState;
+  semantics: VerificationState;
+  evidenceComplete: VerificationState;
+  organizerReproduced: VerificationState;
+  implementationOpen: VerificationState;
+  modelIdentityAttested: VerificationState;
+  hiddenTestCompliant: VerificationState;
+  accountIdentityAttested: VerificationState;
+  timeAttested: VerificationState;
+  publicationLogged: VerificationState;
+  tailAnchored: VerificationState;
+  availabilityObserved: VerificationState;
+  externalAuthorities: ExternalTrustResult[];
+  reasons: string[];
+}
+```
+
+An application may calculate an eligibility decision from these facts and its
+own named policy, but must expose the underlying facts and policy version. The
+SDK does not assign a universal trust meaning.
 
 ## 6 — Neutral leaderboard starter
 
@@ -142,7 +215,7 @@ GAOS must provide a deployable reference template containing:
 - artifact download and local-verification instructions;
 - distinct trust labels from §5.
 
-Minimum entry shape:
+v0.22 already ships `LeaderboardEntry`. Its fields remain supported:
 
 ```ts
 interface LeaderboardEntry {
@@ -163,6 +236,35 @@ interface LeaderboardEntry {
 }
 ```
 
+Those two legacy summary fields have deliberately narrow meanings.
+`evidenceVerdict` is the historical replay, signature, chain, and semantic
+adoption verdict described in
+[Trust and verification](../trust-and-verification.md); it is not an overall
+trust decision. `reproduced` reports only organizer reproduction. Neither
+field implies identity, timing, publication, anchoring, availability,
+open-source, model-identity, or hidden-test facts.
+
+RFC-015 adds a versioned, additive entry shape rather than changing or removing
+the v0.22 contract:
+
+```ts
+interface LeaderboardEntryV2 extends LeaderboardEntry {
+  schema: 'gaos.leaderboard-entry.v2';
+  verification: SubmissionVerificationFacts;
+  eligibility?: {
+    policyId: string;
+    policyVersion: string;
+    decision: 'eligible' | 'ineligible' | 'pending';
+    reasons: string[];
+  };
+}
+```
+
+The V2 `verification` facts are authoritative for the expanded claim set.
+Implementations may derive the legacy summaries from those facts when
+serializing a V2 entry, but must not derive the expanded facts from the two
+legacy fields.
+
 The template does not create an official GAOS ranking. A product must
 instantiate it with an explicit benchmark manifest, governance policy,
 submission rules, and scoring interpretation.
@@ -172,7 +274,9 @@ submission rules, and scoring interpretation.
 Runner, bundle, verifier, metrics, and leaderboard surfaces are additive. New
 wire objects and bundle contents require explicit schema ids and versions.
 Native GAOS evidence and externally adapted evidence remain unambiguous, as
-required by RFC-014.
+required by RFC-014. Existing `LeaderboardEntry` consumers continue to receive
+the v0.22 fields; expanded verification facts require the explicitly versioned
+V2 shape.
 
 v0.24 is complete only when:
 
@@ -184,13 +288,17 @@ v0.24 is complete only when:
 4. independent verification recomputes every episode, task score, and
    aggregate;
 5. the leaderboard starter deploys against both supported database schemas and
-   exposes evidence download plus all trust labels;
-6. every shipped metric or transform enforces its declared preconditions.
+   exposes evidence download plus all independent verification facts;
+6. manifest-pinned authority fixtures cover valid, unknown, rotated, revoked,
+   expired, and artifact-substituted keys without private-key custody in GAOS;
+7. every shipped metric or transform enforces its declared preconditions.
 
 ## 8 — Out of scope
 
 RFC-015 does not add an official benchmark, universal score, official
 leaderboard, hosted evaluation service, training framework, algorithm
 catalogue, proof of model identity, prompt secrecy, wall-clock fairness, or
-proof that evaluation content was withheld. It does not weaken the product
-ownership rules in RFC-013.
+proof that evaluation content was withheld. It does not operate an identity
+provider, timestamp authority, transparency log, witness, certificate
+authority, or key-management service. It does not weaken the product ownership
+rules in RFC-013 or RFC-014.
