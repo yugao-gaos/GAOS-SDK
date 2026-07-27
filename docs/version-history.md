@@ -3,10 +3,28 @@
 GAOS uses the v0.x line to refine its contracts before v1.0. Products should
 review the migration notes when updating across minor versions.
 
-::: tip Current release: v0.24.0
-RFC-014 and RFC-015 complete portable dynamic-control evidence and verifiable
-benchmark execution/publication.
+::: tip Current release: v0.25.0
+RFC-016 adds product-owned historical verifier-kit preservation and restricted
+execution to the portable evidence path.
 :::
+
+## v0.25.0: product-owned historical verifier kits
+
+Released July 27, 2026 with the additive RFC-016 verifier distribution path.
+
+- Deterministic canonical tar packing gives identical product inputs identical
+  `sha256:` kit identities.
+- Strict inspection rejects traversal, duplicate paths, non-regular entries,
+  malformed archives, and file-integrity mismatches before extraction.
+- Replay references keep untrusted mirrors separate from independently pinned
+  kit authorization.
+- Digest-keyed cache admission is atomic and rechecks integrity for offline use.
+- A pinned-container runner disables networking, inherits no product
+  environment, mounts only read-only inputs, and applies process, memory, CPU,
+  wall-time, and output limits.
+- TypeScript and Python inspect the same v1 manifest and reference contracts.
+
+[Product-owned verifier kits →](/rfcs/rfc-016-product-owned-verifier-kits)
 
 ## v0.24.0: interoperability and verifiable benchmark publication
 

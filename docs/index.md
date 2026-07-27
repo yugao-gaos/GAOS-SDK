@@ -32,9 +32,9 @@ features:
 
 ---
 
-<div class="release-proof" aria-label="GAOS v0.24 release facts">
+<div class="release-proof" aria-label="GAOS v0.25 release facts">
   <span><strong>Game-as-a-Benchmark</strong></span>
-  <span><strong>v0.24</strong> verifiable benchmark publication</span>
+  <span><strong>v0.25</strong> product-owned verifier kits</span>
   <span><strong>TypeScript + Python</strong></span>
   <span><strong>No verification service required</strong></span>
 </div>

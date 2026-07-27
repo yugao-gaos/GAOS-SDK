@@ -5,12 +5,12 @@ agents, and let any third party verify the result.**
 
 [Documentation](https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/) ·
 [Playable demos](https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/demos/) ·
-[v0.24 release notes](docs/releases.md) ·
+[v0.25 release notes](docs/releases.md) ·
 [Discord](https://discord.gg/vdvUgcqPU)
 
-v0.24 combines RFC-014 interoperability and authenticated dynamic control with
-RFC-015 verifiable benchmark execution and publication. See the
-[v0.24 release notes](docs/releases.md#v0240).
+v0.25 adds RFC-016 product-owned, content-addressed historical verifier kits
+to the RFC-014/RFC-015 evidence and benchmark path. See the
+[v0.25 release notes](docs/releases.md#v0250).
 
 GAOS is an open-source TypeScript and Python SDK for **Game-as-a-Benchmark**:
 games that humans and agents can both play across turn-based, simultaneous
@@ -53,6 +53,16 @@ timeout reconstruction. The offline verifier returns an explicit verdict:
 ```sh
 gaos verify run.gaos-replay.jsonl --adapter ./historical-adapter.mjs
 gaos-verify run.gaos-replay.jsonl --adapter ./historical_adapter.py
+```
+
+Products can also preserve that exact historical adapter as a reproducible,
+content-addressed verifier kit:
+
+```sh
+gaos verifier pack ./adapter.bundle.mjs \
+  --game creator/demo@1.0.0 \
+  --output creator-demo.gaos-verifier
+gaos verifier inspect creator-demo.gaos-verifier
 ```
 
 ### 3. Production session infrastructure
@@ -137,7 +147,7 @@ policy that produced it. Those remain product and scoring-authority policy. See
 ## Start building
 
 ```sh
-npm install 'git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.24.0'
+npm install 'git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.25.0'
 ```
 
 Choose the path that matches your project:

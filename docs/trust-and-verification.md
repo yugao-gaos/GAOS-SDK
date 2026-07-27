@@ -199,12 +199,12 @@ GAOS deliberately uses signatures and hash chains, not a blockchain. External
 root anchoring could close truncation if a real cross-host leaderboard needs
 it; it is not part of the v1.2/v1.3 signed-evidence construction.
 
-## Planned external-trust boundary
+## External trust and historical verifier availability
 
-RFC-014 and RFC-015 propose interfaces for products that want stronger
-identity, timestamp, publication, or tail-anchoring claims. This is roadmap
-scope, not behavior supplied by the v1.2/v1.3 evidence formats described
-above.
+RFC-014 and RFC-015 supply interfaces for products that want stronger
+identity, timestamp, publication, tail-anchoring, and benchmark-manifest
+claims. Those interfaces ship in v0.24, but no external authority is operated
+by GAOS and those claims are not supplied by replay formats alone.
 
 GAOS will not provide an external authority or its keys. The integrating
 product selects any identity provider, timestamp authority, transparency log,
@@ -218,13 +218,23 @@ A public key or certificate chain embedded in an artifact is enough to check
 whether that material signed the artifact, but not enough to trust the
 authority. Trust requires an exact product or independently obtained
 benchmark-manifest pin, or a valid certificate path to a product-pinned root.
-The planned verifier reports cryptographic validity, pin matching, certificate
+The verifier reports cryptographic validity, pin matching, certificate
 path, revocation state, and policy acceptance separately. Leaderboards must
 also keep replay, identity, time, publication, anchoring, availability,
 reproduction, source availability, model attestation, and hidden-test claims
 separate instead of collapsing them into one `trusted` flag.
 
+[RFC-016](rfcs/rfc-016-product-owned-verifier-kits.md) supplies the v0.25
+availability boundary for the historical reducer and semantic adapter. The
+product chooses whether to export and publish that code. GAOS standardizes its
+content digest, discovery, cache, and restricted execution, while an
+independently obtained manifest, signed catalog, or verifier-owned allowlist
+must authorize the digest. A replay cannot establish trust in the verifier it
+names.
+
 See [RFC-014](rfcs/rfc-014-interoperability-and-dynamic-control-evidence.md)
-for the provisional SDK boundary and
+for the external-trust SDK boundary,
 [RFC-015](rfcs/rfc-015-verifiable-benchmark-publication.md) for manifest and
-leaderboard policy.
+leaderboard policy, and
+[RFC-016](rfcs/rfc-016-product-owned-verifier-kits.md) for historical-verifier
+distribution.

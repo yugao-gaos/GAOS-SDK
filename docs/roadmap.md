@@ -59,6 +59,20 @@ neutral leaderboard starter. Benchmark manifests pin product-chosen external
 authority policy, and leaderboard verification exposes separate facts instead
 of one universal trust flag.
 
+### v0.25 — RFC-016 product-owned historical verifier kits (implemented)
+
+[RFC-016](/rfcs/rfc-016-product-owned-verifier-kits) closes the historical
+adapter availability gap without moving game rules into GAOS. Products
+explicitly export their reducer and semantic adapter; the SDK standardizes a
+reproducible verifier-kit format, SHA-256 identity, optional replay reference,
+independent digest authorization, offline cache, and restricted execution.
+
+The replay may identify mirrors, but a submitted artifact cannot authorize the
+verifier that judges it. A trusted benchmark manifest, signed product catalog,
+or verifier-owned allowlist independently pins the kit digest. Missing or
+unavailable product code remains `unverifiable`. GAOS never infers or publishes
+a product reducer.
+
 Each roadmap release has one authoritative RFC. A later release may depend on
 earlier contracts, but it must not silently absorb unfinished scope from
 another RFC.
@@ -71,7 +85,8 @@ Continue hardening the smallest contracts shared by both audiences:
 - deterministic seeds and settlement;
 - single-agent and multi-agent environments;
 - the `agilabs.ticks` v1 protocol boundary; and
-- the `gaos.replay` v1.3 evidence format and verifier interface.
+- the `gaos.replay` v1.3 evidence format and verifier interface; and
+- product-owned historical verifier export and content-addressed kit identity.
 
 ### Conformance and portability
 

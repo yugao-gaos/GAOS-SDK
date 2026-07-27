@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/v0.25.0/schemas/gaos.verifier-reference-v1.schema.json",
+  "title": "GAOS verifier reference v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "digest", "mediaType", "size", "mirrors"],
+  "properties": {
+    "schema": { "const": "gaos.verifier-reference.v1" },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "mediaType": {
+      "const": "application/vnd.gaos.verifier-kit.v1+tar"
+    },
+    "size": { "type": "integer", "minimum": 0 },
+    "mirrors": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}
