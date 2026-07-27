@@ -162,6 +162,9 @@ export default defineConfig({
         collapsed: true,
         items: [
           { text: 'RFC index', link: '/rfcs/0000-overview' },
+          { text: 'RFC-013: v0.22 foundations', link: '/rfcs/rfc-013-ecosystem-bridges-and-benchmark-tooling' },
+          { text: 'RFC-014: v0.23 interoperability', link: '/rfcs/rfc-014-interoperability-and-dynamic-control-evidence' },
+          { text: 'RFC-015: v0.24 benchmark publication', link: '/rfcs/rfc-015-verifiable-benchmark-publication' },
           { text: 'Batch implementation review', link: '/rfcs/implementation-review' },
         ],
       },

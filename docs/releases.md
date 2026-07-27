@@ -5,7 +5,7 @@ For the public chronological changelog, see the
 
 ## v0.22.0
 
-Released July 27, 2026. This is the first staged RFC-013 delivery: portable
+Released July 27, 2026. This release implements RFC-013: portable
 host and presentation boundaries, auditable controller epochs, formal game and
 policy descriptors, and neutral benchmark manifest planning.
 
@@ -16,7 +16,10 @@ All new TypeScript APIs are additive. Existing fixed-roster sessions and
 `SeatControlLedger` is a separate authority schedule in this stage; it does not
 upgrade or reinterpret `gaos.submission.ed25519.v1` evidence.
 
-See [ecosystem bridges and benchmark contracts](/ecosystem-bridges).
+See [ecosystem bridges and benchmark contracts](/ecosystem-bridges) and the
+[versioned roadmap](/roadmap). Interoperability and dynamic-control evidence
+are specified separately by RFC-014 for v0.23; executable benchmark
+publication is specified by RFC-015 for v0.24.
 
 ## v0.21.0
 
@@ -54,8 +57,9 @@ end without a win or loss.
   spectators remain product/host concerns.
 
 See [sessions and integrity](/session-and-integrity) and
-[portable replay](/mechanisms/replay) for the complete contracts. RFC-013
-remains proposed for v0.22+.
+[portable replay](/mechanisms/replay) for the complete contracts. The
+subsequent v0.22 foundation is recorded in
+[RFC-013](/rfcs/rfc-013-ecosystem-bridges-and-benchmark-tooling).
 
 ## v0.20.0
 

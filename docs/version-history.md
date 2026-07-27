@@ -4,14 +4,14 @@ GAOS uses the v0.x line to refine its contracts before v1.0. Products should
 review the migration notes when updating across minor versions.
 
 ::: tip Current release: v0.22.0
-RFC-013's first staged contracts add ecosystem hosting and presentation
+RFC-013 adds ecosystem hosting and presentation
 boundaries, controller epochs, research descriptors, and neutral benchmark
 planning.
 :::
 
 ## v0.22.0: ecosystem and benchmark contracts
 
-Released July 27, 2026 as the first staged RFC-013 delivery.
+Released July 27, 2026 as the RFC-013 foundation release.
 
 - Transport-neutral host and versioned presentation-frame contracts establish
   stable boundaries for hosts and rendering engines.
@@ -27,6 +27,10 @@ Released July 27, 2026 as the first staged RFC-013 delivery.
   conformance.
 
 [Ecosystem bridges and benchmark contracts →](/ecosystem-bridges)
+
+The remaining roadmap is split by release: RFC-014 targets v0.23
+interoperability and dynamic-control evidence, and RFC-015 targets v0.24
+verifiable benchmark execution and publication.
 
 ## v0.21.0: durable long-running sessions
 
