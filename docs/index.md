@@ -3,7 +3,7 @@ layout: home
 
 hero:
   name: Gaming AGI Open SDK
-  tagline: Build once. Play as a human. Evaluate as an agent.
+  tagline: Deterministic simulation for turn-based, WEGO, and fixed-tick real-time games.
   actions:
     - theme: brand
       text: Start building
@@ -20,7 +20,13 @@ hero:
 ## Build the game and the agent surface together
 
 GAOS gives researchers and game developers one deterministic core for human
-play, agent play, and replayable evidence.
+play, agent play, and replayable evidence across turn-based, simultaneous WEGO,
+and fixed-tick real-time games.
+
+GAOS owns the authoritative reducer, ticks, lockstep input ordering,
+rollback/resimulation, replay verification, and session kernel. Your product
+owns its scheduler, sockets or WebRTC transport, interpolation, rendering, and
+latency policy.
 
 <div class="ownership-grid">
   <div class="ownership-card">
@@ -48,6 +54,8 @@ Game or benchmark design
 [Start with the quickstart →](/quickstart)
 
 [See every supported game shape and mechanism family →](/capabilities)
+
+[Build a real-time game with fixed-rate ticks →](/high-frequency)
 
 [Read the mission and benchmark thesis →](/mission)
 
@@ -90,8 +98,8 @@ metrics.
     <p>Stable cross-container addresses plus square, axial-hex, directed-graph, multi-board, pathfinding, line-of-sight, and keyed movement support.</p>
   </a>
   <a class="mechanism-card" href="./high-frequency">
-    <span class="mechanism-kicker">Fast deterministic play</span>
-    <h3>Lockstep and rollback</h3>
+    <span class="mechanism-kicker">Fixed-tick simulation</span>
+    <h3>Real-time games</h3>
     <p>Canonical tick inputs, sparse transcripts, resimulation, state digests, and authoritative hidden-information deployment.</p>
   </a>
   <a class="mechanism-card" href="./agentic-play">
@@ -132,11 +140,11 @@ metrics.
 <div class="ownership-grid">
   <div class="ownership-card">
     <h3>SDK owns</h3>
-    <p>Reusable algorithms, deterministic ordering, settlement, protocol primitives, replay, scoring behavior, agent lifecycle, and integration contracts.</p>
+    <p>The deterministic reducer, ticks, lockstep input ordering, rollback/resimulation, replay verification, session kernel, reusable algorithms, and integration contracts.</p>
   </div>
   <div class="ownership-card">
     <h3>Your product owns</h3>
-    <p>Characters, abilities, authored levels, game modes, objectives, thresholds, world tokens, prompts, hosting policy, seasons, and presentation.</p>
+    <p>The scheduler, sockets or WebRTC transport, interpolation, rendering, latency policy, characters, authored levels, game modes, hosting, and presentation.</p>
   </div>
 </div>
 

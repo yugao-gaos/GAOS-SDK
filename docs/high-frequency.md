@@ -1,8 +1,10 @@
-# Fixed-rate ticks and deterministic lockstep
+# Real-time games: fixed-rate ticks and deterministic lockstep
 
-Continuous-feeling play uses the same reducer at a fixed tick cadence. The SDK
-does not own a scheduler, wall clock, socket, signaling, interpolation, or
-late-join transport.
+GAOS supports fixed-tick real-time games with the same deterministic reducer
+used for turn-based and WEGO play. The SDK owns ticks, lockstep input ordering,
+rollback/resimulation, replay verification, and the session kernel. The product
+owns its scheduler and wall clock, sockets or WebRTC transport, signaling,
+interpolation, rendering, late-join flow, and latency policy.
 
 ```ts
 import {
