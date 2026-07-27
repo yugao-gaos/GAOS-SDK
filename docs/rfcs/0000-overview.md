@@ -1,10 +1,12 @@
-# GAOS SDK — next-version batch: from grid engine to composable game SDK
+# GAOS SDK — RFC sequence and release roadmap
 
-Status: implemented through v0.19 · Target: v0.13 → v1.0 arc · Baseline: v0.12.0 export surface
+Status: implemented through v0.22; roadmap through v0.24 ·
+Target: v0.13 → v1.0 arc · Baseline: v0.12.0 export surface
 
-::: info Historical design record
-This RFC batch records the design path that led to the current SDK. For
-supported APIs and current terminology, use the
+::: info Design record and roadmap
+RFC-001 through RFC-013 record the design path that led to the current SDK.
+RFC-014 and RFC-015 define planned release scope. For supported APIs and
+current terminology, use the
 [architecture map](/architecture), [capability map](/capabilities), and
 [mechanism reference](/mechanisms/).
 :::
@@ -44,13 +46,21 @@ Two standing design rules govern every RFC in this batch:
 | [010](rfc-010-submission-signatures-and-interest.md) | Submission signatures, audit chains, and generic interest management | v0.20 | 006, 008 |
 | [011](rfc-011-arena-migration-findings.md) | Arena's open asks of the SDK | v0.21 | 006, 009, 010 |
 | [012](rfc-012-post-migration-gaps.md) | SDK gaps after the TabletopLabs migration completed | v0.21 | 006, 009 |
-| [013](rfc-013-ecosystem-bridges-and-benchmark-tooling.md) | Ecosystem bridges, dynamic seat control, and verifiable benchmark tooling | staged implementation v0.22+ | 006, 010, 012 |
+| [013](rfc-013-ecosystem-bridges-and-benchmark-tooling.md) | Ecosystem and benchmark foundations | v0.22 | 006, 010, 012 |
+| [014](rfc-014-interoperability-and-dynamic-control-evidence.md) | Interoperability and dynamic-control evidence | v0.23 | 006, 010, 012, 013 |
+| [015](rfc-015-verifiable-benchmark-publication.md) | Verifiable benchmark execution and publication | v0.24 | 013, 014 |
 
 Sequencing rationale: RFC-001/002 are contract-level and mostly mechanical —
 they unblock naming and addressing for everything else. RFC-003 is the one
 breaking-ish decision (per-seat views) and both hands and fog-of-war hang off
 it, so it lands before any zone code. RFC-004 builds the card family on the
 settled contracts. RFC-005 composes everything and ships last.
+
+The ecosystem sequence is likewise dependency-driven. RFC-013 is the shipped
+v0.22 contract foundation. RFC-014 makes those boundaries interoperable and
+extends portable evidence to changing controllers in v0.23. RFC-015 consumes
+that evidence in the resumable benchmark runner, independent bundle verifier,
+and neutral publication starter planned for v0.24.
 
 The [batch implementation review](implementation-review.md) maps every
 normative requirement and test-plan fixture to its shipped API and evidence.

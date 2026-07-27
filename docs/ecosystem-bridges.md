@@ -1,6 +1,6 @@
 # Ecosystem bridges and benchmark contracts
 
-v0.22 begins the staged implementation of
+v0.22 implements
 [RFC-013](/rfcs/rfc-013-ecosystem-bridges-and-benchmark-tooling). The release
 ships portable boundaries that independent hosts, renderers, games, and
 benchmark products can implement without moving their policy into GAOS.
@@ -71,7 +71,8 @@ connection state:
 The v0.22 ledger preserves claimed handoff signature material but does not
 reinterpret the v1 submission signature scheme. Cryptographic v2 handoff
 verification, replay evidence integration, and TypeScript/Python golden
-vectors remain a later RFC-013 Stage B delivery.
+vectors are the v0.23 scope of
+[RFC-014](/rfcs/rfc-014-interoperability-and-dynamic-control-evidence).
 
 ## Research and benchmark primitives
 
@@ -89,6 +90,8 @@ Evidence verification, organizer reproduction, open implementation, model
 identity attestation, and hidden-test compliance remain five distinct claims.
 `EvidenceTrustClaims` keeps them separate; no single checkmark implies all.
 
-Runner resume/packing, portable submission verification, generated engine
-clients, complete hosting guides, and the neutral deployable leaderboard are
-later staged v0.22+ deliveries.
+Generated engine clients, complete hosting guides, executable conformance, and
+dynamic-control evidence are planned for v0.23 in RFC-014. Runner
+resume/packing, portable submission verification, remaining qualified research
+tooling, and the neutral deployable leaderboard are planned for v0.24 in
+[RFC-015](/rfcs/rfc-015-verifiable-benchmark-publication).

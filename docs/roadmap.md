@@ -28,11 +28,34 @@ bounded patch observations, pre-ingest legality, durable checkpoint and
 compaction, reference prediction/host adapters, and the recovery seams needed
 by Arena and TabletopLabs. Generic infrastructure accepts non-grid
 `SessionView` observations while action discovery retains the compatible
-`TickView` surface. v0.22 begins RFC-013 with host/presentation boundaries,
-controller-epoch infrastructure, formal research contracts, and deterministic
-benchmark manifest primitives. Cross-language clients, v2 control signatures,
-the full runner and bundle verifier, and the leaderboard starter remain staged
-v0.22+ work.
+`TickView` surface.
+
+### v0.22 — RFC-013 foundations
+
+[RFC-013](/rfcs/rfc-013-ecosystem-bridges-and-benchmark-tooling) is implemented
+in v0.22. It ships host and presentation boundaries, controller-epoch
+infrastructure, formal research contracts, deterministic benchmark manifest
+planning and aggregation, and distinct evidence trust claims.
+
+### v0.23 — RFC-014 interoperability and dynamic-control evidence
+
+[RFC-014](/rfcs/rfc-014-interoperability-and-dynamic-control-evidence) is the
+next release target. It adds executable host conformance, complete host and
+engine integration guides, cross-language schemas/clients/golden fixtures,
+signed handoffs, signature-chain v2, replay and checkpoint integration,
+offline verification, and TypeScript/Python parity.
+
+### v0.24 — RFC-015 verifiable benchmark publication
+
+[RFC-015](/rfcs/rfc-015-verifiable-benchmark-publication) follows on the
+portable evidence path. It adds the bounded-parallel resumable benchmark
+runner, agent backends, reproducible `.gaos-bench` bundle and independent
+verifier, remaining qualified research metrics/transforms, and a deployable
+neutral leaderboard starter.
+
+Each roadmap release has one authoritative RFC. A later release may depend on
+earlier contracts, but it must not silently absorb unfinished scope from
+another RFC.
 
 ### Stable bridge contracts
 
