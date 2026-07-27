@@ -38,9 +38,10 @@ export const RFC014_HOST_CONFORMANCE_SCENARIOS =
 export interface HostConformanceAdapter {
   runtime: string;
   adapterVersion: string;
-  run(
+  /** Perform the requested operations. The kit, not the adapter, owns pass/fail. */
+  exercise(
     scenario: Rfc013HostConformanceScenario,
-  ): Promise<{ passed: boolean; details?: JsonValue }>;
+  ): Promise<JsonValue | undefined>;
 }
 
 export interface HostConformanceReport {
@@ -64,14 +65,17 @@ export async function runHostConformance(
   }
   const scenarios = [];
   for (const scenario of RFC014_HOST_CONFORMANCE_SCENARIOS) {
-    const result = await adapter.run(scenario);
-    scenarios.push({
-      scenario,
-      passed: result.passed,
-      ...(result.details === undefined
-        ? {}
-        : { details: structuredClone(result.details) }),
-    });
+    try {
+      const details = await adapter.exercise(scenario);
+      scenarios.push({ scenario, passed: true, ...(details === undefined
+        ? {} : { details: structuredClone(details) }) });
+    } catch (error) {
+      scenarios.push({
+        scenario,
+        passed: false,
+        details: { error: error instanceof Error ? error.message : String(error) },
+      });
+    }
   }
   return {
     schema: HOST_CONFORMANCE_VERSION,
@@ -130,7 +134,7 @@ export async function runReferenceHostConformance(): Promise<HostConformanceRepo
   return runHostConformance({
     runtime: 'gaos-reference-node',
     adapterVersion: '1.0.0',
-    run: async (scenario) => {
+    exercise: async (scenario) => {
       const host = new ReferenceConformanceFixture();
       switch (scenario) {
         case 'byte-identical retry':
@@ -159,7 +163,7 @@ export async function runReferenceHostConformance(): Promise<HostConformanceRepo
           host.prepared = true;
           const base = host.revision;
           host.ingest('a', 'one');
-          try { host.commitPrepared(base); } catch { return { passed: true }; }
+          try { host.commitPrepared(base); } catch { return { executed: true }; }
           throw new Error('stale prepared transition was committed');
         case 'timeout transition handling':
           host.ingest('timeout:1', '{"tick":10}');
@@ -207,7 +211,7 @@ export async function runReferenceHostConformance(): Promise<HostConformanceRepo
           break;
         }
       }
-      return { passed: true, details: { executed: true } };
+      return { executed: true };
     },
   });
 }

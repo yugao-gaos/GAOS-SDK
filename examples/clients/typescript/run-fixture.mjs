@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 
 const fixture = JSON.parse(readFileSync(process.argv[2], 'utf8'));
-const state = { acknowledged: [] };
+const state = { acknowledged: [], rejected: [] };
 let repairRequired = false;
 for (const message of fixture.messages) {
   if (message.type === 'snapshot') {
@@ -29,6 +29,8 @@ for (const message of fixture.messages) {
     });
   } else if (message.type === 'acknowledgement') {
     state.acknowledged.push(message.submissionId);
+  } else if (message.type === 'rejection') {
+    state.rejected.push(message.submissionId);
   } else if (message.type === 'digest-mismatch') {
     repairRequired = true;
   }

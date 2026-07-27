@@ -5,3 +5,6 @@ export function startLeaderboardServer(options: {
   objects: string;
   port?: number;
 }): Server;
+export function databaseBoolean(database: string, value: boolean): 'TRUE' | 'FALSE' | '1' | '0';
+export function normalizeDatabaseBoolean(value: unknown): boolean;
+export function normalizeDatabaseJson(value: unknown): unknown;

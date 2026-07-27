@@ -49,7 +49,7 @@ INSERT INTO benchmark_submissions VALUES (
 ${quote(entry.submissionId)},${quote(entry.benchmarkId)},${quote(entry.benchmarkVersion)},
 ${quote(entry.modality)},${quote(entry.agentName)},${Number(entry.aggregateScore)},
 ${entry.uncertainty == null ? 'NULL' : Number(entry.uncertainty)},${quote(entry.artifactDigest)},
-${quote('unverifiable')},0,
+${quote('unverifiable')},${databaseBoolean(database, false)},
 ${quote(JSON.stringify(pending))},NULL
 );
 ${Object.entries(entry.taskScores).map(([task, score]) =>
@@ -94,7 +94,7 @@ ORDER BY aggregate_score DESC, submission_id ASC;`);
       }
       if (request.method === 'POST' && url.pathname === '/api/verifier/dequeue') {
         const rows = sqlJson(database,
-          "SELECT * FROM verifier_queue WHERE status='pending' ORDER BY rowid LIMIT 1;");
+          "SELECT * FROM verifier_queue WHERE status='pending' ORDER BY submission_id ASC LIMIT 1;");
         if (!rows.length) return json(response, 200, null);
         sql(database, `UPDATE verifier_queue SET status='running'
 WHERE submission_id=${quote(rows[0].submission_id)};`);
@@ -112,7 +112,7 @@ WHERE submission_id=${quote(body.submissionId)} AND status='running';`);
         sql(database, `BEGIN;
 UPDATE benchmark_submissions SET
  evidence_verdict=${quote(body.evidenceVerdict)},
- reproduced=${body.reproduced === true ? 1 : 0},
+ reproduced=${databaseBoolean(database, body.reproduced === true)},
  verification_json=${quote(JSON.stringify(body.verification))},
  eligibility_json=${quote(JSON.stringify(body.eligibility ?? null))}
 WHERE submission_id=${quote(body.submissionId)}
@@ -173,11 +173,23 @@ WHERE submission_id=${quote(row.submission_id)} ORDER BY task_id;`);
     ...(row.uncertainty == null ? {} : { uncertainty: row.uncertainty }),
     artifactDigest: row.artifact_digest,
     evidenceVerdict: row.evidence_verdict,
-    reproduced: row.reproduced === 1,
+    reproduced: normalizeDatabaseBoolean(row.reproduced),
     taskScores: Object.fromEntries(tasks.map(({ task_id, score }) => [task_id, score])),
-    verification: JSON.parse(row.verification_json),
-    eligibility: JSON.parse(row.eligibility_json),
+    verification: normalizeDatabaseJson(row.verification_json),
+    eligibility: normalizeDatabaseJson(row.eligibility_json),
   };
+}
+export function databaseBoolean(database, value) {
+  return /^postgres(?:ql)?:\/\//.test(database)
+    ? (value ? 'TRUE' : 'FALSE')
+    : (value ? '1' : '0');
+}
+export function normalizeDatabaseBoolean(value) {
+  return value === true || value === 1 || value === '1' || value === 't' || value === 'true';
+}
+export function normalizeDatabaseJson(value) {
+  if (value == null) return null;
+  return typeof value === 'string' ? JSON.parse(value) : value;
 }
 function assertEntry(entry) {
   if (!Number.isFinite(entry.aggregateScore)

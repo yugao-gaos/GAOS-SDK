@@ -25,6 +25,12 @@
       "submissionId": "move-1"
     },
     {
+      "schema": "gaos.receipt.v1",
+      "type": "rejection",
+      "submissionId": "bad-1",
+      "reason": "inactive-controller"
+    },
+    {
       "schema": "gaos.observation.v1",
       "type": "snapshot",
       "transitionRevision": 4,
@@ -62,6 +68,7 @@
     "entityId": "unit-1",
     "x": 3,
     "y": 3,
-    "acknowledged": ["move-1"]
+    "acknowledged": ["move-1"],
+    "rejected": ["bad-1"]
   }
 }

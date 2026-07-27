@@ -33,6 +33,7 @@ public static class Program
         int revision = -1, tick = -1, x = 0, y = 0;
         string entityId = "";
         var acknowledged = new List<string>();
+        var rejected = new List<string>();
         bool repairRequired = false;
         foreach (var message in document.RootElement.GetProperty("messages").EnumerateArray())
         {
@@ -64,11 +65,13 @@ public static class Program
             }
             else if (type == "acknowledgement")
                 acknowledged.Add(message.GetProperty("submissionId").GetString()!);
+            else if (type == "rejection")
+                rejected.Add(message.GetProperty("submissionId").GetString()!);
             else if (type == "digest-mismatch")
                 repairRequired = true;
         }
         Console.WriteLine(JsonSerializer.Serialize(new {
-            transitionRevision = revision, tick, entityId, x, y, acknowledged
+            transitionRevision = revision, tick, entityId, x, y, acknowledged, rejected
         }));
     }
 }

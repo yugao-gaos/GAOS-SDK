@@ -376,7 +376,7 @@ describe('RFC-015 release gate', () => {
 
   it('runs the deployable SQLite HTTP leaderboard, object store, and verifier queue', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'gaos-leaderboard-'));
-    const { startLeaderboardServer } = await import(
+    const { startLeaderboardServer, databaseBoolean, normalizeDatabaseBoolean, normalizeDatabaseJson } = await import(
       '../examples/leaderboard/server.mjs'
     ) as {
       startLeaderboardServer(options: {
@@ -384,7 +384,15 @@ describe('RFC-015 release gate', () => {
         objects: string;
         port: number;
       }): import('node:http').Server;
+      databaseBoolean(database: string, value: boolean): string;
+      normalizeDatabaseBoolean(value: unknown): boolean;
+      normalizeDatabaseJson(value: unknown): unknown;
     };
+    expect(databaseBoolean('postgresql://fixture', true)).toBe('TRUE');
+    expect(databaseBoolean('postgresql://fixture', false)).toBe('FALSE');
+    expect(['t', true, 1].map(normalizeDatabaseBoolean)).toEqual([true, true, true]);
+    expect(normalizeDatabaseJson({ replay: 'verified' })).toEqual({ replay: 'verified' });
+    expect(normalizeDatabaseJson('{"replay":"verified"}')).toEqual({ replay: 'verified' });
     const server = startLeaderboardServer({
       database: join(directory, 'leaderboard.sqlite'),
       objects: join(directory, 'objects'),

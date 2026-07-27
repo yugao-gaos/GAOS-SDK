@@ -53,6 +53,7 @@ int main(int argc, char** argv) {
   int revision = -1, tick = -1, x = 0, y = 0;
   std::string entity_id;
   std::vector<std::string> acknowledged;
+  std::vector<std::string> rejected;
   bool repair_required = false;
   for (const auto& message : message_objects(read_all(argv[1]))) {
     const auto type = string_field(message, "type");
@@ -76,11 +77,14 @@ int main(int argc, char** argv) {
       x = int_field(patch, "x"); y = int_field(patch, "y");
     } else if (type == "acknowledgement") {
       acknowledged.push_back(string_field(message, "submissionId"));
+    } else if (type == "rejection") {
+      rejected.push_back(string_field(message, "submissionId"));
     } else if (type == "digest-mismatch") {
       repair_required = true;
     }
   }
   std::cout << "{\"transitionRevision\":" << revision << ",\"tick\":" << tick
             << ",\"entityId\":\"" << entity_id << "\",\"x\":" << x << ",\"y\":" << y
-            << ",\"acknowledged\":[\"" << acknowledged.front() << "\"]}\n";
+            << ",\"acknowledged\":[\"" << acknowledged.front() << "\"]"
+            << ",\"rejected\":[\"" << rejected.front() << "\"]}\n";
 }
