@@ -1,8 +1,9 @@
-# RFC-013 — Ecosystem bridges, game semantics, and verifiable benchmark tooling
+# RFC-013 — Ecosystem bridges, dynamic seat control, and verifiable benchmark tooling
 
 Status: **proposed for staged v0.22+ delivery** · Target: v0.22 and later ·
-Compatibility: additive contracts, packages, fixtures, templates, and
-documentation · Depends on: RFC-006, RFC-010, RFC-012
+Compatibility: additive APIs plus a new evidence/signature format for dynamic
+seat control; existing sessions and artifacts remain supported · Depends on:
+RFC-006, RFC-010, RFC-012
 
 GAOS has a deliberate boundary: it owns deterministic game logic, execution,
 agent-facing environments, and portable evidence. It does not own networking,
@@ -10,16 +11,15 @@ matchmaking, rendering, model training, benchmark meaning, or a universal
 leaderboard.
 
 That boundary is correct, but independent adoption still requires bridges into
-the systems that own those surrounding responsibilities. The SDK also needs a
-small set of higher-level game and research contracts so integrations do not
-rebuild common control flow or invent incompatible descriptions of the same
-game.
+the systems that own those surrounding responsibilities. The SDK also needs
+formal seat-control and research contracts where independently implemented
+versions would otherwise produce incompatible evidence.
 
 This RFC proposes five related additions:
 
 1. hosting and transport integration contracts;
 2. presentation projections and engine-client fixtures;
-3. reusable turn, stage, lifecycle, branching, and extension mechanisms;
+3. dynamic controller occupancy over stable logical seats;
 4. formal game, chance, observation, information-state, and policy descriptors;
 5. neutral benchmark, submission, verification, and leaderboard tooling.
 
@@ -38,6 +38,7 @@ The SDK continues to own:
 - prepared persist-before-publish session transitions;
 - per-seat observations and information-leak checks;
 - agent environments and concrete legal actions;
+- ordered seat-control authority and its evidence consequences;
 - replay, signatures, evidence packaging, and offline verification;
 - reusable, product-neutral game mechanisms.
 
@@ -48,6 +49,10 @@ Integrating products and services continue to own:
 - storage engines and operational retention policy;
 - rendering, animation, audio, input devices, and editor tooling;
 - model inference, training, prompts, and experiment tracking;
+- turn order, stages, lifecycle conditions, undo policy, and reducer
+  composition;
+- join eligibility, disconnect grace periods, vacancy gameplay effects, and
+  account-to-controller identity;
 - benchmark tasks, scoring meaning, held-out content, eligibility, and
   publication policy;
 - seasons, rankings, moderation, and commercial rules.
@@ -66,7 +71,7 @@ Every hosting guide should map its platform onto one lifecycle:
 ```text
 authenticate connection
         ↓
-assign a declared seat and submission identity
+assign or resume a controller epoch for a declared seat
         ↓
 receive and validate a canonical command
         ↓
@@ -85,6 +90,7 @@ kernel. It does not prescribe sockets or storage:
 ```ts
 interface SessionHostDriver<TCommand, TView> {
   create(input: HostCreateInput): Promise<HostedSession<TCommand, TView>>;
+  control(sessionId: string, input: HostSeatControl): Promise<void>;
   ingest(sessionId: string, input: HostSubmission<TCommand>): Promise<void>;
   advance(sessionId: string, tick: number): Promise<void>;
   snapshot(sessionId: string, seat: string, afterRevision?: number):
@@ -100,7 +106,7 @@ semantics do not:
 - conflict-detecting idempotency;
 - persist before publish;
 - explicit timeout escalation;
-- fixed signing roster and product-owned live occupancy;
+- stable logical seats and ordered controller epochs;
 - seat-scoped observation delivery;
 - repair from an acknowledged revision;
 - replay finalization from the complete durable evidence stream.
@@ -176,7 +182,8 @@ The SDK should ship transport-neutral conformance scenarios for:
 - timeout transition handling;
 - acknowledgement, rejection, and reconnect repair;
 - observation patch without a base snapshot;
-- fixed roster and live occupancy separation;
+- dropout, drop-in, reconnect, substitution, transfer, and atomic seat swap;
+- rejection of a command signed by an inactive controller epoch;
 - checkpoint restore and retention-floor behavior;
 - artifact finalization and independent verification.
 
@@ -241,98 +248,224 @@ framework or prescribe art, camera, animation, or input architecture.
 
 ---
 
-## 4 — Higher-level game orchestration
+## 4 — Dynamic seat control
 
-GAOS reducers can already express the following behavior. The gap is reusable,
-tested control flow that prevents each game from implementing it differently.
+Turn order, per-seat stages, lifecycle conditions, undo policy, and reducer
+composition remain product-owned. GAOS standardizes only their externally
+observable participation, legal-action, replay, and evidence consequences.
 
-### 4.1 Turn policy
+Mid-game control changes cross that boundary. A verifier must know which key
+was authorized to submit for a seat at each point in the run. Independent
+hosts cannot invent different answers without producing incompatible evidence.
 
-Add an optional deterministic turn controller supporting:
+### 4.1 Stable seat, changing controller
 
-- authored and dynamic seat order;
-- forward, reverse, reset, continue, and once-only traversal;
-- skip and removal policy;
-- round and traversal counters;
-- minimum and maximum accepted actions;
-- explicit and conditional completion;
-- deterministic next-seat selection.
+This RFC distinguishes:
+
+- **logical seat** — stable game identity declared when the kernel is created;
+- **controller** — a human, agent, or service currently authorized to submit
+  for a logical seat;
+- **connection** — host-owned transport state, never kernel identity;
+- **participation** — reducer-projected game policy describing which logical
+  seats may act.
+
+The logical seat set remains fixed for this proposal. Controllers may become
+vacant, reconnect, be replaced, or transfer between those seats at any
+transition boundary.
+
+Adding or removing logical seats changes the game shape, observation
+partitions, and potentially utility semantics. Products that need variable
+player count may declare a maximum stable seat set and make seats dormant
+through reducer state and `Participation`. A mutable kernel seat set is a
+separate future design.
+
+### 4.2 Seat-control epochs
+
+Each period of authority is a versioned epoch:
 
 ```ts
-interface TurnPolicy<TState> {
-  activeSeats(state: TState): readonly string[];
-  canAct(state: TState, seat: string): boolean;
-  next(state: TState, result: TurnResult): TurnTransition;
-  minActions?: number;
-  maxActions?: number;
+type SeatControllerKind = 'human' | 'agent' | 'service';
+
+interface SeatController {
+  controllerId: string;
+  kind: SeatControllerKind;
+  publicKey?: string;
+  signingTier?: SubmissionSigningTier;
+}
+
+interface SeatControlEpoch {
+  seat: string;
+  epoch: number;
+  status: 'occupied' | 'vacant';
+  controller?: SeatController;
+  effectiveTransitionRevision: number;
+  reason:
+    | 'genesis'
+    | 'released'
+    | 'disconnected'
+    | 'reconnected'
+    | 'substituted'
+    | 'transferred'
+    | 'revoked';
+  authorization: 'genesis' | 'controller-handoff' | 'host-policy';
+  previousEpochDigest?: string;
 }
 ```
 
-This mechanism composes with, rather than replaces, the reducer's
-`Participation` projection.
+Names are provisional. The invariants are not:
 
-### 4.2 Per-seat stages and reaction windows
+- epochs are consecutive per seat and never overlap;
+- at most one controller is authoritative for one seat at a revision;
+- a new key or controller always starts a new epoch;
+- reconnecting the same controller with the same key does not require a new
+  epoch;
+- vacancy is explicit, not inferred from missing commands;
+- a multi-seat transfer or swap commits atomically;
+- `controllerId` is opaque product identity and proves no real-world identity;
+- every accepted command names or unambiguously resolves to its active epoch.
 
-Add named per-seat stages with:
+A product may intentionally allow one agent to control several seats. GAOS
+does not impose controller uniqueness across seats.
 
-- stage-specific legal-action namespaces;
-- independent minimum and maximum action counts;
-- all-seat, other-seat, and act-once presets;
-- deterministic stage entry and completion;
-- sequential, simultaneous, and priority-window composition;
-- observable stage state without leaking private legal actions.
+### 4.3 Ordered non-gameplay transition
 
-This supports reactions, interrupts, bidding, drafting, simultaneous planning,
-and asymmetric subturns without product-specific orchestration loops.
+The kernel should expose a prepared seat-control transition, provisionally:
 
-### 4.3 Lifecycle controller
+```ts
+kernel.prepareSeatControl({
+  changes: readonly SeatControlChange[],
+  authorization: SeatControlAuthorization,
+});
+```
 
-Expand the existing phase primitive with optional declarative:
+It follows the same prepare → persist → commit → publish discipline as other
+session transitions. It advances `transitionRevision`, is retained in
+checkpoint and replay evidence, and is applied atomically.
 
-- `endIf` conditions for turn, phase, and game boundaries;
-- dynamic next-phase selection;
-- enter and exit hooks;
-- strict hook and condition evaluation order;
-- emitted boundary events;
-- convergence guards for chained automatic transitions.
+Changing command authority does not by itself call the reducer, advance the
+gameplay cursor, or change the seat's observation. If vacancy, replacement, or
+transfer affects game state, the product represents that effect with an
+ordinary deterministic command. Examples include auto-wait, elimination,
+entity transfer, pause, or enabling an AI driver.
 
-The lifecycle controller remains deterministic and synchronous. Product code
-defines the conditions and effects.
+This separation keeps nondeterministic connection state out of the reducer
+while making command authority auditable.
 
-### 4.4 Evidence-safe undo and branching
+### 4.4 Dropout, drop-in, and reconnect
 
-Undo semantics depend on evidence state:
+A transport disconnect alone does not determine game policy:
 
-- local casual sessions may use an ordinary bounded undo/redo stack;
-- authoritative unsigned sessions may permit a host-policy rewind;
-- signed sessions represent an accepted undo as an explicit canonical action
-  or create a new transcript branch;
-- finalized evidence is immutable.
+1. The host may retain the controller epoch during a grace period.
+2. Reconnection with the same controller and key resumes that epoch.
+3. When policy revokes control, the host commits a vacant or replacement
+   epoch.
+4. A bot or replacement human starts a new epoch.
+5. A later returning player starts another epoch unless the previous epoch was
+   never revoked.
 
-A branch binds:
+The product decides the grace period, eligibility, whether play pauses, and
+what gameplay command follows. The evidence records the chosen authority
+transition and any resulting gameplay command separately.
 
-- parent artifact or transcript digest;
-- branch point;
-- reason and authorizing identity;
-- new canonical action sequence.
+### 4.5 Handoff authorization
 
-No API may silently delete or rewrite an already signed submission.
+Control changes have two distinguishable authorization modes.
 
-### 4.5 Deterministic extension hooks
+#### Controller-authorized handoff
 
-Define a constrained extension lifecycle for:
+When the outgoing controller is available, it signs a handoff over:
 
-- pre-validation;
-- pre-advance;
-- post-advance;
-- observation projection;
-- replay metadata;
-- conformance assertions.
+- session and logical seat;
+- outgoing epoch and its latest chain head;
+- incoming epoch number, controller id, and public key;
+- effective transition revision.
 
-Extensions may not use wall-clock time, unrecorded randomness, network I/O, or
-untracked mutation inside deterministic hooks. The conformance kit should run
-the same input twice and reject extensions whose state, observations, events,
-or evidence differ.
+The incoming controller signs acceptance of the same handoff. This proves
+continuity between the two controller epochs without claiming who either
+controller is in the real world.
+
+#### Host-policy transition
+
+Abrupt dropout, moderation, timeout, or recovery may make outgoing consent
+impossible. The host may revoke, vacate, or reassign the seat under declared
+product policy. The transition is recorded as `host-policy`, not presented as
+a controller-authorized handoff.
+
+An auditor can therefore distinguish voluntary transfer from authoritative
+replacement. Whether a host-policy replacement is acceptable for a scored run
+is benchmark or product policy. The record proves only which authority schedule
+the artifact declares and which epoch keys authored later commands. It does not
+prove that a disconnect occurred, that the host followed its external account
+policy, or that replacement was justified. Those remain host assertions.
+
+### 4.6 Signature-chain evolution
+
+RFC-010 binds one immutable seat-key roster into every v1 chain genesis. That
+construction cannot authenticate a replacement key. Existing v1 artifacts
+remain unchanged.
+
+Dynamic control requires a new append-only signature scheme. Its exact domain
+tag is an implementation decision; provisionally it is
+`gaos.submission.ed25519.v2`.
+
+Each controller epoch begins a new per-seat chain whose genesis binds:
+
+- session and logical seat;
+- epoch number and controller key;
+- canonical seat-control transition digest;
+- previous epoch digest;
+- the last authenticated chain head from the previous epoch, when available.
+
+An abrupt dropout may leave an unsigned tail after the previous periodic
+signature. That tail is reported with the existing partial-evidence semantics;
+it does not invalidate a correctly authorized replacement epoch.
+
+The verifier must:
+
+- resolve every signed command against the epoch active at its revision;
+- reject signatures from a future, expired, or different-seat epoch;
+- validate handoff and acceptance signatures when authorization claims them;
+- identify host-policy transitions explicitly;
+- verify epoch ordering and cross-epoch digest continuity;
+- report unsigned or incompletely closed epoch tails without hiding them.
+
+The evidence format must include the complete control history needed for this
+check. A new format version is required; no v1.2 artifact is reinterpreted.
+
+### 4.7 Checkpoint, recovery, and observation delivery
+
+RFC-012 checkpoints must retain:
+
+- the current epoch for every logical seat;
+- controller keys and signing tiers;
+- epoch and transition digests;
+- the last chain head and periodic signature state;
+- any prepared atomic multi-seat control change.
+
+Rehydration must reject missing, duplicated, non-consecutive, or conflicting
+epochs. Observation delivery remains scoped to logical seats. The host binds a
+connection to the currently authorized controller and one or more seat scopes;
+changing connections alone does not alter evidence.
+
+### 4.8 Acceptance evidence
+
+The conformance suite must cover:
+
+- disconnect and same-key reconnect without an epoch change;
+- explicit vacancy followed by a new human controller;
+- human-to-agent and agent-to-human substitution;
+- voluntary signed transfer;
+- host-policy revocation and replacement;
+- atomic two-seat swap;
+- command at the exact revision before and after a handoff;
+- stale outgoing-controller and premature incoming-controller rejection;
+- incomplete periodic-signature tail at abrupt dropout;
+- checkpoint and rehydrate across several epochs;
+- TypeScript/Python verification parity and golden signature vectors.
+
+RFC-012 §6 remains the v0.21 baseline: fixed seats and product-managed
+occupancy. This section supersedes its future direction only when the new
+control and evidence formats ship.
 
 ---
 
@@ -615,13 +748,12 @@ and scoring interpretation.
 4. Publish Unity, Godot, and Unreal presentation guides.
 5. Add cross-language protocol fixtures and host conformance scenarios.
 
-### Stage B — Logic ergonomics
+### Stage B — Dynamic seat control
 
-1. Turn policy.
-2. Per-seat stages and reaction windows.
-3. Lifecycle controller.
-4. Evidence-safe branching.
-5. Deterministic extension hooks.
+1. Seat-control epochs and prepared atomic transitions.
+2. Dropout, drop-in, reconnect, substitution, and transfer flows.
+3. Handoff authorization and the next signature scheme.
+4. Replay, checkpoint, verifier, and cross-language conformance support.
 
 ### Stage C — Research contracts
 
@@ -645,8 +777,10 @@ fixtures are stable.
 
 ## 9 — Compatibility and versioning
 
-The proposal is additive. Existing reducers, agent environments, sessions, and
-replay artifacts remain valid.
+Host, presentation, research, and benchmark contracts are additive. Dynamic
+seat control adds APIs but requires a new signature construction and evidence
+format. Existing reducers, agent environments, fixed-roster sessions, and
+replay artifacts remain valid and retain their existing interpretation.
 
 New wire objects require explicit schema ids and versions. Generated
 cross-language clients must preserve unknown optional fields during compatible
@@ -671,9 +805,12 @@ This RFC does not add:
 - an official benchmark, universal score, or official leaderboard;
 - proof of model identity, prompt secrecy, wall-clock fairness, or held-out
   content;
+- SDK-owned turn order, per-seat stages, lifecycle conditions, undo policy, or
+  generic reducer middleware;
+- adding or removing logical kernel seats after session creation;
 - mutable signed history.
 
 The intended result is narrower: make GAOS straightforward to host and render,
-reduce repeated deterministic game-control code, describe games precisely
-enough for research tooling, and let independent benchmark products publish
-scores backed by replayable evidence.
+make mid-game controller changes auditable, describe games precisely enough
+for research tooling, and let independent benchmark products publish scores
+backed by replayable evidence.
