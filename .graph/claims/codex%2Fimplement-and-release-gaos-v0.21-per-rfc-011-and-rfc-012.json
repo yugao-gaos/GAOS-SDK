@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/implement-and-release-gaos-v0.21-per-rfc-011-and-rfc-012",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "019fa18a-e439-7503-8809-6b26aed9fc13",
+  "branch": "orch/attempt/codex-implement-and-release-gaos-v0.21-per-rfc-011-and-rfc-012",
+  "status": "claimed",
+  "claimed_at": "2026-07-27T04:02:46.251Z",
+  "lease_until": "2026-07-27T05:02:46.251Z"
+}
