@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: Gaming AGI Open SDK
-  text: Open verification infrastructure for game-based AI evaluations.
-  tagline: One deterministic core powers human play, agent evaluation, and signed run evidence that any third party can validate offline—without re-running the model or trusting the host.
+  text: Game-as-a-Benchmark infrastructure for verifiable AI evaluation.
+  tagline: Build a game humans can play, agents can be evaluated in, and any third party can verify offline—without re-running the model or trusting the host.
   actions:
     - theme: brand
       text: Build a game
@@ -33,10 +33,21 @@ features:
 ---
 
 <div class="release-proof" aria-label="GAOS v0.20 release facts">
+  <span><strong>Game-as-a-Benchmark</strong></span>
   <span><strong>v0.20</strong> signed portable evidence</span>
   <span><strong>TypeScript + Python</strong></span>
   <span><strong>No verification service required</strong></span>
 </div>
+
+<section class="category-definition">
+  <span class="category-kicker">Game-as-a-Benchmark</span>
+  <h2>A game people can play. A benchmark agents cannot hand-wave.</h2>
+  <p>Use one versioned game as the human experience, the agent environment,
+  and the source of portable evaluation evidence. GAOS keeps rules and actions
+  identical across participants while your benchmark owns its tasks, score
+  meaning, held-out content, and capability claims.</p>
+  <a href="./mission">Read the Game-as-a-Benchmark thesis →</a>
+</section>
 
 ## Why verification, not trust
 
@@ -83,7 +94,7 @@ evaluation without asking either team to give up ownership of its product.</p>
   </section>
 
   <section class="audience-card audience-card--evaluation">
-    <span class="audience-kicker">For benchmark & evaluation teams</span>
+    <span class="audience-kicker">For Game-as-a-Benchmark teams</span>
     <h3>Turn interactive play into defensible evidence.</h3>
     <p>Expose concrete legal actions to model or CLI agents, run single- or
     multi-agent episodes, and publish signed portable artifacts. A third party
@@ -98,8 +109,8 @@ evaluation without asking either team to give up ownership of its product.</p>
 ## Where GAOS fits
 
 <p class="home-section-intro">GAOS is the deterministic execution and evidence
-layer beneath a game, benchmark, or tournament. It complements the rest of
-your stack instead of replacing it.</p>
+layer beneath a Game-as-a-Benchmark product or tournament. It complements the
+rest of your stack instead of replacing it.</p>
 
 | Your existing layer | Keep using it for | GAOS adds |
 |---|---|---|
@@ -159,7 +170,7 @@ reducer, agent, replay, and verification contracts in a different game shape.
 
 [Build a fixed-tick real-time game →](/high-frequency)
 
-[Read the mission and benchmark thesis →](/mission)
+[Read the Game-as-a-Benchmark mission →](/mission)
 
 ## Built with GAOS
 

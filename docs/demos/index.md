@@ -8,7 +8,7 @@ pageClass: demo-landing
 <div class="demo-landing-hero">
   <span>GAOS PLAYABLE ARCADE</span>
   <h1>Six real games.<br>One agent-ready contract.</h1>
-  <p>Play every game yourself, hand your position to a deterministic agent, or watch complete agent-vs-environment runs. No account, server, or API key required.</p>
+  <p>See Game-as-a-Benchmark in action: play every game yourself, hand your position to a deterministic agent, or watch complete agent-vs-environment runs. No account, server, or API key required.</p>
 </div>
 
 <div class="demo-arcade-grid">

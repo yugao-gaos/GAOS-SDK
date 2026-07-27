@@ -7,6 +7,7 @@ documentation.
 
 | Term | Meaning |
 | --- | --- |
+| **Game-as-a-Benchmark** | A playable, versioned game used as an evaluation environment, where humans and agents share authoritative rules and scored runs can carry portable verification evidence. The benchmark operator still owns tasks, scoring meaning, held-out content, and capability claims. |
 | **agent-playable** | The game exposes structured observations and canonical actions that an agent can use without UI automation. This is the SDK's primary promise. |
 | **agent-ready** | The game keeps one authoritative reducer and can add agent play later without rebuilding its rules. |
 | **agent** | Any policy that chooses an action: a script, search algorithm, model, CLI process, or person acting through an adapter. |

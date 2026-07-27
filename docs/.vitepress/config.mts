@@ -2,21 +2,21 @@ import { defineConfig } from 'vitepress';
 
 export default defineConfig({
   title: 'Gaming AGI Open SDK',
-  description: 'Open verification infrastructure for game-based AI evaluations, with signed runs any third party can validate offline.',
+  description: 'The open-source Game-as-a-Benchmark SDK for deterministic games, agent evaluation, and signed runs any third party can validate offline.',
   base: '/GAOS-TurnBasedGrid-SDK/',
   cleanUrls: true,
   lastUpdated: true,
   head: [
     ['meta', { name: 'theme-color', content: '#6657d9' }],
     ['meta', { property: 'og:type', content: 'website' }],
-    ['meta', { property: 'og:title', content: 'Gaming AGI Open SDK' }],
+    ['meta', { property: 'og:title', content: 'Gaming AGI Open SDK | Game-as-a-Benchmark' }],
     ['meta', {
       property: 'og:url',
       content: 'https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/',
     }],
     ['meta', {
       property: 'og:description',
-      content: 'Open verification infrastructure for game-based AI evaluations: one deterministic core for human play, agent evaluation, and signed runs validated offline.',
+      content: 'Game-as-a-Benchmark infrastructure: one deterministic core for human play, agent evaluation, and signed runs validated offline.',
     }],
     ['meta', {
       property: 'og:image',
@@ -26,13 +26,13 @@ export default defineConfig({
     ['meta', { property: 'og:image:height', content: '909' }],
     ['meta', {
       property: 'og:image:alt',
-      content: 'Gaming AGI Open SDK — one game core for human play, agent evaluation, and third-party proof.',
+      content: 'Gaming AGI Open SDK — Game-as-a-Benchmark infrastructure for human play, agent evaluation, and third-party proof.',
     }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
-    ['meta', { name: 'twitter:title', content: 'Gaming AGI Open SDK' }],
+    ['meta', { name: 'twitter:title', content: 'Gaming AGI Open SDK | Game-as-a-Benchmark' }],
     ['meta', {
       name: 'twitter:description',
-      content: 'Game-based AI evaluation with deterministic execution and third-party-verifiable runs.',
+      content: 'Game-as-a-Benchmark evaluation with deterministic execution and third-party-verifiable runs.',
     }],
     ['meta', {
       name: 'twitter:image',
@@ -40,7 +40,7 @@ export default defineConfig({
     }],
     ['meta', {
       name: 'twitter:image:alt',
-      content: 'Gaming AGI Open SDK — one game core for human play, agent evaluation, and third-party proof.',
+      content: 'Gaming AGI Open SDK — Game-as-a-Benchmark infrastructure for human play, agent evaluation, and third-party proof.',
     }],
   ],
   themeConfig: {
@@ -48,6 +48,7 @@ export default defineConfig({
     nav: [
       { text: 'Home', link: '/' },
       { text: 'Play demos', link: '/demos/' },
+      { text: 'Game-as-a-Benchmark', link: '/mission' },
       {
         text: 'Build',
         items: [
@@ -61,7 +62,7 @@ export default defineConfig({
       {
         text: 'About',
         items: [
-          { text: 'Mission', link: '/mission' },
+          { text: 'Game-as-a-Benchmark mission', link: '/mission' },
           { text: 'Roadmap', link: '/roadmap' },
           { text: 'Version history', link: '/version-history' },
         ],
@@ -83,7 +84,7 @@ export default defineConfig({
       {
         text: 'Start here',
         items: [
-          { text: 'Mission and benchmark thesis', link: '/mission' },
+          { text: 'Game-as-a-Benchmark thesis', link: '/mission' },
           { text: 'Capability map', link: '/capabilities' },
           { text: 'Quickstart', link: '/quickstart' },
           { text: 'Architecture map', link: '/architecture' },
@@ -176,7 +177,7 @@ export default defineConfig({
     },
     outline: { level: [2, 3], label: 'On this page' },
     footer: {
-      message: 'One game core for human play, agent play, and verifiable evaluation.',
+      message: 'Game-as-a-Benchmark: one core for human play, agent evaluation, and third-party verification.',
       copyright: 'Gaming AGI Open SDK',
     },
   },

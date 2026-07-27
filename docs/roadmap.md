@@ -1,8 +1,8 @@
 # Roadmap
 
-GAOS is an open-source bridge between game development and agent evaluation.
-The current v0.x line is focused on making that bridge easier to adopt and
-stable enough for independent games and benchmarks to share.
+GAOS is an open-source Game-as-a-Benchmark bridge between game development and
+agent evaluation. The current v0.x line is focused on making that bridge easier
+to adopt and stable enough for independent games and benchmarks to share.
 
 Roadmap items describe direction, not a compatibility promise or release date.
 Published release notes remain the source of truth for shipped behavior.

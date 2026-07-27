@@ -1,8 +1,8 @@
 # Capabilities
 
-GAOS is a general-purpose SDK for deterministic, verifiable,
-agent-playable games. A game can use one mechanism family by itself or
-combine several through a product-owned `TickReducer`. Card games, drafting
+GAOS is a general-purpose Game-as-a-Benchmark SDK for deterministic,
+verifiable, agent-playable games. A game can use one mechanism family by itself
+or combine several through a product-owned `TickReducer`. Card games, drafting
 games, hidden-role games, abstract graph games, tactics games, simulations, and
 hybrids use the same reducer, agent, and replay contracts.
 
@@ -112,7 +112,7 @@ The settlement kernel and focused mechanisms cover:
 Each mechanism receives product callbacks for meaning and mutation. GAOS owns
 ordering and failure semantics; the game owns rules content and presentation.
 
-## Agents and benchmarks
+## Agents and Game-as-a-Benchmark
 
 `AgentEnvironment` and `MultiAgentEnvironment` expose concrete legal actions
 from the same reducer used by ordinary play. They support seat-redacted views,

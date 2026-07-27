@@ -1,9 +1,10 @@
 # Mechanism reference
 
 The `./engine` package is a set of deterministic, product-neutral building
-blocks for games. Each page in this section describes one
-mechanism family: the state it expects, the ordering it guarantees, the policy
-the product must inject, and the edge cases an integration should test.
+blocks for Game-as-a-Benchmark products and standalone games. Each page in
+this section describes one mechanism family: the state it expects, the
+ordering it guarantees, the policy the product must inject, and the edge cases
+an integration should test.
 
 No board is required. Card-only and hidden-role games can use zones,
 information partitions, tick order, response windows, agents, and replay

@@ -10,6 +10,8 @@ scope of [RFC-010](/rfcs/rfc-010-submission-signatures-and-interest), including
 the Arena and TabletopLabs migration findings. Its central result is portable,
 signed run evidence that a third party can verify offline with a pinned
 historical adapter—without trusting the host or a GAOS-operated service.
+It provides the independently checkable evidence layer behind GAOS's
+Game-as-a-Benchmark positioning.
 
 [View the v0.20.0 release on GitHub →](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.20.0)
 

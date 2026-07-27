@@ -1,25 +1,34 @@
 # Gaming AGI Open SDK (GAOS)
 
-**Build deterministic games. Evaluate agents. Let any third party verify the
-result.**
+**The open-source Game-as-a-Benchmark SDK. Build deterministic games, evaluate
+agents, and let any third party verify the result.**
 
 [Documentation](https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/) ·
 [Playable demos](https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/demos/) ·
 [v0.20 release notes](docs/releases.md) ·
 [Discord](https://discord.gg/vdvUgcqPU)
 
-GAOS is an open-source TypeScript and Python SDK for games that humans and
-agents can both play across turn-based, simultaneous WEGO, and fixed-tick
-real-time systems. One reducer drives the game, the agent environment, the
-authoritative session, and deterministic replay. Signed runs can be checked
-offline by anyone with the pinned game adapter—without trusting the host or a
-GAOS-operated service.
+GAOS is an open-source TypeScript and Python SDK for **Game-as-a-Benchmark**:
+games that humans and agents can both play across turn-based, simultaneous
+WEGO, and fixed-tick real-time systems. One reducer drives the game, the agent
+environment, the authoritative session, and deterministic replay. Signed runs
+can be checked offline by anyone with the pinned game adapter—without trusting
+the host or a GAOS-operated service.
 
 **The problem it solves:** agent evaluation results are self-published, and
 checking one today means re-running the whole evaluation at the full inference
 cost of the original — after which you still have a different sample rather
 than that run. GAOS keeps producing a result expensive and makes validation
 nearly free. [Why verification, not trust →](#why-verification-not-trust)
+
+## What is Game-as-a-Benchmark?
+
+**Game-as-a-Benchmark** turns a playable game into a versioned evaluation
+environment. Humans and agents face the same rules and canonical actions;
+every scored run can carry portable evidence of exactly what happened. It is
+not a static test set or a claim that every game score measures general
+intelligence—the benchmark operator still owns the tasks, scoring meaning,
+held-out content, and capability claims.
 
 ## The three reasons to use GAOS
 
@@ -52,16 +61,16 @@ and commercial policy.
 
 ## Built for two teams
 
-| Game developers | Benchmark and evaluation teams |
+| Game developers | Game-as-a-Benchmark teams |
 |---|---|
 | Ship human play today without creating a second rules engine for bots tomorrow. Use reusable board, card, zone, movement, visibility, scoring, settlement, and session mechanisms. | Turn interactive games into reproducible single- or multi-agent evaluations. Use structured legal actions, provider-neutral drivers, portable transcripts, signed evidence, and offline verification. |
 | [Build your first game →](docs/quickstart.md) | [Build an agent evaluation →](docs/agentic-play.md) |
 
 ## Where GAOS fits
 
-GAOS is **open verification infrastructure for game-based AI evaluations**. It
-is the deterministic execution and evidence layer beneath a game, benchmark,
-or tournament—not a replacement for the rest of the stack.
+GAOS is **open verification infrastructure for Game-as-a-Benchmark
+evaluations**. It is the deterministic execution and evidence layer beneath a
+game, benchmark, or tournament—not a replacement for the rest of the stack.
 
 Use GAOS alongside:
 

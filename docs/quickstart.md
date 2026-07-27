@@ -1,15 +1,15 @@
 # Quickstart
 
-GAOS gives game developers and interactive-benchmark creators the same starting
+GAOS gives game developers and Game-as-a-Benchmark creators the same starting
 point: one reducer that can power human play, agent play, and replay
 verification.
 
 - **Building a game?** Start with the mechanism family closest to your game,
   then wrap the finished reducer with `AgentEnvironment` when you want an AI
   player, solver, tournament, or evaluation.
-- **Building a benchmark?** Start with the environment contract and use the
-  mechanism suite to create deeper interactive tasks without building a game
-  runtime from scratch.
+- **Building a Game-as-a-Benchmark product?** Start with the environment
+  contract and use the mechanism suite to create deeper interactive tasks
+  without building a game runtime from scratch.
 
 You can also use the TypeScript engine by itself or connect either language to
 a protocol-compatible host. All paths converge on the same deterministic game
@@ -89,7 +89,7 @@ does not depend on any model provider or CLI package.
 | Square, hex, graph, or multi-board game | [Locations and layouts](/mechanisms/locations-and-layouts) |
 | Sequential or simultaneous multiplayer | [Ticks and lockstep](/mechanisms/ticks-and-lockstep) |
 | Hybrid board/zone game | [Portals](/mechanisms/portals) |
-| Agent benchmark or tournament | [Agentic play](/agentic-play) and [portable replay](/mechanisms/replay) |
+| Game-as-a-Benchmark evaluation or tournament | [Agentic play](/agentic-play) and [portable replay](/mechanisms/replay) |
 
 The [complete capability map](/capabilities) shows which mechanism families
 compose without requiring a board.

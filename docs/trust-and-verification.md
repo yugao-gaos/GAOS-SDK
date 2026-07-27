@@ -1,6 +1,7 @@
 # Trust and verification
 
-GAOS evidence is layered. Each layer proves a different fact:
+Game-as-a-Benchmark claims are useful only when the exact scored run remains
+checkable. GAOS evidence is layered so each layer proves a different fact:
 
 1. deterministic replay checks that the recorded inputs reproduce the recorded
    computation;

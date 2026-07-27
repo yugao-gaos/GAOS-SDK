@@ -1,6 +1,7 @@
 # Python SDK surface
 
-The Python distribution provides a zero-runtime-dependency hosted client, a
+The Python distribution is GAOS's Game-as-a-Benchmark integration surface for
+research harnesses. It provides a zero-runtime-dependency hosted client, a
 Gymnasium-compatible environment API, provider-neutral evaluation helpers, and
 portable replay utilities. It targets Python 3.10 or newer and does not require
 Gymnasium at runtime.

@@ -6,6 +6,10 @@ rollback/resimulation, replay verification, and the session kernel. The product
 owns its scheduler and wall clock, sockets or WebRTC transport, signaling,
 interpolation, rendering, late-join flow, and latency policy.
 
+That makes fixed-tick action and strategy games first-class
+Game-as-a-Benchmark environments rather than limiting the category to
+turn-based tasks.
+
 ```ts
 import {
   createTickRate,

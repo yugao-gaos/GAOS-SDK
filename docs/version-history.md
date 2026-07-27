@@ -12,7 +12,8 @@ Portable replay now adds roster-bound Ed25519 submission chains and explicit
 
 Released July 26, 2026 after Arena and TabletopLabs returned their v0.19
 integration findings. v0.20 makes the resulting signed artifacts fully
-third-party verifiable with a pinned historical adapter and no GAOS service.
+third-party verifiable with a pinned historical adapter and no GAOS service,
+providing the evidence layer for Game-as-a-Benchmark products.
 
 - `gaos.replay` v1.2 validates and verifies
   `gaos.submission.ed25519.v1`, with canonical command/cursor/time material for

@@ -1,9 +1,8 @@
 # Architecture map
 
-GAOS bridges game development and agent evaluation through one authoritative
-reducer. A human-facing client, an autonomous agent, a solver, and a replay
-verifier consume the same rules instead of maintaining separate
-implementations.
+GAOS implements Game-as-a-Benchmark through one authoritative reducer. A
+human-facing client, an autonomous agent, a solver, and a replay verifier
+consume the same rules instead of maintaining separate implementations.
 
 The ownership boundary remains deliberate: reusable behavior belongs in the
 SDK; authored meaning, benchmark methodology, and product policy stay with the

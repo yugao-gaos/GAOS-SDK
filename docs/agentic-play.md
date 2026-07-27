@@ -2,7 +2,8 @@
 
 The SDK is agent-playable because agents can discover and operate a deterministic
 environment without a renderer, a particular model provider, or product-owned
-control code.
+control code. This is the agent-facing half of Game-as-a-Benchmark: the same
+game rules used for human play become a structured evaluation environment.
 
 ## Environment contract
 
@@ -74,6 +75,10 @@ hidden state.
 `runAgentEpisode` accepts synchronous or asynchronous policies.
 `evaluateAgentEpisodes` runs a deterministic case list and reports wins,
 failures, truncations, mean reward, and mean ticks.
+
+In a Game-as-a-Benchmark evaluation, these episodes are not detached test
+fixtures. They are runs of the same versioned game humans can play, expressed
+through canonical observations and actions.
 
 ```ts
 const result = await evaluateAgentEpisodes(

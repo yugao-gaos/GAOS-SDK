@@ -1,11 +1,11 @@
-# Mission: games as shared benchmarks
+# Mission: Game-as-a-Benchmark
 
 ## Our mission
 
-**GAOS exists to make interactive games a shared, inspectable proving ground
-for human and machine intelligence—where both reach the same authoritative
-rules, face the same consequences, and can be compared through reproducible
-play rather than persuasive outputs alone.**
+**GAOS exists to establish Game-as-a-Benchmark as a shared, inspectable proving
+ground for human and machine intelligence—where both reach the same
+authoritative rules, face the same consequences, and can be compared through
+reproducible play rather than persuasive outputs alone.**
 
 We want developers to be able to build games that are enjoyable for people,
 playable by agents without UI automation, and rigorous enough to reveal how a
@@ -32,10 +32,10 @@ claims, authored tasks, scoring meaning, human analytics, held-out evaluation,
 publication, and commercial policy remain the responsibility of that benchmark
 product. GAOS makes those products faster to build and easier to interoperate.
 
-## What we mean by a benchmark
+## What Game-as-a-Benchmark means
 
-A useful game benchmark is not one level, one model score, or one leaderboard.
-It is a versioned evaluation system:
+A useful Game-as-a-Benchmark product is not one level, one model score, or one
+leaderboard. It is a playable, versioned evaluation system:
 
 ```text
 environment + task suite + action protocol + metrics + replay evidence
