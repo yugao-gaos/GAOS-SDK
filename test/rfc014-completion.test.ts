@@ -471,8 +471,7 @@ describe('RFC-014 release gate', () => {
     expect(report.schema).toBe(HOST_CONFORMANCE_VERSION);
     expect(report.scenarios).toHaveLength(RFC014_HOST_CONFORMANCE_SCENARIOS.length);
     expect(report.passed).toBe(true);
-    expect(report.scenarios.every(({ details }) =>
-      details === undefined || (details as { executed?: boolean }).executed === true)).toBe(true);
+    expect(report.scenarios.every(({ details }) => details !== undefined)).toBe(true);
   });
 
   it('rejects no-op, malformed, echoed, extra, and wrong conformance observations', async () => {
@@ -485,16 +484,19 @@ describe('RFC-014 release gate', () => {
     for (const execute of [
       async () => undefined,
       async (value: HostConformanceFixture) => value,
-      async (value: HostConformanceFixture) => ({ ...value.expected as object, extra: true }),
+      async (value: HostConformanceFixture) => ({
+        scenario: value.scenario, executed: true, extra: true,
+      }),
       async (value: HostConformanceFixture) => ({ scenario: value.scenario, executed: false }),
     ]) {
       expect((await runHostConformance(adapter(execute), [fixture!])).passed).toBe(false);
     }
     const malformed = { ...structuredClone(fixture!), steps: [] };
     expect((await runHostConformance(
-      adapter(async (value) => value.expected),
+      adapter(async (value) => ({ scenario: value.scenario, executed: true })),
       [malformed],
     )).passed).toBe(false);
+    expect('expected' in fixture!).toBe(false);
   });
 
   it('repairs missing patch bases and never replays old presentation cues', () => {

@@ -40,16 +40,41 @@ export interface HostConformanceFixture {
   schema: typeof HOST_CONFORMANCE_FIXTURE_VERSION;
   scenario: Rfc013HostConformanceScenario;
   steps: readonly { sequence: number; operation: string }[];
-  expected: JsonValue;
 }
 
 export const RFC014_HOST_CONFORMANCE_FIXTURES: readonly HostConformanceFixture[] =
   RFC014_HOST_CONFORMANCE_SCENARIOS.map((scenario) => ({
     schema: HOST_CONFORMANCE_FIXTURE_VERSION,
     scenario,
-    steps: [{ sequence: 0, operation: scenario }],
-    expected: { scenario, executed: true },
+    steps: [
+      { sequence: 0, operation: 'initialize-isolated-host' },
+      { sequence: 1, operation: scenario },
+      { sequence: 2, operation: 'observe-normalized-result' },
+    ],
   }));
+
+/** Private oracle: never included in the trace passed to an adapter. */
+const HOST_CONFORMANCE_EXPECTED = new Map(
+  Object.entries({
+    'byte-identical retry': { eventCount: 1, retry: 'idempotent' },
+    'conflicting event reuse': { conflict: 'rejected', eventCount: 1 },
+    'crash before persistence': { durableCount: 0, revision: 0 },
+    'crash after persistence': { durableCount: 1, revision: 1 },
+    'crash after commit': { durableCount: 1, revision: 1 },
+    'publish retry after durable commit': { publications: 1 },
+    'stale prepared transition rejection': { stale: 'rejected' },
+    'timeout transition handling': { timeoutRevision: 1 },
+    'acknowledgement and rejection': { acknowledged: 1, rejected: 1 },
+    'reconnect repair': { repairSnapshot: true },
+    'patch without base snapshot': { repairSnapshot: true },
+    'dropout and drop-in': { controllerEpoch: 1 },
+    'reconnect and substitution': { controllerEpoch: 1 },
+    'transfer and atomic seat swap': { alpha: 'two', beta: 'one' },
+    'inactive controller epoch rejection': { inactiveEpoch: 'rejected' },
+    'checkpoint restore and retention floor': { revision: 1, retentionFloor: 1 },
+    'artifact finalization and independent verification': { artifactVerified: true },
+  }) as unknown as [Rfc013HostConformanceScenario, JsonValue][],
+);
 
 export interface HostConformanceAdapter {
   runtime: string;
@@ -83,8 +108,10 @@ export async function runHostConformance(
     try {
       assertHostConformanceFixture(fixture);
       const actual = await adapter.execute(structuredClone(fixture));
+      const expected = HOST_CONFORMANCE_EXPECTED.get(scenario);
       if (actual === undefined
-        || canonicalJson(actual) !== canonicalJson(fixture.expected)) {
+        || expected === undefined
+        || canonicalJson(actual) !== canonicalJson(expected)) {
         throw new TypeError('adapter observation does not exactly match fixture expectation');
       }
       scenarios.push({ scenario, passed: true, details: structuredClone(actual) });
@@ -107,7 +134,7 @@ export async function runHostConformance(
 
 function assertHostConformanceFixture(fixture: HostConformanceFixture): void {
   if (canonicalJson(Object.keys(fixture).sort()) !== canonicalJson(
-    ['expected', 'scenario', 'schema', 'steps'],
+    ['scenario', 'schema', 'steps'],
   ) || fixture.schema !== HOST_CONFORMANCE_FIXTURE_VERSION
     || !RFC014_HOST_CONFORMANCE_SCENARIOS.includes(fixture.scenario)
     || !Array.isArray(fixture.steps) || fixture.steps.length === 0) {
@@ -119,6 +146,14 @@ function assertHostConformanceFixture(fixture: HostConformanceFixture): void {
       throw new TypeError('malformed or unordered host conformance step');
     }
   });
+  const official = RFC014_HOST_CONFORMANCE_FIXTURES.find(
+    (candidate) => candidate.scenario === fixture.scenario,
+  );
+  if (official === undefined
+    || canonicalJson(fixture.steps as unknown as JsonValue)
+      !== canonicalJson(official.steps as unknown as JsonValue)) {
+    throw new TypeError('host conformance operation trace does not match the versioned fixture');
+  }
 }
 
 class ReferenceConformanceFixture {
@@ -169,70 +204,77 @@ export async function runReferenceHostConformance(): Promise<HostConformanceRepo
   return runHostConformance({
     runtime: 'gaos-reference-node',
     adapterVersion: '1.0.0',
-    execute: async (fixture) => {
+    execute: async (fixture): Promise<JsonValue> => {
       const scenario = fixture.scenario;
-      assertFixture(fixture.steps.length === 1
-        && fixture.steps[0]!.operation === scenario, 'unsupported fixture operations');
+      const official = RFC014_HOST_CONFORMANCE_FIXTURES.find(
+        (candidate) => candidate.scenario === scenario,
+      );
+      assertFixture(official !== undefined
+        && canonicalJson(fixture.steps as unknown as JsonValue)
+          === canonicalJson(official.steps as unknown as JsonValue),
+      'unsupported fixture operations');
       const host = new ReferenceConformanceFixture();
       switch (scenario) {
         case 'byte-identical retry':
           assertFixture(eventStoreFacts.get('byte-identical retry'), 'event-store retry failed');
-          break;
+          return { eventCount: 1, retry: 'idempotent' };
         case 'conflicting event reuse':
           assertFixture(eventStoreFacts.get('conflicting event reuse'), 'event-store conflict failed');
-          break;
+          return { conflict: 'rejected', eventCount: 1 };
         case 'crash before persistence':
           try { host.ingest('a', 'one', 'before'); } catch { /* expected */ }
           assertFixture(host.durable.size === 0 && host.revision === 0, 'pre-persist crash mutated state');
-          break;
+          return { durableCount: 0, revision: 0 };
         case 'crash after persistence':
         case 'crash after commit':
           try { host.ingest('a', 'one', 'after'); } catch { /* expected */ }
           assertFixture(host.durable.get('a') === 'one' && host.revision === 1, 'durable commit was lost');
           assertFixture(host.ingest('a', 'one') === 'retry', 'recovery did not deduplicate');
-          break;
+          return { durableCount: host.durable.size, revision: host.revision };
         case 'publish retry after durable commit':
           host.ingest('a', 'one');
           host.publish('a');
           host.publish('a');
           assertFixture(host.published.size === 1, 'publish retry duplicated output');
-          break;
+          return { publications: host.published.size };
         case 'stale prepared transition rejection':
           host.prepared = true;
           const base = host.revision;
           host.ingest('a', 'one');
           try { host.commitPrepared(base); } catch {
-            return { scenario, executed: true };
+            return { stale: 'rejected' };
           }
           throw new Error('stale prepared transition was committed');
         case 'timeout transition handling':
           host.ingest('timeout:1', '{"tick":10}');
           assertFixture(host.revision === 1, 'timeout was not durable');
-          break;
+          return { timeoutRevision: host.revision };
         case 'acknowledgement and rejection':
           host.ingest('accepted', 'ok');
-          try { host.ingest('accepted', 'conflict'); } catch { break; }
+          try { host.ingest('accepted', 'conflict'); } catch {
+            return { acknowledged: 1, rejected: 1 };
+          }
           throw new Error('rejected receipt was not produced');
         case 'reconnect repair':
         case 'patch without base snapshot':
           host.ingest('snapshot', '{"revision":1}');
           assertFixture(host.durable.has('snapshot'), 'repair snapshot missing');
-          break;
+          return { repairSnapshot: true };
         case 'dropout and drop-in':
         case 'reconnect and substitution':
           host.controllerEpoch += 1;
           assertFixture(host.controllerEpoch === 1, 'controller epoch did not advance');
-          break;
+          return { controllerEpoch: host.controllerEpoch };
         case 'transfer and atomic seat swap': {
           const seats = new Map([['a', 'one'], ['b', 'two']]);
           const next = new Map([['a', seats.get('b')!], ['b', seats.get('a')!]]);
           assertFixture(next.get('a') === 'two' && next.get('b') === 'one', 'swap was not atomic');
-          break;
+          return { alpha: next.get('a')!, beta: next.get('b')! };
         }
         case 'inactive controller epoch rejection':
           host.controllerEpoch = 1;
           assertFixture(0 !== host.controllerEpoch, 'stale epoch remained active');
-          break;
+          return { inactiveEpoch: 'rejected' };
         case 'checkpoint restore and retention floor':
           host.ingest('a', 'one');
           host.retentionFloor = host.revision;
@@ -243,15 +285,15 @@ export async function runReferenceHostConformance(): Promise<HostConformanceRepo
           });
           assertFixture(restored.revision === restored.retentionFloor
             && restored.durable.length === 1, 'checkpoint did not restore');
-          break;
+          return { revision: restored.revision, retentionFloor: restored.retentionFloor };
         case 'artifact finalization and independent verification': {
           host.ingest('a', 'one');
           const artifact = canonicalArtifact([...host.durable]);
           assertFixture(artifact === canonicalArtifact([...host.durable]), 'artifact verification failed');
-          break;
+          return { artifactVerified: true };
         }
       }
-      return { scenario, executed: true };
+      throw new Error(`unsupported conformance scenario ${scenario}`);
     },
   });
 }
