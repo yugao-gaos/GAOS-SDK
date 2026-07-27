@@ -40,6 +40,11 @@ Two standing design rules govern every RFC in this batch:
 | [006](rfc-006-session-kernel.md) | Authoritative session kernel with prepared persistence transitions | v0.19 | protocol, replay v1.1 |
 | [007](rfc-007-deterministic-math.md) | Deterministic math classification and immutable `dmath` contexts | v0.19 | engine |
 | [008](rfc-008-commitment-envelope.md) | Context-bound commit–reveal envelopes and replay audit evidence | v0.19 | 006, replay v1.1 |
+| [009](rfc-009-release-sequencing-and-migration.md) | Release sequencing and migration gates | v0.19–v0.20 | 006, 008 |
+| [010](rfc-010-submission-signatures-and-interest.md) | Submission signatures, audit chains, and generic interest management | v0.20 | 006, 008 |
+| [011](rfc-011-arena-migration-findings.md) | Arena's open asks of the SDK | v0.21 review | 006, 009, 010 |
+| [012](rfc-012-post-migration-gaps.md) | SDK gaps after the TabletopLabs migration completed | v0.21 review | 006, 009 |
+| [013](rfc-013-ecosystem-bridges-and-benchmark-tooling.md) | Ecosystem bridges, game semantics, and verifiable benchmark tooling | proposed v0.22+ | 006, 010, 012 |
 
 Sequencing rationale: RFC-001/002 are contract-level and mostly mechanical —
 they unblock naming and addressing for everything else. RFC-003 is the one
