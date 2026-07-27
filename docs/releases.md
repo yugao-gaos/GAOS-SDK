@@ -3,6 +3,153 @@
 For the public chronological changelog, see the
 [complete version history](/version-history).
 
+## v0.20.0
+
+Released July 26, 2026. This release completes the resolved implementation
+scope of [RFC-010](/rfcs/rfc-010-submission-signatures-and-interest), including
+the Arena and TabletopLabs migration findings. Its central result is portable,
+signed run evidence that a third party can verify offline with a pinned
+historical adapter—without trusting the host or a GAOS-operated service.
+
+[View the v0.20.0 release on GitHub →](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.20.0)
+
+### Migration from v0.19
+
+Observation delivery uses one mandatory v2 envelope. `ObservationDelta.codec`
+is `'v2'`; bodies may be `patch`, `snapshot`, or `unchanged`, so clients should
+pass envelopes through `applyObservationDelta`.
+
+Patch computation is a delivery policy, not a wire-version choice. The default
+`patchStrategy: 'adaptive'` requires a patch to win by `minReduction` (default
+**4×**). After repeated unsafe, over-bound, or uneconomic probes, its per-scope
+circuit breaker doubles from `patchBackoffTicks` (default **8**) up to
+`maxPatchBackoffTicks` (default **32**), then performs a half-open probe.
+Products that prefer predictable snapshot CPU can set
+`patchStrategy: 'never'`; envelopes remain v2 and still use `snapshot` or
+`unchanged` bodies.
+
+The patch walker now abandons operation and canonical-byte bounds during the
+walk, reuses the already cached canonical view for its size decision, and does
+not clone a snapshot on a successful patch. Derived seat and interest views
+use copy-on-write references inside prepared drafts; public observations and
+snapshot bodies remain isolated copies.
+
+Transport compression remains recommended for snapshot-heavy traffic. In the
+synthetic benchmark, zlib level 1 compresses a 500-entity snapshot from 38,420
+to 3,839 bytes in about 0.10 ms/seat; level 6 reaches 3,361 bytes but costs
+about 0.57 ms/seat. These synchronous zlib figures expose the CPU trade and are
+not a substitute for measuring the product's actual WebSocket stack.
+
+Durable `SessionEvent.kind` also adds `interest` and `seat-signature`; exhaustive
+switches need arms for enabled RFC-010 lanes. A patch is an observation body,
+not a durable session-event kind. This is an intentional pre-1.0 source/wire
+break, accepted because Arena and TabletopLabs are early integrations and can
+migrate without a compatibility period.
+
+- `gaos.replay` v1.2 assigns cryptographic meaning to the reserved integrity
+  slots: canonical Ed25519 submission envelopes, roster-bound per-seat
+  SHA-256 chains, per-seat periodic signing tiers, and durable
+  `seat-signature` checkpoints;
+- replay results separate deterministic `ok` from signature state and expose
+  the adoption verdicts `trusted`, `unverifiable`, and `rejected`; unsigned
+  v1.0/v1.1 artifacts remain valid and report `unverifiable`;
+- trusted verification independently reconstructs signed commands and timeout
+  actions through the pinned semantic adapter; missing mappings are
+  `unverifiable`, while mismatches are `rejected`;
+- tick-bounded timeout policy uses
+  `{ mode: 'ticks', windowTicks: N }` and fixes timeout position at
+  `windowRef + N`; wall-clock fairness remains outside the artifact. Unsigned
+  sessions retain the v0.19 opaque timeout-policy reservation;
+- TypeScript uses async WebCrypto signing plus synchronous pure-JS
+  verification; the zero-dependency Python package signs and verifies the same
+  published complete-preimage vectors;
+- `gaos verify <artifact> --adapter <module>` and Python `gaos-verify` compose
+  pinned product replay with signature facts completely offline;
+- signed kernel sessions declare `seatKeys` and
+  `signaturePolicy: { scheme: 'gaos.submission.ed25519.v1' }`, preserve exact
+  command/cursor material for accepted and rejected submissions, and record
+  periodic heads through `prepareSeatSignature`;
+- the session hot path caches canonical seat views, reuses their bytes for
+  unchanged checks and digests, snapshots each view once, and clones the heavy
+  prepared-delta graph once while preserving distinct published array shells.
+- client-declared interest is ordered per `(seat, scopeId)`, structurally
+  constrained inside the partitioned view, tier-2 signed, replayed, and
+  delivered with omission metadata;
+- observation codec v2 is the default and emits safe bounded JSON patches with
+  mandatory snapshot fallback and digest-checked reconstruction;
+- reducer legality runs before durable ingest, invalid views are typed/fail
+  fast, action `payload` round-trips through replay, repair envelopes declare
+  their origin, and play-all-level run composition is explicit;
+- generic infrastructure accepts the minimal `SessionView`; existing
+  action-oriented reducers keep `TickView`, while non-grid observations supply
+  replay counters through `replayMetrics` instead of manufacturing a HUD;
+- seat-local chooser/dialogue navigation is explicitly host/UI state, while
+  confirmation enters the deterministic kernel as an ordinary SDK action;
+- `awaitingSeats`, resolved duplicate receipts, `sessionHeaderFor`, and
+  event-array rehydration remove loops reported by both production hosts.
+
+## v0.19.0
+
+Released July 25, 2026. Tagged `v0.19.0` (annotated, pointing at `5ddd404`) —
+**this is the migration baseline; pin the tag.** See RFC-009 §4 for the pin
+rule and the contract freeze that holds while both consumer migrations are in
+flight.
+
+This release adds the optional authoritative session and integrity layer:
+
+- `./session` prepared transitions enforce persist-before-publish ordering;
+- reducer drafts have explicit fork, discard, and retirement ownership;
+- accepted partial-window intents and receipts survive crash rehydration;
+- `finalizeRunReplay` composes ordered level transcripts with derived seeds,
+  global record numbering, aggregate totals, and run-terminal validation;
+- observation deltas carry applied submission acknowledgements in canonical
+  reducer order for prediction reconciliation;
+- rejection advances carry durable per-seat rejection identities at a
+  transition watermark without inventing a gameplay revision; snapshots can
+  replay missed notices after crash/reconnect, and accepted submission IDs
+  remain permanently non-reusable;
+- replay v1.1 preserves grouped reducer calls plus timeout, extension, and
+  commitment-mismatch audit records while retaining v1.0 parsing;
+- the pre-tag API and wire vocabulary is `prepareTimeout`, `TimeoutInput`,
+  `timeoutId`, record/event kind `timeout`, and resolution cause `timeout`;
+- TypeScript and Python pin canonical object-key ordering to Unicode code
+  points, share the JavaScript-safe integer domain, and enforce the same
+  strict replay object/null semantics;
+- `dmath-1` supplies deterministic trigonometry and rounding, frozen for the
+  first time by the v0.19 tag with independent-oracle and cross-runtime
+  evidence;
+- `gaos.commit.sha256.v1` supplies context-bound commit–reveal verification
+  with complete cross-language byte vectors;
+- replay recheck results add non-fatal `diagnostics`, including verified and
+  redacted commitment mismatches; mismatch identities and chronology are
+  checked, `ok` is reserved for replay consistency, and consumers apply their
+  own policy to diagnostics;
+- v1.1 audit records are explicitly advisory host attestation, not a
+  leaderboard trust signal; strict-schema slots are reserved for RFC-010's
+  additive v1.2 `seatKeys`, `clientTime`, periodic signature, policy,
+  signature, and chain fields;
+- session construction requires an explicit
+  `hostTime: (() => number) | 'none'` choice. Clocked events carry advisory
+  UTC epoch milliseconds; `'none'` keeps timestamp-free transcripts valid.
+  Replay projection is opt-in and verification ignores it;
+- `abort()` is idempotent after an explicit or automatic abort; it still
+  rejects committed and foreign prepared transitions;
+- session `AdvanceSummary` adds non-fatal `warnings`, currently used to
+  surface live commitment-salt reuse.
+
+The [sessions and integrity guide](/session-and-integrity) normatively defines
+the host's prepare → persist → commit → publish order, event-id idempotency,
+crash recovery, and reducer-state ownership callbacks.
+
+Migration note: `finalizeRunReplay` requires each source level transcript to
+record its already-derived level seed with `seedPolicy: 'explicit'`.
+Transcripts using `gaos.run-level-seed.v1` directly are rejected.
+Hosts migrating kernel construction must also choose a `hostTime` policy.
+Existing timestamp-free persisted events remain rehydratable under any
+`hostTime` policy.
+
+See [sessions and integrity](/session-and-integrity).
+
 ## v0.18.0
 
 Released July 24, 2026.

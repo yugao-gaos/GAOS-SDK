@@ -1,0 +1,61 @@
+[
+  {
+    "name": "empty-object",
+    "binding": {
+      "sessionId": "s",
+      "seat": "a",
+      "commitmentId": 0,
+      "windowRef": 0
+    },
+    "salt": "000102030405060708090a0b0c0d0e0f",
+    "payload": {},
+    "preimageHex": "0000001567616f732e636f6d6d69742e7368613235362e7631000000017300000001610000000000000000000000000000000000000010000102030405060708090a0b0c0d0e0f000000027b7d",
+    "hash": "b4cbe52512f1f5bdefbd1ee40c9a3f87a44f07eb9918e0ddf12f22d644d1e831"
+  },
+  {
+    "name": "nested-codepoints",
+    "binding": {
+      "sessionId": "session-1",
+      "seat": "red",
+      "commitmentId": 7,
+      "windowRef": 42
+    },
+    "salt": "00112233445566778899aabbccddeeff",
+    "payload": {
+      "z": [true, null, 3],
+      "text": "é",
+      "a": "é"
+    },
+    "preimageHex": "0000001567616f732e636f6d6d69742e7368613235362e76310000000973657373696f6e2d31000000037265640000000000000007000000000000002a0000001000112233445566778899aabbccddeeff000000297b2261223a22c3a9222c2274657874223a2265cc81222c227a223a5b747275652c6e756c6c2c335d7d",
+    "hash": "034de6a1aea5f34e622bb96959d8a6c4e30345c4326b8319bf6bbef43c0c854b"
+  },
+  {
+    "name": "wide-binding",
+    "binding": {
+      "sessionId": "arena:match-2026",
+      "seat": "blue.team",
+      "commitmentId": 4294967295,
+      "windowRef": 9007199254740991
+    },
+    "salt": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "payload": ["north", { "power": 2 }],
+    "preimageHex": "0000001567616f732e636f6d6d69742e7368613235362e7631000000106172656e613a6d617463682d3230323600000009626c75652e7465616d00000000ffffffff001fffffffffffff00000020ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff000000155b226e6f727468222c7b22706f776572223a327d5d",
+    "hash": "aceba8001afb3bd7d672c9a3db1c67e3068e0d0f596c5bf8c2f2ff22e65a9311"
+  },
+  {
+    "name": "non-bmp-key-order",
+    "binding": {
+      "sessionId": "unicode-order",
+      "seat": "gold",
+      "commitmentId": 9,
+      "windowRef": 13
+    },
+    "salt": "0123456789abcdeffedcba9876543210",
+    "payload": {
+      "😀": "astral",
+      "": "private"
+    },
+    "preimageHex": "0000001567616f732e636f6d6d69742e7368613235362e76310000000d756e69636f64652d6f7264657200000004676f6c640000000000000009000000000000000d000000100123456789abcdeffedcba9876543210000000217b22ee8080223a2270726976617465222c22f09f9880223a2261737472616c227d",
+    "hash": "85d605ea37bda3de2ebd83dd9afe495b951763fa79d84791f9bf503dbd57aacb"
+  }
+]

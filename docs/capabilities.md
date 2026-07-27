@@ -2,10 +2,9 @@
 
 GAOS is a general-purpose SDK for deterministic, verifiable,
 agent-playable games. A game can use one mechanism family by itself or
-combine several through a product-owned `TickReducer`. Tabletop and board games
-are supported application families, not the SDK boundary. Card games, drafting
+combine several through a product-owned `TickReducer`. Card games, drafting
 games, hidden-role games, abstract graph games, tactics games, simulations, and
-hybrids can use the same reducer, agent, and replay contracts.
+hybrids use the same reducer, agent, and replay contracts.
 
 ## Capability map
 

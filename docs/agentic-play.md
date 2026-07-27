@@ -83,6 +83,19 @@ const result = await evaluateAgentEpisodes(
 );
 ```
 
+For a scored or published evaluation, treat the evaluation driver as an
+ordinary session seat with an Ed25519 key. Sign its canonical submissions and
+publish the v1.2 replay, seat roster, declared signing tier, pinned historical
+adapter, and reported score together. A benchmark operator can then reproduce
+the computation and establish that the listed agent key authored the signed
+commands without trusting the submitter's database.
+
+Key-to-agent identity remains operator policy, and signatures do not prevent a
+colluding driver or host. Require the verifier's `trusted` verdict for scored
+runs; `unverifiable` means no signature evidence, not a failed agent.
+[Trust and verification](/trust-and-verification) covers key handling, chain
+heads, CLI use, and the honest limits.
+
 ## Tool and MCP adapters
 
 `createAgentToolAdapter(environment)` exposes four provider-neutral operations:

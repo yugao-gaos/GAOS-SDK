@@ -147,15 +147,17 @@ world/entity rules.
 
 ## Reducer adapter
 
-The solver and replay checker depend on `TickReducer<TLevel, TState>` rather
-than a Zonoid registry. A product adapter provides three pure operations:
+Session, lockstep, and replay infrastructure depend on
+`TickReducer<TLevel, TState, TView>` rather than a Zonoid registry. A product
+adapter provides three pure operations:
 
 ```ts
-interface TickReducer<TLevel, TState> {
+interface TickReducer<TLevel, TState, TView extends SessionView = TickView> {
   init(level: TLevel, seed: number): TState;
   advance(state: TState, inputs: readonly SubmittedAction[]): TState;
-  view(state: TState): TickView;
-  viewFor?(state: TState, seat: string): TickView;
+  view(state: TState): TView;
+  viewFor?(state: TState, seat: string): TView;
+  replayMetrics?(state: TState): { actionsUsed: number };
 }
 ```
 
@@ -169,8 +171,11 @@ apply one input at a time. New integrations use `TickReducer.advance`, which
 accepts zero, one, or many canonically ordered inputs.
 
 The same reducer adapter powers `AgentEnvironment` and
-`MultiAgentEnvironment`. A product therefore needs no second gameplay
-implementation for agents, hosted sessions, solving, or deterministic replay.
+`MultiAgentEnvironment` when its view extends the action-capable `TickView`.
+Non-grid reducers may extend the smaller `SessionView` for hosted sessions and
+deterministic replay, supplying `replayMetrics` because their observation has
+no `hud.actionsUsed`. A product therefore needs no second gameplay
+implementation merely to use the generic infrastructure.
 
 ## Scoring configuration
 

@@ -6,8 +6,13 @@ evaluators, and third-party benchmark tools can exchange one self-identifying
 JSONL artifact instead of defining platform-specific wrappers around the same
 SDK transcript.
 
-The first line is a `ReplayHeader`. Every following line is a `ReplayAction`,
-which extends `TranscriptAction` with `kind: "action"` and `levelIndex`.
+The first line is a `ReplayHeader`. A v1.0 stream follows it with individual
+`ReplayAction` lines. A v1.1 stream may instead contain grouped
+`resolution`, `timeout`, `extension`, `checkpoint`, and `commit-mismatch`
+records. A v1.2 stream uses the same grouped shape and assigns cryptographic
+meaning to the reserved roster, submission-chain, and `seat-signature` fields.
+It also records signed tier-2 `interest` declarations. Product actions may
+carry an opaque JSON `payload`, which survives projection and recheck.
 
 ```jsonl
 {"format":"gaos.replay","formatVersion":"1.0","game":{"adapter":{"id":"creator/demo/reducer","version":"commit:abc123"},"id":"creator/demo","version":"1.0.0"},"kind":"header","levels":[{"id":"intro","index":0,"level":{"goal":3},"result":{"actionsUsed":2,"stars":3,"status":"won"},"seed":2654435731}],"perm":[0,1],"seed":42,"seedPolicy":"gaos.run-level-seed.v1","sessionId":"run-42","totals":{"totalActionsUsed":2,"totalStars":3}}
@@ -15,15 +20,19 @@ which extends `TranscriptAction` with `kind: "action"` and `levelIndex`.
 {"canonicalId":"Action 2","index":2,"kind":"action","levelIndex":0,"n":1,"wireId":"Action 2"}
 ```
 
-Property order is not semantic. `serializeReplayJsonl` emits canonical
-lexicographically ordered JSON with one trailing newline, making the exact
-artifact suitable for hashing, signing, and object storage.
+Property order is not semantic. `serializeReplayJsonl` emits canonical JSON
+whose object keys are ordered lexicographically by Unicode code point (not
+UTF-16 code unit), with one trailing newline. JSON numbers must be finite,
+and every integer-valued number must be within the JavaScript-safe range in
+both implementations. Unpaired surrogates are rejected. The resulting exact
+artifact is suitable for hashing, signing, and object storage.
 
 ## Header contract
 
 The header pins everything shared tooling needs before reducer execution:
 
-- `format` and `formatVersion`, currently `gaos.replay` / `1.0`;
+- `format` and `formatVersion`: unsigned producers emit `gaos.replay` / `1.1`;
+  a configured signing roster emits `1.2`;
 - a stable game id/version and historical adapter id/version;
 - the run seed and either explicit seeds or
   `gaos.run-level-seed.v1` derivation;
@@ -91,7 +100,7 @@ It declares MIME `application/vnd.gaos.replay+jsonl`, extension
 storage, but decompression must recover the canonical JSONL bytes.
 
 The npm archive includes the decoded-artifact
-[`gaos.replay` v1 JSON Schema](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/blob/v0.18.0/schemas/gaos.replay-v1.schema.json).
+[`gaos.replay` v1 JSON Schema](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/blob/main/schemas/gaos.replay-v1.schema.json).
 The repository also carries a canonical JSONL fixture used by both language
 test suites, so independent implementations can verify byte-for-byte output.
 
@@ -104,15 +113,18 @@ artifact = parse_replay_jsonl(stored)
 assert serialize_replay_jsonl(artifact) == stored
 ```
 
-Python owns parsing, transport validation, seed derivation, and canonical
-serialization. The SDK's whole-run reducer recheck remains in the TypeScript
-engine and requires the product's pinned reducer registry.
+Python owns parsing, transport validation, seed derivation, canonical
+serialization, Ed25519 signing/verification, and per-seat chain checking.
+Python `verify_replay` composes those facts with a product callback; TypeScript
+`recheckReplayArtifact` invokes the pinned reducer registry directly.
 
 ## Whole-run recheck
 
-`recheckReplayArtifact` validates the envelope, groups actions by level, and
-calls the existing `recheckTranscript` for every segment. The product supplies
-only a trusted adapter registry:
+`recheckReplayArtifact` validates the envelope and checks every level. Legacy
+action streams use `recheckTranscript`; v1.1 resolution records invoke
+`advance` or `applyIntents` exactly once with the complete recorded input
+group. Commitment reveals are recomputed before reducer execution. The product
+supplies only a trusted adapter registry:
 
 ```ts
 const checked = recheckReplayArtifact(
@@ -120,10 +132,75 @@ const checked = recheckReplayArtifact(
   ({ game }) => reducerRegistry.get(
     `${game.adapter.id}@${game.adapter.version}`,
   ),
+  {
+    semanticAdapterForLevel: ({ game }) =>
+      semanticRegistry.get(`${game.adapter.id}@${game.adapter.version}`),
+  },
 );
 
 if (!checked.ok) console.error(checked.problems);
+if (checked.verdict !== 'trusted') {
+  console.error(checked.signatures.problems, checked.semantics.problems);
+}
 ```
+
+`checked.ok` reports demonstrated validation or simulation failures and stays
+orthogonal to authentication. `checked.signatures.state` is `signed`,
+`partial`, or `unsigned`. `checked.verdict` composes both into `trusted`,
+`unverifiable`, or `rejected`; scoring authorities can require `trusted`
+without making unsigned friendly games defective.
+For signed artifacts, `checked.semantics` additionally proves the historical
+adapter maps each canonical command to the recorded action. A missing mapping
+is `unavailable`/`unverifiable`; a mismatch is `failed`/`rejected`.
+`checked.diagnostics` reports evidence that is intentionally non-fatal, such
+as a verified commitment mismatch, a redacted mismatch whose reveal is
+unavailable for independent recomputation, or salt reuse across commitments.
+Mismatch audit records must still occur before the successful reveal at the
+open tick and may not reuse a participant's rejection submission identity.
+Repeated identical bad reveals under fresh identities are permitted.
+
+The v1.1 `timeout` and `commit-mismatch` lanes remain advisory host attestation,
+not authenticated third-party evidence. Their checks detect inconsistent
+records, implementation mistakes, corruption, and simple tampering, but a
+host can still fabricate, reattribute, or delete a plausible audit story.
+`checked.ok` means replay consistency; it does not prove that audit records
+are true. Leaderboard admission and other trust decisions must not depend on
+unauthenticated v1.1 audit records. In v1.2, RFC-010 authenticates submitted
+commit/reveal material with Ed25519 and binds all chained submissions per seat.
+This closes host-only fabrication and reattribution of signed mismatch
+material. In ticks mode the signed stream can also constrain timeout position.
+The exact policy is `{ mode: 'ticks', windowTicks: N }`; timeout records use
+`timeoutPolicyRef: 'header.timeoutPolicy'` and occur at `windowRef + N`.
+The historical adapter's pure `timeoutToAction` mapping must independently
+reproduce each recorded system input.
+Wall-clock earliness remains outside artifact verification, and turns-mode
+position checks necessarily degrade.
+
+Checkpoint digests and optional replay-record `hostTime` values are advisory
+reconciliation evidence. `hostTime` is never reducer input or signature
+preimage material, and replay verification ignores it. The portable
+verifier cannot reconstruct a host's seat-specific `viewFor` projection, so
+it preserves checkpoint records but does not treat their digest as an
+authentication primitive.
+
+To keep v1.2 additive under the strict schema, v1.1 reserved and still
+round-trips
+`seatKeys`, signature and timeout policies, `clientTime`, submission
+chain/signature fields, and the periodic `seat-signature` record carrier.
+The v1.1 verifier deliberately assigns them no cryptographic meaning. The
+v1.2 verifier requires canonical padded Base64, a fixed scheme, complete chain
+metadata, mandatory signed `clientTime`, roster-bound genesis, and the
+declared per-seat periodic tier.
+
+Run the complete check offline:
+
+```sh
+gaos verify run.gaos-replay.jsonl --adapter ./historical-adapter.mjs
+gaos-verify run.gaos-replay.jsonl --adapter ./historical_adapter.py
+```
+
+See [trust and verification](/trust-and-verification) for client/host/scoring
+adoption, threat limits, and adapter contracts.
 
 The checker verifies global action numbering and level ordering, per-level seed
 policy, each recorded terminal result, and aggregate totals. Problems are
@@ -214,7 +291,8 @@ After replay it compares:
 
 - status;
 - stars, normalizing absent values to `null`; and
-- `hud.actionsUsed`.
+- deterministic `actionsUsed`, supplied by `reducer.replayMetrics(state)` or,
+  for compatibility `TickView` reducers, by `view.hud.actionsUsed`.
 
 The returned `replayed` summary is available whether verification succeeds or
 fails.

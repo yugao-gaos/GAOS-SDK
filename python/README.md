@@ -25,9 +25,44 @@ canonical_bytes = serialize_replay_jsonl(artifact)
 ```
 
 `validate_replay_artifact` performs transport-level checks without executing
-game code. Reducer re-simulation requires the TypeScript engine plus the
+game code. Canonical object keys use Unicode code-point order, unpaired
+surrogates are rejected, and every integer-valued replay number must remain
+within the JavaScript safe range so Python produces the same bytes as
+TypeScript. Reducer re-simulation requires the TypeScript engine plus the
 product-owned historical adapter declared in
 `artifact["header"]["game"]["adapter"]`.
+
+`gaos.replay` v1.2 adds zero-dependency Ed25519 signing and synchronous
+verification. Python matches the TypeScript complete-preimage fixture:
+
+```python
+from agilabs_arena import (
+    ed25519_public_key_from_seed,
+    sign_submission_v1,
+    submission_chain_hash_v1,
+)
+
+public_key = ed25519_public_key_from_seed(private_seed)
+sig = sign_submission_v1(private_seed, envelope)
+chain_head = submission_chain_hash_v1(envelope)
+```
+
+`recheck_replay_signatures(artifact)` reports the per-seat chain and signing
+policy facts. To compose those facts with a product-owned Python replay
+adapter, export `recheck_replay(artifact)` from a module and run:
+
+```sh
+gaos-verify run.gaos-replay.jsonl --adapter ./historical_adapter.py
+```
+
+The verdict is `trusted`, `unverifiable`, or `rejected`; an unsigned v1.0/v1.1
+artifact is `unverifiable`, not broken.
+
+For signed evidence, the adapter's replay check also reports
+`semantics.submissions` and `semantics.timeouts` as `verified`,
+`unavailable`, `not_applicable`, or `failed`. Missing historical
+command/timeout mappings make an otherwise consistent signed artifact
+`unverifiable`; a mapping mismatch is `rejected`.
 
 The client speaks the stable `agilabs.ticks` v1 envelope on `/v1/sessions`.
 New code can use the canonical `Tick`, `parse_tick_result()`, `get_tick()`, and

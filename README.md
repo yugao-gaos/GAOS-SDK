@@ -1,59 +1,152 @@
 # Gaming AGI Open SDK (GAOS)
 
-**Build once. Play as a human. Evaluate as an agent.**
+**Build deterministic games. Evaluate agents. Let any third party verify the
+result.**
 
-GAOS is an open-source deterministic game-simulation SDK for **turn-based,
-WEGO, and fixed-tick real-time games** that humans and agents can both play. It
-provides the authoritative reducer, ticks, lockstep input ordering,
-rollback/resimulation, replay verification, and session kernel behind one
-shared game core.
+[Documentation](https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/) ·
+[Playable demos](https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/demos/) ·
+[v0.20 release notes](docs/releases.md) ·
+[Discord](https://discord.gg/vdvUgcqPU)
 
-GAOS does not replace a real-time game stack. Each product owns its scheduler,
-sockets or WebRTC transport, interpolation, rendering, latency policy, world,
-content, benchmark claims, scoring meaning, hosting, and presentation.
+GAOS is an open-source TypeScript and Python SDK for games that humans and
+agents can both play across turn-based, simultaneous WEGO, and fixed-tick
+real-time systems. One reducer drives the game, the agent environment, the
+authoritative session, and deterministic replay. Signed runs can be checked
+offline by anyone with the pinned game adapter—without trusting the host or a
+GAOS-operated service.
 
-## Start here
+**The problem it solves:** agent evaluation results are self-published, and
+checking one today means re-running the whole evaluation at the full inference
+cost of the original — after which you still have a different sample rather
+than that run. GAOS keeps producing a result expensive and makes validation
+nearly free. [Why verification, not trust →](#why-verification-not-trust)
 
-- [Documentation](https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/)
-- [Quickstart and language guide](docs/quickstart.md)
-- [Capabilities](docs/capabilities.md)
-- [Real-time games](docs/high-frequency.md)
-- [Architecture and ownership boundaries](docs/architecture.md)
-- [Mechanism reference](docs/mechanisms/index.md)
-- [Agentic play](docs/agentic-play.md)
-- [Python SDK surface](docs/python.md)
+## The three reasons to use GAOS
+
+### 1. One deterministic core
+
+Write the rules once. The same reducer powers human clients, model and CLI
+agents, solvers, tournaments, authoritative multiplayer, and replay. Hidden
+information stays seat-scoped; action order, randomness, and scoring remain
+reproducible.
+
+### 2. Third-party-verifiable runs
+
+Portable `gaos.replay` v1.2 evidence combines deterministic re-simulation,
+Ed25519 seat signatures, roster-bound hash chains, and independent command and
+timeout reconstruction. The offline verifier returns an explicit verdict:
+`trusted`, `unverifiable`, or `rejected`.
+
+```sh
+gaos verify run.gaos-replay.jsonl --adapter ./historical-adapter.mjs
+gaos-verify run.gaos-replay.jsonl --adapter ./historical_adapter.py
+```
+
+### 3. Production session infrastructure
+
+Use prepared commit/abort transitions, idempotent submissions, authoritative
+ticks, prediction reconciliation, reconnect snapshots, signed interest scopes,
+and adaptive observation delivery. GAOS supplies the hard multiplayer and
+evidence plumbing while your product keeps its world, presentation, hosting,
+and commercial policy.
+
+## Built for two teams
+
+| Game developers | Benchmark and evaluation teams |
+|---|---|
+| Ship human play today without creating a second rules engine for bots tomorrow. Use reusable board, card, zone, movement, visibility, scoring, settlement, and session mechanisms. | Turn interactive games into reproducible single- or multi-agent evaluations. Use structured legal actions, provider-neutral drivers, portable transcripts, signed evidence, and offline verification. |
+| [Build your first game →](docs/quickstart.md) | [Build an agent evaluation →](docs/agentic-play.md) |
+
+## Where GAOS fits
+
+GAOS is **open verification infrastructure for game-based AI evaluations**. It
+is the deterministic execution and evidence layer beneath a game, benchmark,
+or tournament—not a replacement for the rest of the stack.
+
+Use GAOS alongside:
+
+- a renderer, game engine, scheduler, sockets or WebRTC transport,
+  interpolation, and latency policy;
+- an evaluation orchestrator, RL training loop, or multi-agent environment
+  API; and
+- your own tasks, scoring meaning, held-out content, hosting, analytics, and
+  publication policy.
+
+Choose GAOS when the exact interactive run must remain independently checkable,
+the same rules must serve humans and agents, or multiplayer outcomes must be
+reconstructed from canonical signed inputs. If you only need rendering,
+network transport, model orchestration, or experiment tracking, use the tool
+that specializes in that layer and integrate GAOS where deterministic evidence
+begins.
+
+## Why verification, not trust
+
+Agent evaluation results are self-published. A leaderboard entry is a claim
+made by the party that benefits from it, and a reader has two options today:
+
+- **Trust it.** No verification at all.
+- **Reproduce it.** Re-run the evaluation at full inference cost — and still
+  not get *that* run back, because the model is stochastic and the harness has
+  moved on. What you get is a different sample, not a check.
+
+So verification is either free and worthless, or expensive and inconclusive.
+Most published agent results are unverifiable in practice: not because anyone
+is dishonest, but because checking costs more than any reader will spend.
+
+**GAOS inverts that cost.** A run is recorded as a deterministic transcript
+with every input signed by the seat that produced it. Verifying replays those
+recorded inputs through a pinned reducer — **it never re-runs the agent.** No
+model calls, no inference spend, no stochasticity. Checking a claim costs
+milliseconds of local CPU, and it checks *that exact run* rather than a fresh
+sample of roughly similar behaviour.
+
+Producing a result stays expensive. Checking one becomes nearly free, works
+offline, and needs no cooperation from whoever published it.
+
+### What a `trusted` verdict proves
+
+A scoring authority pins the historical reducer and pure command adapter named
+by the artifact, then checks the run locally:
+
+- the recorded inputs reproduce the recorded game result;
+- the declared seat keys authored the signed submission chains;
+- chain order, periodic signing tiers, and roster binding are intact; and
+- signed commands and timeout inputs independently map to the recorded actions.
+
+### What it does not prove
+
+Not that a key belongs to a real-world identity, that an artifact was published
+rather than withheld, or that wall-clock timing was fair. And not that the agent
+would play this way again — replay verifies **this run**, not the policy that
+produced it. Those remain product and scoring-authority policy. See
+[Trust and verification](docs/trust-and-verification.md) for the exact boundary.
+
+## Start building
+
+```sh
+npm install 'git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.20.0'
+```
+
+Choose the path that matches your project:
+
+- [Quickstart and authenticated package-registry install](docs/quickstart.md)
+- [Complete capability map](docs/capabilities.md)
+- [Reusable mechanism reference](docs/mechanisms/index.md)
+- [Authoritative sessions and integrity](docs/session-and-integrity.md)
+- [Fixed-tick real-time games](docs/high-frequency.md)
 - [Portable replay and verification](docs/mechanisms/replay.md)
-- [Roadmap, including the future naming migration](docs/roadmap.md)
+- [Architecture and ownership boundaries](docs/architecture.md)
 
-The existing repository and package names remain active for compatibility; no
-replacement name is active yet.
+## Built with GAOS
 
-**Built with GAOS:** [Zonoid](https://zonoid.ai) is the first production game
-and live reference. For questions and ideas, join the
-[GAOS Discord community](https://discord.gg/vdvUgcqPU).
+[Zonoid](https://zonoid.ai) is the first production game and live reference: a
+strategy game for humans and AI agents built around prediction, planning, and
+judgment.
 
-## Built during OpenAI Build Week
-
-The **GAOS SDK is the submitted project**. This standalone repository was
-created on July 21, 2026 during OpenAI Build Week, and its complete commit and
-release history was produced during the event. The work turned the reusable
-mechanism engine, deterministic agent evaluation environment, provider-neutral
-drivers, and CLI integrations into an independently installable open-source
-toolkit with TypeScript and Python releases.
-
-The pre-existing Zonoid platform is outside the submission scope, but was
-central to production. As the game evolved, GAOS generalized its initial
-spatial engine into reusable game-mechanism, multiplayer, verification, and
-agent capabilities; Zonoid then validated them in a live product. Judges can
-register at [zonoid.ai](https://zonoid.ai) and download the game without
-rebuilding its platform source. The
-[GPT-5.6 Sol case study](docs/building-with-gpt-5-6-sol.md) records Codex's role
-in extraction, design, implementation, review, publishing, and agent-play
-testing.
-
-GAOS is submitted in the **Developer Tools** category. Submission links,
-prebuilt installation checks, supported platforms, verification commands, and
-the `/feedback` Session ID are collected in [DEVPOST.md](DEVPOST.md).
+GAOS was extracted and published as a standalone SDK during OpenAI Build Week
+2026. The [GPT-5.6 Sol case study](docs/building-with-gpt-5-6-sol.md) records
+the design, implementation, review, and agent-play workflow. Submission
+materials remain available in [DEVPOST.md](DEVPOST.md).
 
 ## Development
 
@@ -70,11 +163,8 @@ python3 -m build
 ```
 
 Live integration tests use `ARENA_BASE_URL` and skip automatically when a
-compatible API host is not available.
-
-Use `npm run docs:dev` to work on the documentation locally. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for contribution checks and [SECURITY.md](SECURITY.md)
-for private vulnerability reporting.
+compatible API host is unavailable. See [CONTRIBUTING.md](CONTRIBUTING.md) and
+[SECURITY.md](SECURITY.md).
 
 ## License
 

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/v0.18.0/schemas/gaos.replay-v1.schema.json",
+  "$id": "https://raw.githubusercontent.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/v0.20.0/schemas/gaos.replay-v1.schema.json",
   "title": "GAOS portable replay v1",
-  "description": "Schema for a decoded gaos.replay v1 artifact. The JSONL transport stores the header first, followed by each action.",
+  "description": "Schema for a decoded gaos.replay v1 artifact. v1.0 stores actions, v1.1 adds grouped audit records, and v1.2 assigns RFC-010 signature semantics.",
   "type": "object",
   "additionalProperties": false,
   "required": ["header", "actions"],
@@ -11,9 +11,333 @@
     "actions": {
       "type": "array",
       "items": { "$ref": "#/$defs/action" }
+    },
+    "records": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/record" }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "header": {
+            "properties": {
+              "formatVersion": { "const": "1.0" }
+            },
+            "required": ["formatVersion"]
+          }
+        },
+        "required": ["header"]
+      },
+      "then": {
+        "allOf": [
+          { "not": { "required": ["records"] } },
+          {
+            "properties": {
+              "header": {
+                "not": {
+                  "anyOf": [
+                    { "required": ["seatKeys"] },
+                    { "required": ["signaturePolicy"] },
+                    { "required": ["timeoutPolicy"] }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "actions": {
+                "items": {
+                  "not": {
+                    "anyOf": [
+                      { "required": ["commit"] },
+                      { "required": ["reveal"] },
+                      { "required": ["verifiedPayload"] },
+                      { "required": ["submissionId"] },
+                      { "required": ["canonicalCommand"] },
+                      { "required": ["cursor"] },
+                      { "required": ["clientTime"] },
+                      { "required": ["hostTime"] },
+                      { "required": ["prevChainHash"] },
+                      { "required": ["sig"] }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "header": {
+            "properties": {
+              "formatVersion": { "const": "1.2" }
+            },
+            "required": ["formatVersion"]
+          }
+        },
+        "required": ["header"]
+      },
+      "then": {
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "header": { "required": ["timeoutPolicy"] }
+              }
+            },
+            "then": {
+              "properties": {
+                "records": {
+                  "items": {
+                    "if": {
+                      "properties": { "kind": { "const": "timeout" } },
+                      "required": ["kind"]
+                    },
+                    "then": {
+                      "required": ["timeoutPolicyRef"],
+                      "properties": {
+                        "timeoutPolicyRef": { "const": "header.timeoutPolicy" }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "records": {
+                  "items": {
+                    "if": {
+                      "properties": { "kind": { "const": "timeout" } },
+                      "required": ["kind"]
+                    },
+                    "then": { "not": { "required": ["timeoutPolicyRef"] } }
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "properties": {
+          "header": {
+            "dependentRequired": {
+              "seatKeys": ["signaturePolicy"],
+              "signaturePolicy": ["seatKeys"]
+            },
+            "properties": {
+              "seatKeys": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "$ref": "#/$defs/seatKeyV12" }
+              },
+              "signaturePolicy": { "$ref": "#/$defs/signaturePolicyV12" },
+              "timeoutPolicy": { "$ref": "#/$defs/timeoutPolicyV12" }
+            }
+          },
+          "actions": {
+            "items": { "$ref": "#/$defs/integrityV12" }
+          },
+          "records": {
+            "items": {
+              "allOf": [
+                {
+                  "if": {
+                    "properties": { "kind": { "const": "action" } },
+                    "required": ["kind"]
+                  },
+                  "then": { "$ref": "#/$defs/integrityV12" }
+                },
+                {
+                  "if": {
+                    "properties": { "kind": { "const": "resolution" } },
+                    "required": ["kind"]
+                  },
+                  "then": {
+                    "properties": {
+                      "inputs": {
+                        "items": { "$ref": "#/$defs/integrityV12" }
+                      },
+                      "systemInput": { "$ref": "#/$defs/integrityV12" }
+                    }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "header": {
+            "properties": {
+              "formatVersion": { "const": "1.1" }
+            },
+            "required": ["formatVersion"]
+          }
+        },
+        "required": ["header"]
+      },
+      "then": {
+        "properties": {
+          "records": {
+            "items": {
+              "not": {
+                "properties": { "kind": { "const": "interest" } },
+                "required": ["kind"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+                    "properties": { "kind": { "const": "commit-mismatch" } },
+                    "required": ["kind"]
+                  },
+                  "then": { "$ref": "#/$defs/integrityV12" }
+                },
+                {
+                  "if": {
+                    "properties": { "kind": { "const": "interest" } },
+                    "required": ["kind"]
+                  },
+                  "then": {
+                    "allOf": [
+                      { "$ref": "#/$defs/integrityV12" },
+                      { "required": ["clientTime", "prevChainHash", "sig"] }
+                    ]
+                  }
+                },
+                {
+                  "if": {
+                    "properties": { "kind": { "const": "seat-signature" } },
+                    "required": ["kind"]
+                  },
+                  "then": {
+                    "required": ["clientTime", "prevChainHash", "sig"],
+                    "properties": {
+                      "clientTime": { "$ref": "#/$defs/nonNegativeSafeInteger" },
+                      "prevChainHash": { "$ref": "#/$defs/hashBase64" },
+                      "sig": { "$ref": "#/$defs/signatureBase64" }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
+    "nonNegativeSafeInteger": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "hashBase64": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]{43}=$"
+    },
+    "signatureBase64": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]{86}==$"
+    },
+    "seatKeyV12": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "publicKey", "alg", "signingTier"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "publicKey": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9+/]{43}=$"
+        },
+        "alg": { "const": "Ed25519" },
+        "signingTier": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["N"],
+          "properties": {
+            "N": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          }
+        }
+      }
+    },
+    "signaturePolicyV12": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scheme"],
+      "properties": {
+        "scheme": { "const": "gaos.submission.ed25519.v1" }
+      }
+    },
+    "timeoutPolicyV12": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "windowTicks"],
+      "properties": {
+        "mode": { "const": "ticks" },
+        "windowTicks": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "integrityV12": {
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              { "required": ["submissionId"] },
+              { "required": ["canonicalCommand"] },
+              { "required": ["cursor"] }
+            ]
+          },
+          "then": {
+            "required": [
+              "submissionId",
+              "canonicalCommand",
+              "cursor"
+            ]
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              { "required": ["clientTime"] },
+              { "required": ["prevChainHash"] },
+              { "required": ["sig"] }
+            ]
+          },
+          "then": {
+            "required": [
+              "submissionId",
+              "canonicalCommand",
+              "cursor",
+              "clientTime",
+              "prevChainHash"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "submissionId": { "type": "string", "minLength": 1 },
+        "canonicalCommand": { "type": "string", "minLength": 1 },
+        "cursor": { "$ref": "#/$defs/nonNegativeSafeInteger" },
+        "clientTime": { "$ref": "#/$defs/nonNegativeSafeInteger" },
+        "prevChainHash": { "$ref": "#/$defs/hashBase64" },
+        "sig": { "$ref": "#/$defs/signatureBase64" }
+      }
+    },
     "jsonObject": {
       "type": "object",
       "additionalProperties": true
@@ -93,7 +417,7 @@
       "properties": {
         "kind": { "const": "header" },
         "format": { "const": "gaos.replay" },
-        "formatVersion": { "const": "1.0" },
+        "formatVersion": { "enum": ["1.0", "1.1", "1.2"] },
         "sessionId": { "type": "string", "minLength": 1 },
         "game": { "$ref": "#/$defs/gameRef" },
         "seed": {
@@ -121,6 +445,9 @@
             { "type": "string", "pattern": "^seat:.+" }
           ]
         },
+        "seatKeys": true,
+        "signaturePolicy": { "$ref": "#/$defs/jsonObject" },
+        "timeoutPolicy": { "$ref": "#/$defs/jsonObject" },
         "extensions": { "$ref": "#/$defs/jsonObject" }
       }
     },
@@ -150,6 +477,13 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["kind", "n", "levelIndex", "wireId", "canonicalId"],
+      "allOf": [
+        { "not": { "required": ["commit", "reveal"] } },
+        {
+          "if": { "required": ["verifiedPayload"] },
+          "then": { "required": ["reveal"] }
+        }
+      ],
       "properties": {
         "kind": { "const": "action" },
         "n": { "type": "integer", "minimum": 0 },
@@ -162,6 +496,7 @@
           "type": "string",
           "pattern": "^Action [1-9][0-9]*$"
         },
+        "payload": true,
         "x": { "type": "integer" },
         "y": { "type": "integer" },
         "index": { "type": "integer" },
@@ -172,8 +507,275 @@
           "type": "array",
           "items": { "$ref": "#/$defs/locationRef" }
         },
-        "tick": { "type": "integer", "minimum": 0 }
+        "tick": { "type": "integer", "minimum": 0 },
+        "hostTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "submissionId": true,
+        "canonicalCommand": true,
+        "cursor": true,
+        "clientTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "prevChainHash": true,
+        "sig": true,
+        "commit": { "$ref": "#/$defs/commit" },
+        "reveal": { "$ref": "#/$defs/reveal" },
+        "verifiedPayload": true
       }
+    },
+    "commit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commitmentId", "scheme", "hash"],
+      "properties": {
+        "commitmentId": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "scheme": { "const": "gaos.commit.sha256.v1" },
+        "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "reveal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commitmentId", "salt", "payload"],
+      "properties": {
+        "commitmentId": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "salt": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{2}){16,64}$"
+        },
+        "payload": true
+      }
+    },
+    "resolutionInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wireId", "canonicalId"],
+      "allOf": [
+        { "not": { "required": ["commit", "reveal"] } },
+        {
+          "if": { "required": ["verifiedPayload"] },
+          "then": { "required": ["reveal"] }
+        }
+      ],
+      "properties": {
+        "wireId": { "type": "string", "pattern": "^Action [1-9][0-9]*$" },
+        "canonicalId": { "type": "string", "pattern": "^Action [1-9][0-9]*$" },
+        "payload": true,
+        "x": { "type": "integer" },
+        "y": { "type": "integer" },
+        "index": { "type": "integer" },
+        "boardId": { "type": "string", "minLength": 1 },
+        "zoneId": { "type": "string", "minLength": 1 },
+        "seat": { "type": "string", "minLength": 1 },
+        "targets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/locationRef" }
+        },
+        "submissionId": true,
+        "canonicalCommand": true,
+        "cursor": true,
+        "clientTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "prevChainHash": true,
+        "sig": true,
+        "commit": { "$ref": "#/$defs/commit" },
+        "reveal": { "$ref": "#/$defs/reveal" },
+        "verifiedPayload": true
+      }
+    },
+    "resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "n", "levelIndex", "tick", "inputs", "cause"],
+      "allOf": [
+        {
+          "if": {
+            "properties": { "cause": { "const": "timeout" } },
+            "required": ["cause"]
+          },
+          "then": { "required": ["systemInput"] },
+          "else": { "not": { "required": ["systemInput"] } }
+        }
+      ],
+      "properties": {
+        "kind": { "const": "resolution" },
+        "n": { "type": "integer", "minimum": 0 },
+        "levelIndex": { "type": "integer", "minimum": 0 },
+        "tick": { "type": "integer", "minimum": 0 },
+        "hostTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "inputs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/resolutionInput" }
+        },
+        "cause": { "enum": ["complete", "timeout", "tick"] },
+        "systemInput": { "$ref": "#/$defs/resolutionInput" }
+      }
+    },
+    "timeout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "n",
+        "levelIndex",
+        "tick",
+        "timeoutId",
+        "windowRef",
+        "participantId",
+        "reason"
+      ],
+      "properties": {
+        "kind": { "const": "timeout" },
+        "n": { "type": "integer", "minimum": 0 },
+        "levelIndex": { "type": "integer", "minimum": 0 },
+        "tick": { "type": "integer", "minimum": 0 },
+        "timeoutId": { "type": "string", "minLength": 1 },
+        "windowRef": { "type": "integer", "minimum": 0 },
+        "participantId": { "type": ["string", "null"], "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 },
+        "timeoutPolicyRef": { "type": "string", "minLength": 1 },
+        "hostTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+      }
+    },
+    "extension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "n", "levelIndex", "lane", "record"],
+      "properties": {
+        "kind": { "const": "extension" },
+        "n": { "type": "integer", "minimum": 0 },
+        "levelIndex": { "type": "integer", "minimum": 0 },
+        "lane": { "type": "string", "minLength": 1 },
+        "record": { "$ref": "#/$defs/jsonObject" }
+        ,"hostTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+      }
+    },
+    "interest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "n",
+        "levelIndex",
+        "tick",
+        "cursor",
+        "participantId",
+        "submissionId",
+        "scopeId",
+        "declaration",
+        "canonicalCommand"
+      ],
+      "properties": {
+        "kind": { "const": "interest" },
+        "n": { "type": "integer", "minimum": 0 },
+        "levelIndex": { "type": "integer", "minimum": 0 },
+        "tick": { "$ref": "#/$defs/nonNegativeSafeInteger" },
+        "cursor": { "$ref": "#/$defs/nonNegativeSafeInteger" },
+        "participantId": { "type": "string", "minLength": 1 },
+        "submissionId": { "type": "string", "minLength": 1 },
+        "scopeId": { "type": "string", "minLength": 1 },
+        "declaration": true,
+        "canonicalCommand": { "type": "string", "minLength": 1 },
+        "clientTime": { "$ref": "#/$defs/nonNegativeSafeInteger" },
+        "prevChainHash": { "$ref": "#/$defs/hashBase64" },
+        "sig": { "$ref": "#/$defs/signatureBase64" },
+        "hostTime": { "$ref": "#/$defs/nonNegativeSafeInteger" }
+      }
+    },
+    "checkpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "n", "levelIndex", "tick", "digest"],
+      "properties": {
+        "kind": { "const": "checkpoint" },
+        "n": { "type": "integer", "minimum": 0 },
+        "levelIndex": { "type": "integer", "minimum": 0 },
+        "tick": { "type": "integer", "minimum": 0 },
+        "digest": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "hostTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+      }
+    },
+    "commitMismatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "n",
+        "levelIndex",
+        "tick",
+        "participantId",
+        "submissionId",
+        "commitmentId",
+        "scheme"
+      ],
+      "properties": {
+        "kind": { "const": "commit-mismatch" },
+        "n": { "type": "integer", "minimum": 0 },
+        "levelIndex": { "type": "integer", "minimum": 0 },
+        "tick": { "type": "integer", "minimum": 0 },
+        "participantId": { "type": "string", "minLength": 1 },
+        "submissionId": { "type": "string", "minLength": 1 },
+        "commitmentId": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "scheme": { "const": "gaos.commit.sha256.v1" },
+        "canonicalCommand": true,
+        "cursor": true,
+        "clientTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "prevChainHash": true,
+        "sig": true,
+        "hostTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "attemptedReveal": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["salt", "payload"],
+          "properties": {
+            "salt": {
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{2}){16,64}$"
+            },
+            "payload": true
+          }
+        }
+      }
+    },
+    "seatSignature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "n", "levelIndex", "tick", "participantId"],
+      "properties": {
+        "kind": { "const": "seat-signature" },
+        "n": { "type": "integer", "minimum": 0 },
+        "levelIndex": { "type": "integer", "minimum": 0 },
+        "tick": { "type": "integer", "minimum": 0 },
+        "participantId": { "type": "string", "minLength": 1 },
+        "clientTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "prevChainHash": true,
+        "sig": true,
+        "hostTime": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+      }
+    },
+    "record": {
+      "oneOf": [
+        { "$ref": "#/$defs/action" },
+        { "$ref": "#/$defs/resolution" },
+        { "$ref": "#/$defs/timeout" },
+        { "$ref": "#/$defs/extension" },
+        { "$ref": "#/$defs/interest" },
+        { "$ref": "#/$defs/checkpoint" },
+        { "$ref": "#/$defs/commitMismatch" },
+        { "$ref": "#/$defs/seatSignature" }
+      ]
     }
   }
 }

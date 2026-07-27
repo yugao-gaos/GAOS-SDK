@@ -20,7 +20,7 @@ upgrading:
 ```json
 {
   "dependencies": {
-    "@yugao-gaos/turn-based-grid-sdk": "git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.18.0"
+    "@yugao-gaos/turn-based-grid-sdk": "git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.20.0"
   }
 }
 ```
@@ -34,12 +34,12 @@ identifiers throughout the v0.x line so existing installations, import maps,
 release URLs, and automation do not break.
 
 Those identifiers do not describe the current feature boundary. The `./engine`
-entry point is a genre-neutral game-mechanism suite; tabletop and spatial-grid
-games are supported application families, not product boundaries. Neutral
-names such as `TickReducer`, `solveLevel`, and `recheckTranscript` are
-canonical. The remaining deprecated grid-prefixed action aliases are
-scheduled for the separate v1.0 boundary, where package naming will also be
-reconsidered.
+entry point is a genre-neutral game-mechanism suite for deterministic card,
+tactics, simulation, and hybrid games; spatial grids are one optional
+mechanism. Neutral names such as `TickReducer`, `solveLevel`, and
+`recheckTranscript` are canonical. The remaining deprecated grid-prefixed
+action aliases are scheduled for the separate v1.0 boundary, where package
+naming will also be reconsidered.
 
 The project plans to migrate the repository and distributions to coordinated,
 neutral names rather than rename one surface at a time. Current identifiers

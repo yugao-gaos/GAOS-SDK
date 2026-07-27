@@ -1,0 +1,88 @@
+{
+  "scheme": "gaos.submission.ed25519.v1",
+  "algorithm": "Ed25519",
+  "roster": [
+    {
+      "id": "alpha",
+      "publicKey": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+      "alg": "Ed25519",
+      "signingTier": {
+        "N": 10
+      }
+    },
+    {
+      "id": "zulu",
+      "publicKey": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+      "alg": "Ed25519",
+      "signingTier": {
+        "N": 100
+      }
+    }
+  ],
+  "rosterHash": "pBIx0qG8mxEvpx6QVEHP2zH7Qb2zS34EGmHBu0g3Oog=",
+  "vectors": [
+    {
+      "name": "alpha-0",
+      "envelope": {
+        "sessionId": "vector-session",
+        "seat": "alpha",
+        "submissionId": "alpha-0",
+        "cursor": 0,
+        "tick": 0,
+        "clientTime": 1785032000000,
+        "command": {
+          "move": 1
+        },
+        "prevChainHash": "YLJ2fSvHigNNIn+CX6w3S69Mr5tkJyB2M0t5IiJx4Ko="
+      },
+      "preimageHex": "0000001a67616f732e7375626d697373696f6e2e656432353531392e76310000000e766563746f722d73657373696f6e00000005616c70686100000007616c7068612d30000000000000000000000000000000000000019f9c32c2000000000a7b226d6f7665223a317d0000002060b2767d2bc78a034d227f825fac374baf4caf9b64272076334b79222271e0aa",
+      "signature": "d2KEFtcRYWbczdXcrI+HfGSPtxu4w4InWfNAcoiFL4mh9m/hyu+jKwIe2fhQmyWOoW9PDI6OtiF6TtQfg40/Cg==",
+      "publicKey": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+      "chainHash": "M54ZxI0xf0m/qVQkletK6BnrZZ45TjWhgK29+GREKXE="
+    },
+    {
+      "name": "alpha-1",
+      "envelope": {
+        "sessionId": "vector-session",
+        "seat": "alpha",
+        "submissionId": "alpha-1",
+        "cursor": 1,
+        "tick": 1,
+        "clientTime": 1785032001250,
+        "command": {
+          "emoji": "😀",
+          "nested": {
+            "b": 2,
+            "a": 1
+          }
+        },
+        "prevChainHash": "M54ZxI0xf0m/qVQkletK6BnrZZ45TjWhgK29+GREKXE="
+      },
+      "preimageHex": "0000001a67616f732e7375626d697373696f6e2e656432353531392e76310000000e766563746f722d73657373696f6e00000005616c70686100000007616c7068612d31000000000000000100000000000000010000019f9c32c6e2000000277b22656d6f6a69223a22f09f9880222c226e6573746564223a7b2261223a312c2262223a327d7d00000020339e19c48d317f49bfa9542495eb4ae819eb659e394e35a180adbdf864442971",
+      "signature": "exG7xdfjrnehIiupEE/PrSKoowb+U8cQyM/cL4UDU3zTt8UAi4lEYs4/msvV+lCwb6ypUhbhDdANF0V2FD0FBg==",
+      "publicKey": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+      "chainHash": "tdqwkVnlQlvEasCvfrZlID88aw5SHcJVEWOSfAo/SwU="
+    },
+    {
+      "name": "alpha-2",
+      "envelope": {
+        "sessionId": "vector-session",
+        "seat": "alpha",
+        "submissionId": "alpha-2",
+        "cursor": 2,
+        "tick": 10,
+        "clientTime": 1785032010000,
+        "command": [
+          "pass",
+          null,
+          true
+        ],
+        "prevChainHash": "tdqwkVnlQlvEasCvfrZlID88aw5SHcJVEWOSfAo/SwU="
+      },
+      "preimageHex": "0000001a67616f732e7375626d697373696f6e2e656432353531392e76310000000e766563746f722d73657373696f6e00000005616c70686100000007616c7068612d320000000000000002000000000000000a0000019f9c32e910000000125b2270617373222c6e756c6c2c747275655d00000020b5dab09159e5425bc46ac0af7eb665203f3c6b0e521dc2551163927c0a3f4b05",
+      "signature": "oaWGuJLrZyU//mpoYnfLStodzjtUR4q2LAjcC8daFKALK8Hpb7obmr+tlrXpj6jSz24eDewZIbdUsOCSXeLLDg==",
+      "publicKey": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+      "chainHash": "zXr88bk1eWT9uGIgNva8Rvw5+o7aQ3hxdI8oAEsYPXQ="
+    }
+  ]
+}

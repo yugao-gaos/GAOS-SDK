@@ -21,6 +21,16 @@ workflow:
 5. emit a portable `gaos.replay` artifact; and
 6. verify that artifact independently.
 
+The v0.20 integrity path now signs canonical submissions, chains them per
+seat, binds every chain to the roster, and exposes offline TypeScript and
+Python verdict tooling. Migration feedback now also supplies signed named
+interest scopes, bounded patch observations, pre-ingest legality, and the
+host recovery seams needed by Arena and TabletopLabs. Generic infrastructure
+now accepts non-grid `SessionView` observations while action discovery retains
+the compatible `TickView` surface. The remaining
+reference-project and conformance-kit work stays separate from the shipped
+wire construction.
+
 ### Stable bridge contracts
 
 Continue hardening the smallest contracts shared by both audiences:
@@ -29,7 +39,7 @@ Continue hardening the smallest contracts shared by both audiences:
 - deterministic seeds and settlement;
 - single-agent and multi-agent environments;
 - the `agilabs.ticks` v1 protocol boundary; and
-- the `gaos.replay` v1 evidence format and verifier interface.
+- the `gaos.replay` v1.2 signed-evidence format and verifier interface.
 
 ### Conformance and portability
 

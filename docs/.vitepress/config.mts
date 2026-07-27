@@ -2,7 +2,7 @@ import { defineConfig } from 'vitepress';
 
 export default defineConfig({
   title: 'Gaming AGI Open SDK',
-  description: 'Deterministic simulation for turn-based, WEGO, and fixed-tick real-time games.',
+  description: 'Open verification infrastructure for game-based AI evaluations, with signed runs any third party can validate offline.',
   base: '/GAOS-TurnBasedGrid-SDK/',
   cleanUrls: true,
   lastUpdated: true,
@@ -16,31 +16,31 @@ export default defineConfig({
     }],
     ['meta', {
       property: 'og:description',
-      content: 'An open-source deterministic simulation SDK for turn-based, WEGO, and fixed-tick real-time games.',
+      content: 'Open verification infrastructure for game-based AI evaluations: one deterministic core for human play, agent evaluation, and signed runs validated offline.',
     }],
     ['meta', {
       property: 'og:image',
-      content: 'https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/gaos-tabletop-sdk-social.png',
+      content: 'https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/og.png',
     }],
-    ['meta', { property: 'og:image:width', content: '1730' }],
+    ['meta', { property: 'og:image:width', content: '1731' }],
     ['meta', { property: 'og:image:height', content: '909' }],
     ['meta', {
       property: 'og:image:alt',
-      content: 'Gaming AGI Open SDK — build once, play as a human, evaluate as an agent.',
+      content: 'Gaming AGI Open SDK — one game core for human play, agent evaluation, and third-party proof.',
     }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
     ['meta', { name: 'twitter:title', content: 'Gaming AGI Open SDK' }],
     ['meta', {
       name: 'twitter:description',
-      content: 'Deterministic simulation for turn-based, WEGO, and fixed-tick real-time games.',
+      content: 'Game-based AI evaluation with deterministic execution and third-party-verifiable runs.',
     }],
     ['meta', {
       name: 'twitter:image',
-      content: 'https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/gaos-tabletop-sdk-social.png',
+      content: 'https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/og.png',
     }],
     ['meta', {
       name: 'twitter:image:alt',
-      content: 'Gaming AGI Open SDK — build once, play as a human, evaluate as an agent.',
+      content: 'Gaming AGI Open SDK — one game core for human play, agent evaluation, and third-party proof.',
     }],
   ],
   themeConfig: {
@@ -52,6 +52,7 @@ export default defineConfig({
         text: 'Build',
         items: [
           { text: 'Quickstart', link: '/quickstart' },
+          { text: 'Capabilities', link: '/capabilities' },
           { text: 'Mechanisms', link: '/mechanisms/' },
           { text: 'Real-time games', link: '/high-frequency' },
           { text: 'Agentic play', link: '/agentic-play' },
@@ -61,7 +62,6 @@ export default defineConfig({
         text: 'About',
         items: [
           { text: 'Mission', link: '/mission' },
-          { text: 'Capabilities', link: '/capabilities' },
           { text: 'Roadmap', link: '/roadmap' },
           { text: 'Version history', link: '/version-history' },
         ],
@@ -133,6 +133,9 @@ export default defineConfig({
           { text: 'Scoring and AI action limits', link: '/mechanisms/scoring' },
           { text: 'Solver', link: '/mechanisms/solver' },
           { text: 'Portable replay and verification', link: '/mechanisms/replay' },
+          { text: 'Trust and verification', link: '/trust-and-verification' },
+          { text: 'Sessions and integrity', link: '/session-and-integrity' },
+          { text: 'Fixed-rate ticks', link: '/high-frequency' },
         ],
       },
       {

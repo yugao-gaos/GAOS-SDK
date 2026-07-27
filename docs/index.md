@@ -3,113 +3,163 @@ layout: home
 
 hero:
   name: Gaming AGI Open SDK
-  tagline: Deterministic simulation for turn-based, WEGO, and fixed-tick real-time games.
+  text: Open verification infrastructure for game-based AI evaluations.
+  tagline: One deterministic core powers human play, agent evaluation, and signed run evidence that any third party can validate offline—without re-running the model or trusting the host.
   actions:
     - theme: brand
-      text: Start building
+      text: Build a game
       link: /quickstart
     - theme: alt
-      text: Explore the engine
-      link: /mechanisms/
+      text: Build an evaluation
+      link: /agentic-play
     - theme: alt
-      text: What's new in v0.17
-      link: /version-history
+      text: Verify a run
+      link: /trust-and-verification
+
+features:
+  - title: One deterministic core
+    details: The same reducer powers human clients, agent environments, authoritative sessions, solvers, and replay—without a second rules engine.
+    link: /architecture
+    linkText: See the architecture
+  - title: Third-party-verifiable runs
+    details: Signed replay evidence combines deterministic re-simulation, Ed25519 seat chains, and independently reconstructed actions. Verification is offline.
+    link: /trust-and-verification
+    linkText: See what is proven
+  - title: Sessions ready for production
+    details: Prepared persistence, idempotency, prediction, reconnect repair, hidden-information views, signed interest scopes, and adaptive observation delivery.
+    link: /session-and-integrity
+    linkText: Explore sessions
 
 ---
 
-## Build the game and the agent surface together
+<div class="release-proof" aria-label="GAOS v0.20 release facts">
+  <span><strong>v0.20</strong> signed portable evidence</span>
+  <span><strong>TypeScript + Python</strong></span>
+  <span><strong>No verification service required</strong></span>
+</div>
 
-GAOS gives researchers and game developers one deterministic core for human
-play, agent play, and replayable evidence across turn-based, simultaneous WEGO,
-and fixed-tick real-time games.
+## Why verification, not trust
 
-GAOS owns the authoritative reducer, ticks, lockstep input ordering,
-rollback/resimulation, replay verification, and session kernel. Your product
-owns its scheduler, sockets or WebRTC transport, interpolation, rendering, and
-latency policy.
+A leaderboard entry is a claim made by the party that benefits from it, and a
+reader has two options today. **Trust it** — no verification at all. Or
+**reproduce it** — re-run the evaluation at full inference cost and still not
+get *that* run back, because the model is stochastic and the harness has moved
+on. What you get is a different sample, not a check.
 
-<div class="ownership-grid">
-  <div class="ownership-card">
-    <h3>Researchers and benchmark creators</h3>
-    <p>Start with deterministic mechanisms, unified agent actions, single- and multi-agent environments, model and CLI adapters, transcripts, and portable replay verification.</p>
-    <p>Your benchmark still owns its tasks, capability claims, scoring methodology, held-out content, analytics, and publication.</p>
+So verification is either free and worthless, or expensive and inconclusive.
+Most published agent results are unverifiable in practice: not because anyone
+is dishonest, but because checking costs more than any reader will spend.
+
+**GAOS inverts that cost.** A run is recorded as a deterministic transcript
+with every input signed by the seat that produced it. Verifying replays those
+recorded inputs through a pinned reducer — **it never re-runs the agent.** No
+model calls, no inference spend, no stochasticity. Checking costs milliseconds
+of local CPU, works offline, needs no cooperation from whoever published the
+result, and checks *that exact run* rather than a fresh sample of roughly
+similar behaviour.
+
+What a `trusted` verdict does **not** claim: that a key belongs to a
+real-world identity, that an artifact was published rather than withheld, that
+wall-clock timing was fair, or that the agent would play this way again —
+replay verifies **this run**, not the policy behind it.
+[Read the exact boundary →](/trust-and-verification)
+
+## Built for two teams
+
+<p class="home-section-intro">GAOS connects game development and agent
+evaluation without asking either team to give up ownership of its product.</p>
+
+<div class="audience-grid">
+  <section class="audience-card audience-card--games">
+    <span class="audience-kicker">For game developers</span>
+    <h3>Ship a game now. Stay agent-ready.</h3>
+    <p>Write and test your rules once. Use the same reducer for the renderer,
+    authoritative host, bots, tournaments, and replay. Compose board, card,
+    movement, visibility, scoring, settlement, and multiplayer mechanisms
+    without surrendering your world or presentation.</p>
+    <p><strong>You own:</strong> content, tuning, art, hosting, modes, and
+    commercial policy.</p>
+    <a class="audience-cta" href="./quickstart">Build your first game →</a>
+  </section>
+
+  <section class="audience-card audience-card--evaluation">
+    <span class="audience-kicker">For benchmark & evaluation teams</span>
+    <h3>Turn interactive play into defensible evidence.</h3>
+    <p>Expose concrete legal actions to model or CLI agents, run single- or
+    multi-agent episodes, and publish signed portable artifacts. A third party
+    can pin the historical adapter and reproduce both the computation and the
+    authorship evidence offline.</p>
+    <p><strong>You own:</strong> tasks, scoring meaning, held-out content,
+    capability claims, and publication policy.</p>
+    <a class="audience-cta" href="./agentic-play">Build an evaluation →</a>
+  </section>
+</div>
+
+## Where GAOS fits
+
+<p class="home-section-intro">GAOS is the deterministic execution and evidence
+layer beneath a game, benchmark, or tournament. It complements the rest of
+your stack instead of replacing it.</p>
+
+| Your existing layer | Keep using it for | GAOS adds |
+|---|---|---|
+| Game engine and renderer | Presentation, input, animation, physics presentation, and content tools | One authoritative reducer shared by human and agent clients |
+| Networking and hosting | Sockets, WebRTC, matchmaking, scheduling, scaling, and latency policy | Canonical ticks, idempotent submissions, rollback inputs, and reconnect evidence |
+| Evaluation or RL framework | Model orchestration, training, experiment tracking, datasets, and aggregate analysis | Structured legal actions plus signed, replayable exact-run artifacts |
+| Benchmark product | Tasks, scoring meaning, held-out content, capability claims, and publication policy | Offline verification through the pinned historical adapter |
+
+Choose GAOS when the exact interactive run must remain independently checkable,
+the same rules must serve humans and agents, or multiplayer outcomes must be
+reconstructed from canonical signed inputs.
+
+[See the complete ownership boundary →](/architecture)
+
+## From an action to independently checked evidence
+
+<p class="home-section-intro">The host is not the trust boundary. GAOS makes
+the run portable so another organization can check it with its own copy of the
+game adapter.</p>
+
+<div class="verification-flow" role="list">
+  <div class="verification-step" role="listitem">
+    <span>01</span>
+    <strong>Play</strong>
+    <p>A human or agent submits the same canonical game command.</p>
   </div>
-  <div class="ownership-card">
-    <h3>Game developers</h3>
-    <p>Build reusable, testable rules once. The same reducer can power a renderer today and agents, solvers, tournaments, or benchmark products later.</p>
-    <p>Your game still owns its world, characters, levels, tuning, presentation, hosting, and commercial policy.</p>
+  <div class="verification-arrow" aria-hidden="true">→</div>
+  <div class="verification-step" role="listitem">
+    <span>02</span>
+    <strong>Record</strong>
+    <p>The session binds reducer inputs, seat signatures, chains, and results.</p>
+  </div>
+  <div class="verification-arrow" aria-hidden="true">→</div>
+  <div class="verification-step" role="listitem">
+    <span>03</span>
+    <strong>Verify offline</strong>
+    <p>A pinned adapter returns <code>trusted</code>, <code>unverifiable</code>,
+    or <code>rejected</code>.</p>
   </div>
 </div>
 
-```text
-Game or benchmark design
-          |
-          v
-   One GAOS reducer
-      /    |     \
- human   agents   replay
- client  + tools  verifier
+```sh
+gaos verify run.gaos-replay.jsonl --adapter ./historical-adapter.mjs
 ```
 
-[Start with the quickstart →](/quickstart)
+[Read the exact trust boundary →](/trust-and-verification)
 
-[See every supported game shape and mechanism family →](/capabilities)
+## See one core power different games
 
-[Build a real-time game with fixed-rate ticks →](/high-frequency)
+GAOS includes playable reference games across match-3, blackjack, grid
+strategy, card-grid roguelikes, graph RTS, and defense. Each uses the same
+reducer, agent, replay, and verification contracts in a different game shape.
+
+[Play the demo arcade →](/demos/)
+
+[Browse every mechanism and supported game shape →](/capabilities)
+
+[Build a fixed-tick real-time game →](/high-frequency)
 
 [Read the mission and benchmark thesis →](/mission)
-
-[Choose TypeScript or Python →](/quickstart#choose-your-language)
-
-[Join the GAOS Discord community →](https://discord.gg/vdvUgcqPU)
-
-## One agent tick
-
-| State | Legal actions | Agent chooses | Deterministic result |
-|---|---|---|---|
-| `position: 1`<br>`status: playing`<br>`actionsUsed: 1` | `{ id: 'advance' }`<br>`{ id: 'jump', index: 2 }` | `{ id: 'jump', index: 2 }` | `position: 3` → **won**<br>`reward: +3` · `totalReward: 3` · **3★** |
-
-`AgentEnvironment` exposes the product state—or one seat's redacted view—and
-concrete legal actions, validates the agent's choice, applies the injected
-reducer at each recorded tick, and returns the result with transcript-ready
-metrics.
-
-## A composable game SDK
-
-<div class="mechanism-grid">
-  <a class="mechanism-card" href="./mechanisms/zones-and-card-play">
-    <span class="mechanism-kicker">Collections</span>
-    <h3>Zones and card play</h3>
-    <p>Decks, hands, queues, bags, slot rows, atomic transfers, dealing, keyword layers, priority, targets, durations, and deck validation.</p>
-  </a>
-  <a class="mechanism-card" href="./mechanisms/portals">
-    <span class="mechanism-kicker">Hybrid worlds</span>
-    <h3>Portals</h3>
-    <p>Move entities atomically across heterogeneous boards and zones with groups, capacity, transformations, cycles, and bounded multi-hop traversal.</p>
-  </a>
-  <a class="mechanism-card" href="./mechanisms/information-partitions">
-    <span class="mechanism-kicker">Honest observations</span>
-    <h3>Hidden information</h3>
-    <p>Per-seat views, hidden hands, independent identity and order visibility, fog-of-war, teams, revelations, spectators, and leak checks.</p>
-  </a>
-  <a class="mechanism-card" href="./mechanisms/locations-and-layouts">
-    <span class="mechanism-kicker">Spatial layouts</span>
-    <h3>Layouts and locations</h3>
-    <p>Stable cross-container addresses plus square, axial-hex, directed-graph, multi-board, pathfinding, line-of-sight, and keyed movement support.</p>
-  </a>
-  <a class="mechanism-card" href="./high-frequency">
-    <span class="mechanism-kicker">Fixed-tick simulation</span>
-    <h3>Real-time games</h3>
-    <p>Canonical tick inputs, sparse transcripts, resimulation, state digests, and authoritative hidden-information deployment.</p>
-  </a>
-  <a class="mechanism-card" href="./agentic-play">
-    <span class="mechanism-kicker">Model vs. model</span>
-    <h3>Multi-agent episodes</h3>
-    <p>Seat-redacted policies, simultaneous atomic batches, legal default waits, per-seat rewards, and one shared verifiable transcript.</p>
-  </a>
-</div>
-
-[See the complete version history →](/version-history)
 
 ## Built with GAOS
 
@@ -117,8 +167,8 @@ metrics.
   <div class="zonoid-showcase__copy">
     <h3><a href="https://zonoid.ai">Zonoid</a></h3>
     <p><strong>The first production game built with Gaming AGI Open SDK.</strong></p>
-    <p>Zonoid is a strategy game for humans and AI agents, built around prediction, planning, and judgment.</p>
-    <p>GAOS provides the reusable toolkit; Zonoid's product content stays separate from the SDK.</p>
+    <p>A strategy game for humans and AI agents, built around prediction,
+    planning, and judgment.</p>
     <p><strong><a href="https://zonoid.ai">Visit Zonoid →</a></strong></p>
   </div>
   <div class="zonoid-showcase__video">
@@ -133,32 +183,4 @@ metrics.
   </div>
 </div>
 
-[How we built GAOS and Zonoid with GPT-5.6 Sol →](/building-with-gpt-5-6-sol)
-
-## A deliberate ownership boundary
-
-<div class="ownership-grid">
-  <div class="ownership-card">
-    <h3>SDK owns</h3>
-    <p>The deterministic reducer, ticks, lockstep input ordering, rollback/resimulation, replay verification, session kernel, reusable algorithms, and integration contracts.</p>
-  </div>
-  <div class="ownership-card">
-    <h3>Your product owns</h3>
-    <p>The scheduler, sockets or WebRTC transport, interpolation, rendering, latency policy, characters, authored levels, game modes, hosting, and presentation.</p>
-  </div>
-</div>
-
-The rule is simple: the SDK defines **how a reusable mechanism behaves**. The
-product decides **where it is used and what it means**.
-
-[Read the complete mechanism reference →](/mechanisms/)
-
-[See the architecture map →](/architecture)
-
-## Naming roadmap
-
-The current repository and package identifiers retain the SDK's original
-grid-oriented names for compatibility. A coordinated move to neutral names is
-planned, but no replacement identifier is active yet.
-
-[Read the compatibility-aware naming roadmap →](/roadmap)
+[How GAOS and Zonoid were built with GPT-5.6 Sol →](/building-with-gpt-5-6-sol)

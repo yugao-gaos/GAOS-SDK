@@ -1,8 +1,8 @@
 import {
   advanceTick,
   type Reducer,
+  type SessionView,
   type SubmittedAction,
-  type TickView,
 } from './contracts.js';
 import { fnv1a } from './random.js';
 
@@ -40,7 +40,7 @@ function compareStrings(a: string, b: string): number {
 export function applyCanonicalActions<
   TLevel,
   TState,
-  TView extends TickView<unknown, unknown>,
+  TView extends SessionView,
 >(
   reducer: Reducer<TLevel, TState, TView>,
   state: TState,
@@ -97,7 +97,7 @@ export function canonicalizeLockstepInputs(
 export function resimulate<
   TLevel,
   TState,
-  TView extends TickView<unknown, unknown>,
+  TView extends SessionView,
 >(
   reducer: Reducer<TLevel, TState, TView>,
   snapshotState: TState,

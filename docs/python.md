@@ -27,10 +27,10 @@ Python wheels and source distributions are attached to each GitHub release.
 Install the current wheel directly:
 
 ```sh
-python -m pip install "https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/download/v0.18.0/gaos_turn_based_grid_sdk-0.18.0-py3-none-any.whl"
+python -m pip install "https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/download/v0.20.0/gaos_turn_based_grid_sdk-0.20.0-py3-none-any.whl"
 ```
 
-For a different release, replace both `0.18.0` occurrences with the same
+For a different release, replace both `0.20.0` occurrences with the same
 version. The distribution is named `gaos-turn-based-grid-sdk`; the stable
 import name remains `agilabs_arena` for compatibility. The
 [naming roadmap](/roadmap) describes the future coordinated rename.
@@ -119,8 +119,10 @@ canonical_jsonl = serialize_replay_jsonl(artifact)
 
 Validation checks the replay envelope, schema, sequence, digests, and canonical
 transport representation. It does not execute the game. Full rechecking
-requires the pinned historical reducer and authored content and is available
-through the TypeScript engine. See
+requires the pinned historical reducer and authored content. Use the
+TypeScript `gaos verify` adapter contract or provide a Python
+`recheck_replay(artifact)` adapter whose result includes semantic
+command/timeout binding facts for signed evidence. See
 [portable replay and verification](/mechanisms/replay).
 
 For matchmaking, control revision, and lower-level envelope operations, see
