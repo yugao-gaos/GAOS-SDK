@@ -1,6 +1,6 @@
 {
   "name": "@yugao-gaos/turn-based-grid-sdk",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "description": "Deterministic game mechanisms and multiplayer infrastructure for agent-ready games.",
   "license": "Apache-2.0",
   "type": "module",
@@ -58,6 +58,14 @@
       "types": "./dist/leaderboard.d.ts",
       "import": "./dist/leaderboard.js"
     },
+    "./verifier-kit": {
+      "types": "./dist/verifier-kit.d.ts",
+      "import": "./dist/verifier-kit.js"
+    },
+    "./container-verifier-runner": {
+      "types": "./dist/container-verifier-runner.d.ts",
+      "import": "./dist/container-verifier-runner.js"
+    },
     "./agent": {
       "types": "./dist/agent/index.d.ts",
       "import": "./dist/agent/index.js"
@@ -84,7 +92,9 @@
     "./schemas/gaos.seat-control-v2.schema.json": "./schemas/gaos.seat-control-v2.schema.json",
     "./schemas/gaos.evidence-verdict-v2.schema.json": "./schemas/gaos.evidence-verdict-v2.schema.json",
     "./schemas/gaos.dynamic-control-evidence-v2.schema.json": "./schemas/gaos.dynamic-control-evidence-v2.schema.json",
-    "./schemas/gaos.benchmark-bundle-v1.schema.json": "./schemas/gaos.benchmark-bundle-v1.schema.json"
+    "./schemas/gaos.benchmark-bundle-v1.schema.json": "./schemas/gaos.benchmark-bundle-v1.schema.json",
+    "./schemas/gaos.verifier-kit-v1.schema.json": "./schemas/gaos.verifier-kit-v1.schema.json",
+    "./schemas/gaos.verifier-reference-v1.schema.json": "./schemas/gaos.verifier-reference-v1.schema.json"
   },
   "files": [
     "dist",

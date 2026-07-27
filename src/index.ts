@@ -152,6 +152,39 @@ export {
   type LeaderboardSubmissionMetadata,
   type LeaderboardVerifierQueue,
 } from './leaderboard.js';
+export {
+  VERIFIER_KIT_EXTENSION,
+  VERIFIER_KIT_MEDIA_TYPE,
+  VERIFIER_KIT_SCHEMA,
+  VERIFIER_REFERENCE_SCHEMA,
+  admitVerifierKit,
+  assertVerifierKitManifest,
+  assertVerifierReference,
+  extractVerifierKit,
+  inspectVerifierKit,
+  packVerifierKit,
+  readCachedVerifierKit,
+  resolveVerifierKit,
+  runRestrictedVerifier,
+  verifierReferenceFromExtensions,
+  type InspectedVerifierKit,
+  type PackVerifierKitInput,
+  type PackedVerifierKit,
+  type ResolveVerifierKitOptions,
+  type RestrictedVerifierRequest,
+  type RestrictedVerifierResponse,
+  type RestrictedVerifierRunner,
+  type VerifierKitLimits,
+  type VerifierKitManifestV1,
+  type VerifierKitResolution,
+  type VerifierReferenceV1,
+} from './verifier-kit.js';
+export {
+  ContainerVerifierRunner,
+  containerVerifierInvocation,
+  type ContainerVerifierInvocation,
+  type ContainerVerifierRunnerOptions,
+} from './container-verifier-runner.js';
 
 /** Namespaced hosted-Arena concurrency extension. */
 export const ARENA_CONTROL_EXTENSION = 'agilabs.arena' as const;

@@ -3,6 +3,25 @@
 For the public chronological changelog, see the
 [complete version history](/version-history).
 
+## v0.25.0
+
+RFC-016 adds product-owned historical verifier kits without changing
+`gaos.replay` v1.0–v1.3 or the existing local adapter workflow.
+
+- `gaos verifier pack`, `inspect`, and `fetch` provide explicit product export,
+  read-only inspection, verified retrieval, and atomic offline caching.
+- `gaos.verifier-kit.v1` uses canonical regular-file-only tar bytes and a
+  whole-kit SHA-256 identity.
+- `gaos.verifier-reference.v1` carries digest, size, media type, and untrusted
+  mirror hints in the namespaced `gaos.verifier` replay extension.
+- Resolver facts keep retrieval, integrity, independent authorization, and
+  restricted execution separate.
+- The reference container runner requires a digest-pinned image, disables
+  networking, inherits no host environment, uses read-only mounts/root, and
+  enforces resource bounds.
+- TypeScript and Python validate and inspect the shared manifest and reference
+  contracts.
+
 ## v0.24.0
 
 Released July 27, 2026. This release includes the RFC-014 interoperability and

@@ -70,6 +70,16 @@ from .dynamic_control import (
     DYNAMIC_CONTROL_EVIDENCE_FORMAT,
     verify_dynamic_control_evidence_v2,
 )
+from .verifier_kit import (
+    VERIFIER_KIT_MEDIA_TYPE,
+    VERIFIER_KIT_SCHEMA,
+    VERIFIER_REFERENCE_SCHEMA,
+    InspectedVerifierKit,
+    inspect_verifier_kit,
+    parse_verifier_kit_manifest,
+    parse_verifier_reference,
+    verifier_reference_from_replay,
+)
 
 __all__ = [
     "PROTOCOL_ID",
@@ -134,5 +144,13 @@ __all__ = [
     "verify_replay",
     "DYNAMIC_CONTROL_EVIDENCE_FORMAT",
     "verify_dynamic_control_evidence_v2",
+    "VERIFIER_KIT_MEDIA_TYPE",
+    "VERIFIER_KIT_SCHEMA",
+    "VERIFIER_REFERENCE_SCHEMA",
+    "InspectedVerifierKit",
+    "inspect_verifier_kit",
+    "parse_verifier_kit_manifest",
+    "parse_verifier_reference",
+    "verifier_reference_from_replay",
 ]
-__version__ = "0.24.0"
+__version__ = "0.25.0"

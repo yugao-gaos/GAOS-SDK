@@ -50,6 +50,14 @@ can keep the same content id while selecting the exact reducer implementation
 needed to recheck an old result. The SDK does not download or execute adapters;
 the verifier supplies a trusted registry callback.
 
+[RFC-016](/rfcs/rfc-016-product-owned-verifier-kits) adds the v0.25
+distribution path for that product-owned code. A product explicitly exports
+and packs its historical reducer and semantic adapter into a content-addressed
+verifier kit. GAOS standardizes the manifest, digest, resolver, cache, and
+restricted runner; it does not own, infer, or automatically publish the
+product's rules. A replay-carried kit location improves discovery but cannot
+authorize its own verifier.
+
 Every level stores its seed even when the run uses
 `gaos.run-level-seed.v1`. This makes a segment independently inspectable while
 letting validation detect a seed that disagrees with the declared derivation.
