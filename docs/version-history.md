@@ -8,9 +8,10 @@ RFC-014 and RFC-015 complete portable dynamic-control evidence and verifiable
 benchmark execution/publication.
 :::
 
-## v0.24.0: verifiable benchmark publication
+## v0.24.0: interoperability and verifiable benchmark publication
 
-Released July 27, 2026 as the RFC-015 publication release.
+Released July 27, 2026 with the RFC-014 interoperability/dynamic-control
+milestone and RFC-015 benchmark publication.
 
 - Bounded parallel execution, interruption, and resume preserve the authored
   plan and deterministic aggregate.
@@ -26,9 +27,9 @@ Released July 27, 2026 as the RFC-015 publication release.
 
 [Verifiable benchmark publication →](/benchmark-publication)
 
-## v0.23.0: interoperability and dynamic-control evidence
+## RFC-014 compatibility milestone
 
-Released July 27, 2026 as the RFC-014 interoperability release.
+Incorporated into v0.24.0; no separate v0.23.0 artifact was released.
 
 - A versioned executable host-conformance report covers the common lifecycle
   failures and repair/control transitions.
@@ -62,7 +63,7 @@ Released July 27, 2026 as the RFC-013 foundation release.
 
 [Ecosystem bridges and benchmark contracts →](/ecosystem-bridges)
 
-RFC-014 and RFC-015 build additively on these foundations in v0.23 and v0.24.
+RFC-014 and RFC-015 build additively on these foundations in v0.24.
 
 ## v0.21.0: durable long-running sessions
 

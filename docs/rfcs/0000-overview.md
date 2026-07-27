@@ -1,11 +1,11 @@
 # GAOS SDK — RFC sequence and release roadmap
 
-Status: implemented through v0.22; roadmap through v0.24 ·
+Status: implemented through v0.24 ·
 Target: v0.13 → v1.0 arc · Baseline: v0.12.0 export surface
 
 ::: info Design record and roadmap
 RFC-001 through RFC-013 record the design path that led to the current SDK.
-RFC-014 and RFC-015 define planned release scope. For supported APIs and
+RFC-014 and RFC-015 are shipped in v0.24. For supported APIs and
 current terminology, use the
 [architecture map](/architecture), [capability map](/capabilities), and
 [mechanism reference](/mechanisms/).
@@ -47,7 +47,7 @@ Two standing design rules govern every RFC in this batch:
 | [011](rfc-011-arena-migration-findings.md) | Arena's open asks of the SDK | v0.21 | 006, 009, 010 |
 | [012](rfc-012-post-migration-gaps.md) | SDK gaps after the TabletopLabs migration completed | v0.21 | 006, 009 |
 | [013](rfc-013-ecosystem-bridges-and-benchmark-tooling.md) | Ecosystem and benchmark foundations | v0.22 | 006, 010, 012 |
-| [014](rfc-014-interoperability-and-dynamic-control-evidence.md) | Interoperability and dynamic-control evidence | v0.23 | 006, 010, 012, 013 |
+| [014](rfc-014-interoperability-and-dynamic-control-evidence.md) | Interoperability and dynamic-control evidence | v0.24 (historical v0.23 target) | 006, 010, 012, 013 |
 | [015](rfc-015-verifiable-benchmark-publication.md) | Verifiable benchmark execution and publication | v0.24 | 013, 014 |
 
 Sequencing rationale: RFC-001/002 are contract-level and mostly mechanical —
@@ -58,9 +58,10 @@ settled contracts. RFC-005 composes everything and ships last.
 
 The ecosystem sequence is likewise dependency-driven. RFC-013 is the shipped
 v0.22 contract foundation. RFC-014 makes those boundaries interoperable and
-extends portable evidence to changing controllers in v0.23. RFC-015 consumes
-that evidence in the resumable benchmark runner, independent bundle verifier,
-and neutral publication starter shipped in v0.24.
+extends portable evidence to changing controllers as a historical v0.23
+compatibility milestone. RFC-015 consumes that evidence in the resumable
+benchmark runner, independent bundle verifier, and neutral publication
+starter. Both RFC-014 and RFC-015 ship in the official v0.24 release.
 
 The [batch implementation review](implementation-review.md) maps every
 normative requirement and test-plan fixture to its shipped API and evidence.

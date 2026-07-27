@@ -5,8 +5,12 @@ agents, and let any third party verify the result.**
 
 [Documentation](https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/) ·
 [Playable demos](https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/demos/) ·
-[v0.21 release notes](docs/releases.md) ·
+[v0.24 release notes](docs/releases.md) ·
 [Discord](https://discord.gg/vdvUgcqPU)
+
+v0.24 combines RFC-014 interoperability and authenticated dynamic control with
+RFC-015 verifiable benchmark execution and publication. See the
+[v0.24 release notes](docs/releases.md#v0240).
 
 GAOS is an open-source TypeScript and Python SDK for **Game-as-a-Benchmark**:
 games that humans and agents can both play across turn-based, simultaneous

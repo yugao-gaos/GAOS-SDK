@@ -5,6 +5,22 @@ packaging, replay verification, and score recomputation. A benchmark product
 still owns its tasks, scoring meaning, weights, held-out content, eligibility,
 governance, and publication policy.
 
+## CLI workflow
+
+```sh
+gaos benchmark init benchmark.json
+gaos benchmark run benchmark.json --agent ./agent.mjs --output ./run
+# If a run was interrupted:
+gaos benchmark resume ./run --agent ./agent.mjs
+gaos benchmark pack ./run --output submission.gaos-bench
+gaos benchmark verify submission.gaos-bench \
+  --manifest benchmark.json \
+  --adapter ./verifier-adapter.mjs
+```
+
+The manifest passed to `verify` must come from an independent trusted source,
+not from the submitted bundle.
+
 `runBenchmark()` accepts local, provider, and CLI adapters through one episode
 contract. It runs sequentially or with bounded parallelism, stores completed
 results in authored plan order, and resumes only when the manifest digest,
@@ -26,8 +42,8 @@ carried by the bundle as authoritative.
 Manifest authority requirements pin claim, purpose, authority, key ids,
 schemas, algorithms, roots, and revocation policy. A manifest copied only from
 the submitted artifact cannot anchor itself. GAOS accepts public material and
-portable receipts through the v0.23 external-trust interfaces and never takes
-private-key custody.
+portable receipts through the RFC-014 external-trust interfaces incorporated
+into v0.24 and never takes private-key custody.
 
 The neutral starter under `examples/leaderboard` includes a runnable Node HTTP
 server, SQLite persistence, a durable artifact directory, verifier queue,

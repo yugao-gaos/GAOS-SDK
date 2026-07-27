@@ -23,9 +23,11 @@ benchmark work depends:
 4. deterministic benchmark manifests, episode planning, aggregation, and
    distinct trust claims.
 
-RFC-014 adds interoperability and cryptographic dynamic-control evidence in
-v0.23. RFC-015 adds the executable benchmark and publication path in v0.24.
-Those RFCs inherit the product boundary below rather than redefining it.
+RFC-014 adds interoperability and cryptographic dynamic-control evidence as a
+historical v0.23 compatibility milestone, and RFC-015 adds the executable
+benchmark and publication path. Both are incorporated into the official
+v0.24 release. Those RFCs inherit the product boundary below rather than
+redefining it.
 
 ## 2 — Product boundary
 

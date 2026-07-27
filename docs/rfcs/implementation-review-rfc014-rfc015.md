@@ -1,10 +1,12 @@
 # RFC-014 and RFC-015 implementation gate
 
-This matrix records the release evidence for v0.23 and v0.24. Product-owned
-networking, credentials, benchmark meaning, eligibility, and governance remain
-outside the SDK.
+This matrix records the release evidence for the RFC-014 compatibility
+milestone and the official v0.24 release that incorporates it alongside
+RFC-015. No separate v0.23 artifact was published. Product-owned networking,
+credentials, benchmark meaning, eligibility, and governance remain outside
+the SDK.
 
-## RFC-014 / v0.23
+## RFC-014 compatibility milestone (historical v0.23 target)
 
 | Gate | Shipped evidence |
 | --- | --- |
