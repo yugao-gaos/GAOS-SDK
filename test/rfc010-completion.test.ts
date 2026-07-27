@@ -507,7 +507,9 @@ describe('RFC-010 completed migration-informed scope', () => {
     expect(kernel.observe('alpha', 'phone').entities.map(({ id }) => id))
       .toEqual(['entity-3']);
     expect(kernel.observe('alpha', 'phone')).not.toHaveProperty('private');
-    expect(kernel.snapshot('alpha', 0, 'phone').origin).toBe('snapshot');
+    const phoneSnapshot = kernel.snapshot('alpha', 0, 'phone');
+    expect('status' in phoneSnapshot ? phoneSnapshot.status : phoneSnapshot.origin)
+      .toBe('snapshot');
     expect(canonicalJson(kernel.observe('alpha', 'phone') as unknown as JsonValue).length)
       .toBeLessThan(canonicalJson(kernel.observe('alpha') as unknown as JsonValue).length);
 

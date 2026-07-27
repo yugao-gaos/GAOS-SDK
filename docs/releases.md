@@ -3,6 +3,45 @@
 For the public chronological changelog, see the
 [complete version history](/version-history).
 
+## v0.21.0
+
+Released July 26, 2026. This release implements RFC-011 A1/A2 and RFC-012
+§§1–7: durable checkpoint/restore/compaction for long-running kernels, the
+reference prediction client and host adapter, explicit tick deadlines, fixed
+seat guidance, improved diagnostics, and portable evidence for sessions that
+end without a win or loss.
+
+[View the v0.21.0 release on GitHub →](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.21.0)
+
+### Migration from v0.20
+
+- `SessionView.status` and replay results add `ended`. Exhaustive switches need
+  a new arm. An ended replay level has `stars: null`.
+- New replay artifacts emit `gaos.replay` v1.3. Existing v1.0, unsigned v1.1,
+  and signed v1.2 artifacts remain accepted with their original rules.
+- Stale cursor validation precedes game-owned legality checks. Reducer
+  rejection is `IntentCollectionError('illegal_command', ...)` and preserves
+  the thrown value as `cause`.
+- `checkpoint()` and `rehydrateKernelFromCheckpoint()` preserve reducer and
+  protocol state across restarts. `compact()` additionally requires an exact
+  durable checkpoint confirmation and access to complete canonical history;
+  checkpoint recovery does not replace the full replay evidence log.
+- Snapshot requests older than `retentionFloor()` return
+  `resync_required`; clients must request a current snapshot.
+- The new `PredictionSession` reconciles authoritative deltas and replays
+  remaining optimistic commands in enqueue order. Gaps, missing patch bases,
+  and digest failures require resync.
+- The new `./session-host` reference adapter serializes
+  prepare → persist → commit → publish, queues failed publication for retry,
+  and includes a reusable event-store conformance kit.
+- `nextDeadline()` returns the next tick-bounded participation deadline.
+  Declared seats remain fixed; occupancy, reconnect, driver assignment, and
+  spectators remain product/host concerns.
+
+See [sessions and integrity](/session-and-integrity) and
+[portable replay](/mechanisms/replay) for the complete contracts. RFC-013
+remains proposed for v0.22+.
+
 ## v0.20.0
 
 Released July 26, 2026. This release completes the resolved implementation

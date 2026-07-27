@@ -88,7 +88,7 @@ export type Outcome =
  * infrastructure. Products with non-grid observations extend this directly.
  */
 export interface SessionView {
-  status: 'playing' | 'won' | 'failed';
+  status: 'playing' | 'won' | 'failed' | 'ended';
   stars?: number;
   /** Active player/agent seat. Absent retains the single-seat behavior. */
   activeSeat?: string;

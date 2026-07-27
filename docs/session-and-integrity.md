@@ -9,6 +9,11 @@ named interest scopes, bounded patch delivery, explicit repair envelopes,
 product action payloads, generic non-grid session views, and host
 recovery/inspection helpers.
 
+Version 0.21 makes that path durable for long-running rooms: integrity-checked
+checkpoint/restore/compaction, explicit reconnect retention floors, a
+prediction reconciler, a reference host adapter and event-store conformance
+kit, tick-deadline inspection, and portable `ended` results.
+
 ## Persist before publish
 
 Every state-changing operation returns a `Prepared` transition:
@@ -97,6 +102,35 @@ called exactly once. After a successful commit, `stateIsolation.retire` owns
 the previous live state and is also called exactly once. Hosts must not retain
 or reuse either resource after its ownership callback.
 
+The `./session-host` entry point packages the same sequence for hosts that do
+not need a custom coordinator:
+
+```ts
+import {
+  InMemorySessionEventStore,
+  SessionKernelHost,
+  runEventStoreConformance,
+} from '@yugao-gaos/turn-based-grid-sdk/session-host';
+
+const store = new InMemorySessionEventStore();
+const host = new SessionKernelHost(kernel, store, publishDeltas);
+await host.ingest(submission);
+
+const results = await runEventStoreConformance(() => productEventStore());
+if (results.some(({ passed }) => !passed)) {
+  throw new Error('event store is not GAOS-conformant');
+}
+```
+
+`SessionKernelHost` serializes operations per kernel. A persistence failure
+aborts the prepared draft. Once persistence succeeds it commits exactly once;
+a publication failure remains in an ordered queue and `retryPublish()` retries
+it without rerunning the reducer or rewriting history. The event store's
+`persist(events)` operation must be atomic for each prepared batch. The
+conformance kit proves byte-identical retry and rejection of conflicting bytes
+under a reused event id; products still test their own transaction, crash, and
+delivery boundaries.
+
 Accepted intents are events even before a simultaneous window is complete.
 `rehydrateKernel(options, transcript)` therefore restores pending commands and
 idempotency receipts after a crash. A resolution records the complete
@@ -138,9 +172,101 @@ from pending, and replay the remainder in original local enqueue order.
 A view-revision gap requires retransmission or snapshot/resync; it must not
 be filled by guessing.
 
+`PredictionSession` is the reference implementation of that contract:
+
+```ts
+import {
+  PredictionSession,
+} from '@yugao-gaos/turn-based-grid-sdk/session';
+
+const prediction = new PredictionSession({
+  initial: { view, transitionRevision, viewRevision },
+  applyPending: (current, pending) =>
+    optimisticReducer(current, pending.command),
+});
+
+const optimisticView = prediction.predict({
+  participantId: seat,
+  submissionId,
+  command,
+});
+const reconciled = prediction.reconcile(authoritativeDelta);
+if (reconciled.status === 'resync_required') {
+  requestSnapshot();
+}
+```
+
+Acknowledgements and rejections settle the exact submission identity. All
+remaining commands are reapplied in original enqueue order. A transition gap,
+a patch without a base, an invalid patch, or a digest mismatch returns
+`resync_required`; the class never fabricates an intermediate view. A snapshot
+can establish the initial base or recover after a gap.
+
+### Checkpoint, restore, and compaction
+
+`checkpoint()` returns a frozen `gaos.kernel-checkpoint` v1 object containing
+the session header, reducer-state encoding, cursor/tick/transition watermarks,
+open intent window, receipts, views and revisions, commitments, interest
+scopes, identity state, and a canonical SHA-256 `integrityDigest`. The default
+codec accepts JSON reducer state. Non-JSON state supplies a stable,
+versioned `checkpointCodec`:
+
+```ts
+const options = {
+  // normal SessionKernelOptions...
+  checkpointCodec: {
+    id: 'example.world',
+    version: '1',
+    encode: (state) => encodeWorld(state),
+    decode: (value) => decodeWorld(value),
+  },
+  limits: {
+    checkpointInterval: 600,
+    maxOpenCommitmentsPerSeat: 64,
+  },
+};
+
+const checkpoint = kernel.checkpoint();
+await checkpointStore.put(checkpoint);
+
+const restored = rehydrateKernelFromCheckpoint(
+  options,
+  checkpoint,
+  eventsStrictlyAfter(checkpoint.watermark.transitionRevision),
+);
+```
+
+Restore checks the header, codec identity, integrity and state digests,
+watermarks, event ids, and contiguous transition tail. Tail events at or
+before the checkpoint watermark are rejected. Checkpoint cadence records
+audit events; it does not itself persist a recoverable checkpoint, so the host
+must call and durably store `checkpoint()`.
+
+Compaction has a deliberately explicit two-store contract. Before calling it,
+the host must durably commit the exact checkpoint and copy every permanent
+gameplay submission id, interest command, and commitment-salt identity into a
+canonical history index. Supply synchronous `historyLookup` callbacks backed
+by a preloaded cache or preflighted durable answer, then confirm both writes:
+
+```ts
+kernel.compact(checkpoint, {
+  checkpointDigest: checkpoint.integrityDigest,
+  checkpointDurablyCommitted: true,
+  historyDurablyCommitted: true,
+});
+```
+
+Compaction discards the in-memory event prefix and migrated identity
+tombstones, removes revealed commitments, and advances `retentionFloor()`.
+It does not delete the host's full event log. Independent replay verification
+still requires that complete canonical history. After compaction,
+`snapshot(seat, oldTransitionRevision)` returns `resync_required` when the
+requested watermark predates the floor; request a current snapshot and reset
+the client's authoritative base.
+
 ### Patch delivery and interest scopes
 
-Every v0.20 session emits observation codec v2. Its default adaptive strategy
+Every v0.20+ session emits observation codec v2. Its default adaptive strategy
 uses deterministic, bounded JSON patches only when they beat a snapshot by the
 configured `minReduction`. After a probe falls back, that interest scope emits
 snapshots for `patchBackoffTicks` changed observations before probing again.
@@ -320,19 +446,39 @@ authoritative observations, or later results is simulation input and must be
 recorded as an action.
 
 The kernel bounds future tick targets, catch-up work, retained receipts,
-and extension bytes. A participation window admits exactly one unresolved
-intent per seat, so there is no multi-entry per-seat buffer. The client-side
-`PredictionSession` extraction now has TabletopLabs' migration evidence but
-remains a separate follow-on from RFC-010; its acknowledgement contract is
-already stable.
+extension bytes, checkpoint cadence, and open commitments per seat. A
+participation window admits exactly one unresolved intent per seat, so there
+is no multi-entry per-seat buffer. For
+`timeoutPolicy: { mode: 'ticks', windowTicks: N }`, `nextDeadline()` returns
+the open tick plus `N` while the window is incomplete and `undefined` once it
+is complete or when no tick-bounded policy exists. The accessor is scheduling
+information; the host still owns the timer and calls `prepareTimeout`.
 
 Receipt retention bounds stored responses, not idempotency. Once a submission
 identity has been accepted, reusing it at any later cursor returns
 `unknown_submission` even after its receipt has been evicted or its command
 was rejected before gameplay. A corrected command uses a fresh submission ID.
-The kernel therefore retains one idempotency key per accepted gameplay or
-interest submission for the session lifetime. Operators sizing long-running
-sessions must budget this independently of `receiptRetention`.
+Before compaction, the kernel retains one idempotency key per accepted
+gameplay or interest submission. After compaction, the configured
+`historyLookup` must answer those identities permanently. Receipt eviction and
+compaction never permit a submission id to be reused.
+
+### Fixed seats and live occupancy
+
+The declared `seats` list and any signing roster are immutable for the session.
+Reducer participation is a non-empty subset of those declared seats and must
+not be derived from who is currently connected or occupying a chair.
+Construction-time and transition-time validation errors report both declared
+and supplied sets in canonical lexical order, including whether the supplied
+set was empty or contained undeclared seats.
+
+Occupancy, driver assignment, reconnect, kick, claim, and human/bot
+substitution are product state or host authentication state. If they affect
+legality, RNG, turn order, authoritative observations, or results, encode the
+change as an ordinary deterministic input. Spectators receive observation
+delivery and are not action-capable kernel seats. See
+[high-frequency sessions](/high-frequency) and
+[information partitions](/mechanisms/information-partitions).
 
 ## Multi-level runs
 
@@ -359,8 +505,8 @@ and dmath declaration. The default `win-to-advance` policy requires every
 non-final segment to be won; `play-all-levels` permits scored runs that
 continue after losses. The projection
 assigns global action/record numbers and level indices, derives aggregate
-totals, and returns an unsigned `gaos.replay` v1.1 artifact, or v1.2 when the
-shared session header declares a signing roster and policy.
+totals, and returns `gaos.replay` v1.3. A shared signing roster and policy
+retain the v1.2 signature and chain construction within the v1.3 envelope.
 
 `SubmittedAction.payload` carries arbitrary JSON product input through the
 live transcript and portable replay without borrowing commitment verification
@@ -451,7 +597,7 @@ In v1.1, timeout and commitment-mismatch records remain unauthenticated host
 attestation. Rechecking proves only that recorded values form a consistent
 story; it cannot prove authorship or prevent a host from fabricating,
 reattributing, or deleting audit records. Leaderboards and third parties must
-not treat this lane as evidence. In v1.2, RFC-010 submission signatures and
+not treat this lane as evidence. In v1.2+, RFC-010 submission signatures and
 per-seat chains authenticate signed commit/reveal authorship and make
 fabrication, reattribution, deletion, and reordering detectable. They can
 constrain timeout position in ticks mode; they cannot prove wall-clock
@@ -472,7 +618,7 @@ the deadline, `prepareAdvance` refuses to suppress the timeout and requires
 The v0.19 unsigned reservation remains compatible: without a signing roster,
 `timeoutPolicy` is an opaque canonical JSON object and a non-empty
 `timeoutPolicyRef` is preserved without assigning positional semantics.
-Supplying `seatKeys` and `signaturePolicy` opts into the strict v1.2 policy
+Supplying `seatKeys` and `signaturePolicy` opts into the strict signed policy
 shape above.
 
 Live reveal processing reports salt reuse through
@@ -483,10 +629,12 @@ warning: salt reuse weakens resistance to offline guessing.
 ## Finalization
 
 `liveTranscript()` is an append-only durability log, not a portable result.
-Once the reducer reports `won` or `failed`, `finalizeReplay(transcript,
-options)` projects it into unsigned `gaos.replay` v1.1 by default. A kernel
-configured with `seatKeys` and
-`signaturePolicy: { scheme: 'gaos.submission.ed25519.v1' }` projects v1.2.
+Once the reducer reports `won`, `failed`, or `ended`,
+`finalizeReplay(transcript, options)` projects it into `gaos.replay` v1.3. A
+kernel configured with `seatKeys` and
+`signaturePolicy: { scheme: 'gaos.submission.ed25519.v1' }` retains the signed
+v1.2 construction within that v1.3 artifact. An `ended` result exports with
+`stars: null`; older replay versions cannot encode it.
 Timeout, extension, checkpoint, grouped-resolution, commitment-mismatch, and
 periodic `seat-signature` records survive in their portable lanes.
 

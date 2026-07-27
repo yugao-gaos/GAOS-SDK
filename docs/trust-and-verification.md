@@ -11,7 +11,7 @@ checkable. GAOS evidence is layered so each layer proves a different fact:
    seat's recorded stream detectable; and
 4. product policy decides whether those facts are sufficient to adopt a score.
 
-`gaos.replay` v1.2 therefore lets an evaluator check both the computation and
+`gaos.replay` v1.3 therefore lets an evaluator check both the computation and
 the authorship of signed submissions offline. An agent driver is an ordinary
 seat with a key, so the same mechanism applies to human play, agent evaluation,
 and mixed sessions.
@@ -197,4 +197,4 @@ order replay.
 
 GAOS deliberately uses signatures and hash chains, not a blockchain. External
 root anchoring could close truncation if a real cross-host leaderboard needs
-it; it is not part of v1.2.
+it; it is not part of the v1.2/v1.3 signed-evidence construction.

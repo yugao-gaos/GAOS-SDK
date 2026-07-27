@@ -21,15 +21,15 @@ workflow:
 5. emit a portable `gaos.replay` artifact; and
 6. verify that artifact independently.
 
-The v0.20 integrity path now signs canonical submissions, chains them per
+The v0.21 integrity path signs canonical submissions, chains them per
 seat, binds every chain to the roster, and exposes offline TypeScript and
-Python verdict tooling. Migration feedback now also supplies signed named
-interest scopes, bounded patch observations, pre-ingest legality, and the
-host recovery seams needed by Arena and TabletopLabs. Generic infrastructure
-now accepts non-grid `SessionView` observations while action discovery retains
-the compatible `TickView` surface. The remaining
-reference-project and conformance-kit work stays separate from the shipped
-wire construction.
+Python verdict tooling. It now also supplies signed named interest scopes,
+bounded patch observations, pre-ingest legality, durable checkpoint and
+compaction, reference prediction/host adapters, and the recovery seams needed
+by Arena and TabletopLabs. Generic infrastructure accepts non-grid
+`SessionView` observations while action discovery retains the compatible
+`TickView` surface. RFC-013 ecosystem bridges and benchmark integrations
+remain future v0.22+ work.
 
 ### Stable bridge contracts
 
@@ -39,14 +39,14 @@ Continue hardening the smallest contracts shared by both audiences:
 - deterministic seeds and settlement;
 - single-agent and multi-agent environments;
 - the `agilabs.ticks` v1 protocol boundary; and
-- the `gaos.replay` v1.2 signed-evidence format and verifier interface.
+- the `gaos.replay` v1.3 evidence format and verifier interface.
 
 ### Conformance and portability
 
-Expand cross-platform fixtures, compatibility tests, and reference
-implementations so an integrating product can demonstrate that it speaks the
-same protocol and produces the same replay evidence without depending on
-Zonoid-specific product behavior.
+Expand cross-platform fixtures and reference implementations beyond the
+shipped event-store conformance kit so an integrating product can demonstrate
+that it speaks the same protocol and produces the same replay evidence without
+depending on Zonoid-specific product behavior.
 
 ## Naming migration
 

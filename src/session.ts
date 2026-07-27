@@ -1,11 +1,14 @@
 import {
   PROTOCOL_ID,
   PROTOCOL_VERSION,
+  assertJsonValue,
   canonicalJson,
   collectIntent,
   createIntentWindow,
   isParticipantId,
   IntentCollectionError,
+  makeTickId,
+  validateIntentSubmission,
   type CollectedIntent,
   type CommandSubmission,
   type IntentWindow,
@@ -46,6 +49,7 @@ import {
   fnv1a,
   replayMetricsFor,
   runLevelSeed,
+  sha256,
   signatureBytesFromBase64,
   submissionRosterHashV1,
   type CommitmentEnvelope,
@@ -87,12 +91,122 @@ export interface SessionLimits {
   receiptRetention?: number;
   /** Maximum canonical bytes accepted by one extension record. */
   maxExtensionBytes?: number;
+  /** Resolved ticks between audit checkpoint events. */
+  checkpointInterval?: number;
+  /** Maximum unresolved commitments retained for one seat. */
+  maxOpenCommitmentsPerSeat?: number;
 }
 
 export interface SessionStateIsolation<TState> {
   fork(state: TState): TState;
   discard?(draft: TState): void;
   retire?(previous: TState): void;
+}
+
+export interface SessionCheckpointCodec<TState> {
+  id: string;
+  version: string;
+  encode(state: TState): JsonValue;
+  decode(value: JsonValue): TState;
+}
+
+/**
+ * Permanent session identities move to host storage when the live kernel is
+ * compacted. Lookups remain synchronous because the kernel itself is
+ * synchronous; hosts preflight or cache the durable answer before entering it.
+ */
+export interface SessionHistoryLookup {
+  gameplaySubmission(participantId: string, submissionId: string): boolean;
+  interestCommand(participantId: string, submissionId: string): string | undefined;
+  saltIdentity(salt: string): string | undefined;
+}
+
+interface KernelCheckpointReceipt {
+  key: string;
+  canonicalCommand: string;
+  tickId: string;
+  receipt: IngestReceipt;
+  cursor: number;
+}
+
+interface KernelCheckpointView {
+  seat: string;
+  view: unknown;
+  canonical: string;
+  revision: number;
+}
+
+interface KernelCheckpointInterest {
+  key: string;
+  participantId: string;
+  scopeId: string;
+  declared: boolean;
+  declaration: JsonValue;
+  view: unknown;
+  canonical: string;
+  patchBackoffRemaining: number;
+  patchBackoffWindow: number;
+}
+
+interface RetainedRejection {
+  transitionRevision: number;
+  tick: number;
+  participantId: string;
+  submissionId: string;
+  code: 'commit_mismatch';
+}
+
+export interface KernelCheckpoint<TLevel = unknown, TCommand extends JsonValue = JsonValue> {
+  format: 'gaos.kernel-checkpoint';
+  formatVersion: '1.0';
+  header: SessionHeader<TLevel>;
+  codec: { id: string; version: string };
+  watermark: {
+    transitionRevision: number;
+    cursor: number;
+    tick: number;
+    lastCheckpointTick: number;
+  };
+  reducerState: JsonValue;
+  window: IntentWindow<TCommand>;
+  protocol: {
+    receipts: KernelCheckpointReceipt[];
+    expiredReceiptKeys: string[];
+    views: KernelCheckpointView[];
+    commitments: Array<{
+      key: string;
+      value: {
+        envelope: CommitmentEnvelope;
+        seat: string;
+        windowRef: number;
+        revealed: boolean;
+      };
+    }>;
+    nextCommitmentIds: Array<[string, number]>;
+    seenSalts: Array<[string, string]>;
+    interests: KernelCheckpointInterest[];
+    rejections: RetainedRejection[];
+    historicalSubmissionKeys: string[];
+    historicalInterestCommands: Array<[string, string]>;
+  };
+  retentionFloor: number;
+  stateDigest: number;
+  integrityDigest: string;
+}
+
+export interface SnapshotResyncRequired {
+  status: 'resync_required';
+  requestedTransitionRevision: number;
+  retentionFloor: number;
+  currentTransitionRevision: number;
+}
+
+export type SnapshotResult<TView> = ObservationDelta<TView> | SnapshotResyncRequired;
+
+export interface CompactionConfirmation {
+  checkpointDigest: string;
+  checkpointDurablyCommitted: true;
+  historyDurablyCommitted: true;
 }
 
 /**
@@ -227,6 +341,8 @@ export interface SessionKernelOptions<
   dmath?: Dmath;
   limits?: SessionLimits;
   stateIsolation?: SessionStateIsolation<TState>;
+  checkpointCodec?: SessionCheckpointCodec<TState>;
+  historyLookup?: SessionHistoryLookup;
   /**
    * Mandatory v2 observation delivery. Adaptive bounded patches are the
    * default; use `patchStrategy: 'never'` for v2 snapshots without diff CPU.
@@ -298,7 +414,7 @@ export type SessionEvent =
     /** Exact host-derived input for a timeout resolution. */
     systemInput?: CanonicalInput;
     result: {
-      status: 'playing' | 'won' | 'failed';
+      status: 'playing' | 'won' | 'failed' | 'ended';
       stars: number | null;
       actionsUsed: number;
     };
@@ -531,7 +647,9 @@ interface KernelState<TState, TCommand extends JsonValue, TView> {
   transitionRevision: number;
   cursor: number;
   tick: number;
+  lastCheckpointTick: number;
   events: SessionEvent[];
+  rejectionHistory: RetainedRejection[];
   receipts: Map<string, ReceiptState>;
   expiredReceiptKeys: Set<string>;
   views: Map<string, TView>;
@@ -612,7 +730,11 @@ export class SessionAdvanceError extends Error {
   }
 }
 
-export interface SessionKernel<TCommand extends JsonValue, TView> {
+export interface SessionKernel<
+  TCommand extends JsonValue,
+  TView,
+  TLevel = unknown,
+> {
   prepareIngest(submission: CommandSubmission<TCommand>): Prepared<IngestReceipt, TView>;
   prepareAdvance(target?: number): Prepared<AdvanceSummary<TView>, TView>;
   prepareTimeout(
@@ -629,13 +751,23 @@ export interface SessionKernel<TCommand extends JsonValue, TView> {
   awaitingSeats(): readonly string[];
   cursor(): number;
   tick(): number;
+  nextDeadline(): number | undefined;
   viewRevision(seat: string): number;
+  snapshot(seat: string): ObservationDelta<TView>;
+  snapshot(seat: string, afterTransitionRevision: undefined, scopeId?: string):
+    ObservationDelta<TView>;
   snapshot(
     seat: string,
-    afterTransitionRevision?: number,
+    afterTransitionRevision: number,
     scopeId?: string,
-  ): ObservationDelta<TView>;
-  sessionHeader(): SessionHeader;
+  ): SnapshotResult<TView>;
+  checkpoint(): KernelCheckpoint<TLevel, TCommand>;
+  compact(
+    checkpoint: KernelCheckpoint<TLevel, TCommand>,
+    confirmation: CompactionConfirmation,
+  ): void;
+  retentionFloor(): number;
+  sessionHeader(): SessionHeader<TLevel>;
   liveTranscript(): SessionTranscript;
   digest(): number;
 }
@@ -644,6 +776,8 @@ const DEFAULT_LIMITS = Object.freeze({
   maxCatchUpTicks: 600,
   receiptRetention: 64,
   maxExtensionBytes: 65_536,
+  checkpointInterval: 1,
+  maxOpenCommitmentsPerSeat: 64,
 });
 const utf8Encoder = new TextEncoder();
 
@@ -758,6 +892,181 @@ export function applyObservationDelta<TView>(
   return next;
 }
 
+export interface PredictionSubmission<TCommand extends JsonValue> {
+  participantId: string;
+  submissionId: string;
+  command: TCommand;
+}
+
+export interface PredictionSessionOptions<TCommand extends JsonValue, TView> {
+  initial?: {
+    view: TView;
+    transitionRevision: number;
+    viewRevision: number;
+  };
+  applyPending(view: TView, submission: PredictionSubmission<TCommand>): TView;
+}
+
+export type PredictionReconcileResult<TView> =
+  | {
+    status: 'applied';
+    view: TView;
+    transitionRevision: number;
+    viewRevision: number;
+    settled: readonly string[];
+    reapplied: readonly string[];
+    rolledBack: boolean;
+  }
+  | {
+    status: 'ignored';
+    view: TView;
+    transitionRevision: number;
+    viewRevision: number;
+  }
+  | {
+    status: 'resync_required';
+    reason: 'missing_base' | 'transition_gap' | 'invalid_delta';
+    expectedTransitionRevision?: number;
+    receivedTransitionRevision: number;
+  };
+
+/**
+ * Client-side optimistic reconciliation over authoritative observation
+ * deltas. Pending commands always replay in original local enqueue order.
+ */
+export class PredictionSession<TCommand extends JsonValue, TView> {
+  private authoritative: TView | undefined;
+  private predicted: TView | undefined;
+  private transitionRevision: number | undefined;
+  private authoritativeViewRevision: number | undefined;
+  private readonly pendingSubmissions: PredictionSubmission<TCommand>[] = [];
+
+  constructor(private readonly options: PredictionSessionOptions<TCommand, TView>) {
+    if (!isObjectRecord(options) || typeof options.applyPending !== 'function') {
+      throw new TypeError('PredictionSession requires an applyPending function');
+    }
+    if (options.initial !== undefined) {
+      if (!Number.isSafeInteger(options.initial.transitionRevision)
+        || options.initial.transitionRevision < 0
+        || !Number.isSafeInteger(options.initial.viewRevision)
+        || options.initial.viewRevision < 0) {
+        throw new RangeError('PredictionSession initial revisions must be non-negative integers');
+      }
+      this.authoritative = structuredClone(options.initial.view);
+      this.predicted = structuredClone(options.initial.view);
+      this.transitionRevision = options.initial.transitionRevision;
+      this.authoritativeViewRevision = options.initial.viewRevision;
+    }
+  }
+
+  predict(submission: PredictionSubmission<TCommand>): TView {
+    if (this.predicted === undefined) {
+      throw new SessionAdvanceError(
+        'invalid_view',
+        'prediction requires an authoritative snapshot',
+      );
+    }
+    if (!isObjectRecord(submission)
+      || typeof submission.participantId !== 'string'
+      || !submission.participantId
+      || typeof submission.submissionId !== 'string'
+      || !submission.submissionId) {
+      throw new TypeError('predicted submission must include participantId and submissionId');
+    }
+    assertJsonValue(submission.command, 'predicted command');
+    const detached = structuredClone(submission);
+    this.pendingSubmissions.push(detached);
+    this.predicted = structuredClone(this.options.applyPending(
+      structuredClone(this.predicted),
+      structuredClone(detached),
+    ));
+    return structuredClone(this.predicted);
+  }
+
+  reconcile(delta: ObservationDelta<TView>): PredictionReconcileResult<TView> {
+    const origin = delta.origin ?? 'resolution';
+    if (this.transitionRevision !== undefined
+      && delta.transitionRevision <= this.transitionRevision) {
+      return {
+        status: 'ignored',
+        view: structuredClone(this.predicted ?? this.authoritative!),
+        transitionRevision: this.transitionRevision,
+        viewRevision: this.authoritativeViewRevision!,
+      };
+    }
+    if (origin !== 'snapshot'
+      && this.transitionRevision !== undefined
+      && delta.transitionRevision !== this.transitionRevision + 1) {
+      return {
+        status: 'resync_required',
+        reason: 'transition_gap',
+        expectedTransitionRevision: this.transitionRevision + 1,
+        receivedTransitionRevision: delta.transitionRevision,
+      };
+    }
+    if (this.authoritative === undefined && delta.body.kind !== 'snapshot') {
+      return {
+        status: 'resync_required',
+        reason: 'missing_base',
+        receivedTransitionRevision: delta.transitionRevision,
+      };
+    }
+    let nextAuthoritative: TView;
+    try {
+      nextAuthoritative = applyObservationDelta(this.authoritative, delta);
+    } catch {
+      return {
+        status: 'resync_required',
+        reason: 'invalid_delta',
+        receivedTransitionRevision: delta.transitionRevision,
+      };
+    }
+    const settledKeys = new Set([
+      ...delta.acknowledgements,
+      ...delta.rejections,
+    ].map(({ participantId, submissionId }) => receiptKey(participantId, submissionId)));
+    const settled: string[] = [];
+    const remaining = this.pendingSubmissions.filter((submission) => {
+      const wasSettled = settledKeys.has(receiptKey(
+        submission.participantId,
+        submission.submissionId,
+      ));
+      if (wasSettled) settled.push(submission.submissionId);
+      return !wasSettled;
+    });
+    this.pendingSubmissions.splice(0, this.pendingSubmissions.length, ...remaining);
+    this.authoritative = structuredClone(nextAuthoritative);
+    this.transitionRevision = delta.transitionRevision;
+    this.authoritativeViewRevision = delta.viewRevision;
+    this.predicted = structuredClone(nextAuthoritative);
+    const reapplied: string[] = [];
+    for (const submission of this.pendingSubmissions) {
+      this.predicted = structuredClone(this.options.applyPending(
+        structuredClone(this.predicted),
+        structuredClone(submission),
+      ));
+      reapplied.push(submission.submissionId);
+    }
+    return {
+      status: 'applied',
+      view: structuredClone(this.predicted),
+      transitionRevision: delta.transitionRevision,
+      viewRevision: delta.viewRevision,
+      settled,
+      reapplied,
+      rolledBack: settled.length > 0 || reapplied.length > 0,
+    };
+  }
+
+  pending(): readonly PredictionSubmission<TCommand>[] {
+    return deepFreeze(structuredClone(this.pendingSubmissions));
+  }
+
+  view(): TView | undefined {
+    return this.predicted === undefined ? undefined : structuredClone(this.predicted);
+  }
+}
+
 function canonicalSessionView(view: unknown): string {
   try {
     return canonicalJson(view);
@@ -780,6 +1089,19 @@ function compareUnicodeCodePoints(left: string, right: string): number {
     if (difference !== 0) return difference;
   }
   return leftPoints.length - rightPoints.length;
+}
+
+function checkpointIntegrityDigest(
+  checkpoint: Omit<KernelCheckpoint, 'integrityDigest'>,
+): string {
+  const bytes = sha256(utf8Encoder.encode(canonicalJson(
+    checkpoint as unknown as JsonValue,
+  )));
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function sortedEntries<T>(value: ReadonlyMap<string, T>): Array<[string, T]> {
+  return [...value].sort(([left], [right]) => compareUnicodeCodePoints(left, right));
 }
 
 /** Derive the durable session header without initializing reducer state. */
@@ -828,10 +1150,12 @@ class SessionKernelImpl<
   TState,
   TCommand extends JsonValue,
   TView extends SessionView,
-> implements SessionKernel<TCommand, TView> {
+> implements SessionKernel<TCommand, TView, TLevel> {
   private readonly owner = {};
   private readonly isolation: SessionStateIsolation<TState>;
   private readonly limits: Required<SessionLimits>;
+  private readonly checkpointCodec: SessionCheckpointCodec<TState>;
+  private readonly historyLookup: SessionHistoryLookup | undefined;
   private readonly header: SessionHeader<TLevel>;
   private readonly tickTimeoutPolicy: ReplayTickTimeoutPolicy | undefined;
   private readonly observationCodec: Required<ObservationCodecV2Options>;
@@ -843,10 +1167,12 @@ class SessionKernelImpl<
     TState
   >();
   private live: KernelState<TState, TCommand, TView>;
+  private compactedRetentionFloor = 0;
 
   constructor(
     private readonly options: SessionKernelOptions<TLevel, TState, TCommand, TView>,
     transcript?: SessionTranscript<TLevel>,
+    checkpoint?: KernelCheckpoint<TLevel, TCommand>,
   ) {
     if (!isObjectRecord(options)) {
       throw new TypeError('session kernel options must be an object');
@@ -869,12 +1195,13 @@ class SessionKernelImpl<
         throw new TypeError('timeoutPolicy must be an object');
       }
       canonicalJson(options.timeoutPolicy);
-      if (options.seatKeys !== undefined && !isReplayTickTimeoutPolicy(options.timeoutPolicy)) {
+      const tickPolicy = isReplayTickTimeoutPolicy(options.timeoutPolicy);
+      if (options.seatKeys !== undefined && !tickPolicy) {
         throw new TypeError(
           'signed timeoutPolicy must be { mode: "ticks", windowTicks: positiveInteger }',
         );
       }
-      if (options.seatKeys !== undefined) {
+      if (tickPolicy) {
         this.tickTimeoutPolicy = structuredClone(
           options.timeoutPolicy,
         ) as unknown as ReplayTickTimeoutPolicy;
@@ -924,6 +1251,9 @@ class SessionKernelImpl<
       maxCatchUpTicks: options.limits?.maxCatchUpTicks ?? DEFAULT_LIMITS.maxCatchUpTicks,
       receiptRetention: options.limits?.receiptRetention ?? DEFAULT_LIMITS.receiptRetention,
       maxExtensionBytes: options.limits?.maxExtensionBytes ?? DEFAULT_LIMITS.maxExtensionBytes,
+      checkpointInterval: options.limits?.checkpointInterval ?? DEFAULT_LIMITS.checkpointInterval,
+      maxOpenCommitmentsPerSeat: options.limits?.maxOpenCommitmentsPerSeat
+        ?? DEFAULT_LIMITS.maxOpenCommitmentsPerSeat,
     };
     for (const [key, value] of Object.entries(this.limits)) {
       if (!Number.isSafeInteger(value) || value < (key === 'receiptRetention' ? 0 : 1)) {
@@ -972,6 +1302,29 @@ class SessionKernelImpl<
     this.isolation = options.stateIsolation ?? {
       fork: (state: TState): TState => structuredClone(state),
     };
+    this.checkpointCodec = options.checkpointCodec ?? {
+      id: 'gaos.json',
+      version: '1',
+      encode: (state: TState): JsonValue => {
+        const encoded = structuredClone(state) as unknown;
+        assertJsonValue(encoded, 'checkpoint reducerState');
+        return encoded;
+      },
+      decode: (value: JsonValue): TState => structuredClone(value) as TState,
+    };
+    if (typeof this.checkpointCodec.id !== 'string' || !this.checkpointCodec.id
+      || typeof this.checkpointCodec.version !== 'string' || !this.checkpointCodec.version
+      || typeof this.checkpointCodec.encode !== 'function'
+      || typeof this.checkpointCodec.decode !== 'function') {
+      throw new TypeError('checkpointCodec must provide id, version, encode, and decode');
+    }
+    this.historyLookup = options.historyLookup;
+    if (this.historyLookup !== undefined
+      && (typeof this.historyLookup.gameplaySubmission !== 'function'
+        || typeof this.historyLookup.interestCommand !== 'function'
+        || typeof this.historyLookup.saltIdentity !== 'function')) {
+      throw new TypeError('historyLookup must provide gameplay, interest, and salt lookups');
+    }
     const levelSeed = options.seedPolicy === 'gaos.run-level-seed.v1'
       ? runLevelSeed(options.seed, 0)
       : options.seed;
@@ -1031,7 +1384,9 @@ class SessionKernelImpl<
       transitionRevision: 0,
       cursor: 0,
       tick: 0,
+      lastCheckpointTick: 0,
       events: [],
+      rejectionHistory: [],
       receipts: new Map(),
       expiredReceiptKeys: new Set(),
       views,
@@ -1042,6 +1397,7 @@ class SessionKernelImpl<
       seenSalts: new Map(),
       interestScopes,
     };
+    if (checkpoint !== undefined) this.restoreCheckpoint(checkpoint);
     if (transcript !== undefined) this.rehydrate(transcript);
   }
 
@@ -1174,10 +1530,26 @@ class SessionKernelImpl<
   }
 
   private validatedParticipantsForView(view: TView): string[] {
+    if (view.status === 'ended' && view.stars !== undefined) {
+      throw new SessionAdvanceError(
+        'invalid_view',
+        'an ended session view must not report stars',
+      );
+    }
     const participants = participantsForView(view, this.options.seats);
     if (participants.length === 0
       || participants.some((seat) => !this.options.seats.includes(seat))) {
-      throw new TypeError('reducer participation must name one or more declared session seats');
+      const declared = [...this.options.seats].sort(compareUnicodeCodePoints);
+      const supplied = [...participants].sort(compareUnicodeCodePoints);
+      const reason = supplied.length === 0
+        ? 'supplied set is empty'
+        : `undeclared seats: ${supplied
+          .filter((seat) => !this.options.seats.includes(seat))
+          .join(', ')}`;
+      throw new TypeError(
+        `reducer participation must name one or more declared session seats; `
+        + `declared=[${declared.join(', ')}], supplied=[${supplied.join(', ')}] (${reason})`,
+      );
     }
     return participants;
   }
@@ -1190,7 +1562,9 @@ class SessionKernelImpl<
       transitionRevision: this.live.transitionRevision,
       cursor: this.live.cursor,
       tick: this.live.tick,
+      lastCheckpointTick: this.live.lastCheckpointTick,
       events: [...this.live.events],
+      rejectionHistory: structuredClone(this.live.rejectionHistory),
       receipts: cloneMapValues(this.live.receipts),
       expiredReceiptKeys: new Set(this.live.expiredReceiptKeys),
       // Derived views are immutable and replaced, never mutated in place.
@@ -1251,6 +1625,17 @@ class SessionKernelImpl<
     if (!noop) {
       draft.transitionRevision = nextRevision;
       draft.events.push(...events);
+      draft.rejectionHistory.push(...events.flatMap((event) => (
+        event.kind === 'rejection'
+          ? [{
+            transitionRevision: event.transitionRevision,
+            tick: event.tick,
+            participantId: event.participantId,
+            submissionId: event.submissionId,
+            code: event.code,
+          }]
+          : []
+      )));
     }
     // The two delta array shells intentionally remain distinct, while one
     // structured clone memoizes their shared (and usually much larger)
@@ -1377,11 +1762,21 @@ class SessionKernelImpl<
         throw error;
       }
     }
+    validateIntentSubmission(this.live.window, submission);
     if (this.options.reducer.view(this.live.reducerState).status !== 'playing') {
       throw new SessionAdvanceError('terminal', 'session is already terminal');
     }
     if (this.live.expiredReceiptKeys.has(key)
-      || this.historicalSubmissionKeys.has(key)) {
+      || this.historicalSubmissionKeys.has(key)
+      || this.historicalInterestCommands.has(key)
+      || this.historyLookup?.gameplaySubmission(
+        submission.participantId,
+        submission.submissionId,
+      )
+      || this.historyLookup?.interestCommand(
+        submission.participantId,
+        submission.submissionId,
+      ) !== undefined) {
       throw new SessionConflictError(
         'unknown_submission',
         'receipt retention has expired',
@@ -1416,6 +1811,15 @@ class SessionKernelImpl<
       if (preview.commit.commitmentId !== expected) {
         throw new SessionConflictError(
           `commitmentId ${preview.commit.commitmentId} must be ${expected}`,
+        );
+      }
+      const open = [...this.live.commitments.values()].filter(
+        (commitment) => commitment.seat === submission.participantId
+          && !commitment.revealed,
+      ).length;
+      if (open >= this.limits.maxOpenCommitmentsPerSeat) {
+        throw new SessionConflictError(
+          `seat ${submission.participantId} reached maxOpenCommitmentsPerSeat`,
         );
       }
     }
@@ -1453,10 +1857,11 @@ class SessionKernelImpl<
         );
       } catch (error) {
         throw new IntentCollectionError(
-          'invalid_submission',
+          'illegal_command',
           `command rejected by reducer (${error instanceof Error
             ? error.message
             : String(error)})`,
+          error,
         );
       } finally {
         this.isolation.discard?.(validationState);
@@ -1561,7 +1966,8 @@ class SessionKernelImpl<
           intent.participantId,
           action.reveal.commitmentId,
         );
-        const priorIdentity = seenSalts.get(action.reveal.salt);
+        const priorIdentity = seenSalts.get(action.reveal.salt)
+          ?? this.historyLookup?.saltIdentity(action.reveal.salt);
         if (priorIdentity !== undefined && priorIdentity !== identity) {
           warnings.push({
             code: 'salt_reuse',
@@ -1824,17 +2230,14 @@ class SessionKernelImpl<
     afterTransitionRevision: number,
   ): ObservationRejectionNotice[] {
     if (!this.options.seats.includes(seat)) throw new RangeError(`unknown seat ${seat}`);
-    return this.live.events.flatMap((event) => event.kind === 'rejection'
-      && event.transitionRevision > afterTransitionRevision
+    return this.live.rejectionHistory.flatMap((rejection) => (
+      rejection.transitionRevision > afterTransitionRevision
       ? [{
         seat,
-        transitionRevision: event.transitionRevision,
-        tick: event.tick,
-        participantId: event.participantId,
-        submissionId: event.submissionId,
-        code: event.code,
+        ...structuredClone(rejection),
       }]
-      : []);
+      : []
+    ));
   }
 
   prepareAdvance(target?: number): Prepared<AdvanceSummary<TView>, TView> {
@@ -1927,8 +2330,11 @@ class SessionKernelImpl<
         }
       }
       const digest = this.digestState(draft);
-      if (resolutions > 0 || rawEvents.at(-1)?.kind === 'rejection') {
+      const checkpointDue = resolutions > 0
+        && draft.tick - draft.lastCheckpointTick >= this.limits.checkpointInterval;
+      if (checkpointDue || rawEvents.at(-1)?.kind === 'rejection') {
         rawEvents.push({ kind: 'checkpoint', tick: draft.tick, digest });
+        draft.lastCheckpointTick = draft.tick;
       }
       const result: AdvanceSummary<TView> = {
         resolutions,
@@ -2090,8 +2496,11 @@ class SessionKernelImpl<
         : [];
       if (resolved.rejection) deltas.push(...this.rejectionDeltas(draft, resolved.rejection));
       const digest = this.digestState(draft);
-      if (resolved.event || resolved.rejection) {
+      const checkpointDue = resolved.event
+        && draft.tick - draft.lastCheckpointTick >= this.limits.checkpointInterval;
+      if (checkpointDue || resolved.rejection) {
         rawEvents.push({ kind: 'checkpoint', tick: draft.tick, digest });
+        draft.lastCheckpointTick = draft.tick;
       }
       const result: AdvanceSummary<TView> = {
         resolutions: resolved.event ? 1 : 0,
@@ -2178,7 +2587,11 @@ class SessionKernelImpl<
       );
     }
     const key = receiptKey(submission.participantId, submission.submissionId);
-    const prior = this.historicalInterestCommands.get(key);
+    const prior = this.historicalInterestCommands.get(key)
+      ?? this.historyLookup?.interestCommand(
+        submission.participantId,
+        submission.submissionId,
+      );
     const receipt: InterestReceipt = {
       status: prior === undefined ? 'accepted' : 'duplicate',
       participantId: submission.participantId,
@@ -2199,7 +2612,11 @@ class SessionKernelImpl<
         throw error;
       }
     }
-    if (this.historicalSubmissionKeys.has(key)) {
+    if (this.historicalSubmissionKeys.has(key)
+      || this.historyLookup?.gameplaySubmission(
+        submission.participantId,
+        submission.submissionId,
+      )) {
       throw new SessionConflictError('submission id was already used by a gameplay command');
     }
     if (this.header.signaturePolicy !== undefined) {
@@ -2397,21 +2814,48 @@ class SessionKernelImpl<
     return this.live.tick;
   }
 
+  nextDeadline(): number | undefined {
+    if (this.tickTimeoutPolicy === undefined
+      || this.live.window.participants.every(
+        (seat) => Object.hasOwn(this.live.window.intents, seat),
+      )) {
+      return undefined;
+    }
+    return this.live.tick + this.tickTimeoutPolicy.windowTicks;
+  }
+
   viewRevision(seat: string): number {
     const revision = this.live.viewRevisions.get(seat);
     if (revision === undefined) throw new RangeError(`unknown seat ${seat}`);
     return revision;
   }
 
+  snapshot(seat: string): ObservationDelta<TView>;
+  snapshot(seat: string, afterTransitionRevision: undefined, scopeId?: string):
+    ObservationDelta<TView>;
   snapshot(
     seat: string,
-    afterTransitionRevision = 0,
+    afterTransitionRevision: number,
+    scopeId?: string,
+  ): SnapshotResult<TView>;
+  snapshot(
+    seat: string,
+    afterTransitionRevision?: number,
     scopeId = seat,
-  ): ObservationDelta<TView> {
-    if (!Number.isSafeInteger(afterTransitionRevision)
-      || afterTransitionRevision < 0
-      || afterTransitionRevision > this.live.transitionRevision) {
+  ): SnapshotResult<TView> {
+    const requested = afterTransitionRevision ?? this.compactedRetentionFloor;
+    if (!Number.isSafeInteger(requested)
+      || requested < 0
+      || requested > this.live.transitionRevision) {
       throw new RangeError('afterTransitionRevision must identify committed session history');
+    }
+    if (requested < this.compactedRetentionFloor) {
+      return {
+        status: 'resync_required',
+        requestedTransitionRevision: requested,
+        retentionFloor: this.compactedRetentionFloor,
+        currentTransitionRevision: this.live.transitionRevision,
+      };
     }
     const scope = this.live.interestScopes.get(interestScopeKey(seat, scopeId));
     if (scope === undefined) throw new RangeError(`unknown interest scope ${seat}/${scopeId}`);
@@ -2428,13 +2872,124 @@ class SessionKernelImpl<
       codec: 'v2',
       origin: 'snapshot',
       acknowledgements: [],
-      rejections: this.rejectionNoticesSince(seat, afterTransitionRevision),
+      rejections: this.rejectionNoticesSince(seat, requested),
       body: { kind: 'snapshot', view },
       viewDigest: viewDigest(view),
     };
   }
 
-  sessionHeader(): SessionHeader {
+  checkpoint(): KernelCheckpoint<TLevel, TCommand> {
+    let reducerState: JsonValue;
+    try {
+      reducerState = this.checkpointCodec.encode(this.live.reducerState);
+      assertJsonValue(reducerState, 'checkpoint reducerState');
+    } catch (error) {
+      throw new TypeError(
+        `checkpoint codec could not encode reducer state: `
+        + `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    const withoutIntegrity: Omit<
+      KernelCheckpoint<TLevel, TCommand>,
+      'integrityDigest'
+    > = {
+      format: 'gaos.kernel-checkpoint',
+      formatVersion: '1.0',
+      header: structuredClone(this.header),
+      codec: {
+        id: this.checkpointCodec.id,
+        version: this.checkpointCodec.version,
+      },
+      watermark: {
+        transitionRevision: this.live.transitionRevision,
+        cursor: this.live.cursor,
+        tick: this.live.tick,
+        lastCheckpointTick: this.live.lastCheckpointTick,
+      },
+      reducerState: structuredClone(reducerState),
+      window: structuredClone(this.live.window),
+      protocol: {
+        receipts: sortedEntries(this.live.receipts).map(([key, receipt]) => ({
+          key,
+          ...structuredClone(receipt),
+        })),
+        expiredReceiptKeys: [...this.live.expiredReceiptKeys]
+          .sort(compareUnicodeCodePoints),
+        views: sortedEntries(this.live.views).map(([seat, view]) => ({
+          seat,
+          view: structuredClone(view),
+          canonical: this.live.viewCanonical.get(seat)!,
+          revision: this.live.viewRevisions.get(seat)!,
+        })),
+        commitments: sortedEntries(this.live.commitments).map(([key, value]) => ({
+          key,
+          value: structuredClone(value),
+        })),
+        nextCommitmentIds: sortedEntries(this.live.nextCommitmentIds),
+        seenSalts: sortedEntries(this.live.seenSalts),
+        interests: sortedEntries(this.live.interestScopes).map(([key, scope]) => ({
+          key,
+          participantId: scope.participantId,
+          scopeId: scope.scopeId,
+          declared: scope.declared,
+          declaration: structuredClone(scope.declaration),
+          view: structuredClone(scope.view),
+          canonical: scope.canonical,
+          patchBackoffRemaining: scope.patchBackoffRemaining,
+          patchBackoffWindow: scope.patchBackoffWindow,
+        })),
+        rejections: structuredClone(this.live.rejectionHistory),
+        historicalSubmissionKeys: [...this.historicalSubmissionKeys]
+          .sort(compareUnicodeCodePoints),
+        historicalInterestCommands: sortedEntries(this.historicalInterestCommands),
+      },
+      retentionFloor: this.compactedRetentionFloor,
+      stateDigest: this.digestState(this.live),
+    };
+    return deepFreeze({
+      ...withoutIntegrity,
+      integrityDigest: checkpointIntegrityDigest(
+        withoutIntegrity as Omit<KernelCheckpoint, 'integrityDigest'>,
+      ),
+    });
+  }
+
+  compact(
+    checkpoint: KernelCheckpoint<TLevel, TCommand>,
+    confirmation: CompactionConfirmation,
+  ): void {
+    if (!isObjectRecord(confirmation)
+      || confirmation.checkpointDurablyCommitted !== true
+      || confirmation.historyDurablyCommitted !== true) {
+      throw new TypeError(
+        'compaction requires durable checkpoint and permanent-history confirmation',
+      );
+    }
+    const current = this.checkpoint();
+    if (checkpoint.integrityDigest !== current.integrityDigest
+      || confirmation.checkpointDigest !== current.integrityDigest) {
+      throw new SessionConflictError('compaction checkpoint does not match current kernel state');
+    }
+    if (this.historyLookup === undefined) {
+      throw new TypeError('compaction requires a host-backed historyLookup');
+    }
+    this.live.events = [];
+    this.live.rejectionHistory = [];
+    this.live.expiredReceiptKeys.clear();
+    this.historicalSubmissionKeys.clear();
+    this.historicalInterestCommands.clear();
+    this.live.seenSalts.clear();
+    for (const [key, commitment] of this.live.commitments) {
+      if (commitment.revealed) this.live.commitments.delete(key);
+    }
+    this.compactedRetentionFloor = this.live.transitionRevision;
+  }
+
+  retentionFloor(): number {
+    return this.compactedRetentionFloor;
+  }
+
+  sessionHeader(): SessionHeader<TLevel> {
     return structuredClone(this.header);
   }
 
@@ -2457,6 +3012,176 @@ class SessionKernelImpl<
 
   digest(): number {
     return this.digestState(this.live);
+  }
+
+  private restoreCheckpoint(checkpoint: KernelCheckpoint<TLevel, TCommand>): void {
+    if (!isObjectRecord(checkpoint)
+      || checkpoint.format !== 'gaos.kernel-checkpoint'
+      || checkpoint.formatVersion !== '1.0') {
+      throw new TypeError('checkpoint must be a gaos.kernel-checkpoint v1.0 object');
+    }
+    if (canonicalJson(checkpoint.header as unknown as JsonValue)
+      !== canonicalJson(this.header as unknown as JsonValue)) {
+      throw new TypeError('checkpoint header does not match kernel options');
+    }
+    if (checkpoint.codec?.id !== this.checkpointCodec.id
+      || checkpoint.codec?.version !== this.checkpointCodec.version) {
+      throw new TypeError('checkpoint codec does not match kernel options');
+    }
+    const { integrityDigest, ...withoutIntegrity } = checkpoint;
+    if (!/^[0-9a-f]{64}$/.test(integrityDigest)
+      || checkpointIntegrityDigest(
+        withoutIntegrity as Omit<KernelCheckpoint, 'integrityDigest'>,
+      ) !== integrityDigest) {
+      throw new TypeError('checkpoint integrity digest mismatch');
+    }
+    const watermark = checkpoint.watermark;
+    if (!isObjectRecord(watermark)
+      || !Number.isSafeInteger(watermark.transitionRevision)
+      || watermark.transitionRevision < 0
+      || !Number.isSafeInteger(watermark.cursor)
+      || watermark.cursor < 0
+      || !Number.isSafeInteger(watermark.tick)
+      || watermark.tick < 0
+      || !Number.isSafeInteger(watermark.lastCheckpointTick)
+      || watermark.lastCheckpointTick < 0
+      || watermark.lastCheckpointTick > watermark.tick
+      || !Number.isSafeInteger(checkpoint.retentionFloor)
+      || checkpoint.retentionFloor < 0
+      || checkpoint.retentionFloor > watermark.transitionRevision) {
+      throw new TypeError('checkpoint watermarks are invalid');
+    }
+    if (checkpoint.window.sessionId !== this.options.sessionId
+      || checkpoint.window.revision !== watermark.cursor
+      || checkpoint.window.tickId !== makeTickId(this.options.sessionId, watermark.cursor)) {
+      throw new TypeError('checkpoint intent window does not match its watermark');
+    }
+    const protocol = checkpoint.protocol;
+    if (!isObjectRecord(protocol)
+      || !Array.isArray(protocol.receipts)
+      || !Array.isArray(protocol.expiredReceiptKeys)
+      || !Array.isArray(protocol.views)
+      || !Array.isArray(protocol.commitments)
+      || !Array.isArray(protocol.nextCommitmentIds)
+      || !Array.isArray(protocol.seenSalts)
+      || !Array.isArray(protocol.interests)
+      || !Array.isArray(protocol.rejections)
+      || !Array.isArray(protocol.historicalSubmissionKeys)
+      || !Array.isArray(protocol.historicalInterestCommands)) {
+      throw new TypeError('checkpoint protocol payload is invalid');
+    }
+    let previousRejectionRevision = checkpoint.retentionFloor;
+    for (const rejection of protocol.rejections) {
+      if (!isObjectRecord(rejection)
+        || !Number.isSafeInteger(rejection.transitionRevision)
+        || rejection.transitionRevision <= checkpoint.retentionFloor
+        || rejection.transitionRevision > watermark.transitionRevision
+        || rejection.transitionRevision < previousRejectionRevision
+        || !Number.isSafeInteger(rejection.tick)
+        || rejection.tick < 0
+        || typeof rejection.participantId !== 'string'
+        || !this.options.seats.includes(rejection.participantId)
+        || typeof rejection.submissionId !== 'string'
+        || !rejection.submissionId
+        || rejection.code !== 'commit_mismatch') {
+        throw new TypeError('checkpoint rejection history is invalid');
+      }
+      previousRejectionRevision = rejection.transitionRevision;
+    }
+    let reducerState: TState;
+    try {
+      reducerState = this.checkpointCodec.decode(structuredClone(checkpoint.reducerState));
+      const probe = this.isolation.fork(reducerState);
+      this.isolation.discard?.(probe);
+    } catch (error) {
+      throw new TypeError(
+        `checkpoint codec could not restore reducer state: `
+        + `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    const receipts = new Map(protocol.receipts.map((receipt) => [
+      receipt.key,
+      {
+        canonicalCommand: receipt.canonicalCommand,
+        tickId: receipt.tickId,
+        receipt: structuredClone(receipt.receipt),
+        cursor: receipt.cursor,
+      },
+    ]));
+    const views = new Map(protocol.views.map(({ seat, view }) => [
+      seat,
+      structuredClone(view) as TView,
+    ]));
+    const viewCanonical = new Map(protocol.views.map(({ seat, canonical }) => [
+      seat,
+      canonical,
+    ]));
+    const viewRevisions = new Map(protocol.views.map(({ seat, revision }) => [
+      seat,
+      revision,
+    ]));
+    if (views.size !== this.options.seats.length
+      || this.options.seats.some((seat) => !views.has(seat))) {
+      throw new TypeError('checkpoint views must name every session seat exactly once');
+    }
+    for (const seat of this.options.seats) {
+      if (canonicalSessionView(views.get(seat)!)
+        !== viewCanonical.get(seat)) {
+        throw new TypeError(`checkpoint view canonical form mismatch for seat ${seat}`);
+      }
+    }
+    const commitments = new Map(protocol.commitments.map(({ key, value }) => [
+      key,
+      structuredClone(value),
+    ]));
+    const nextCommitmentIds = new Map(protocol.nextCommitmentIds);
+    const seenSalts = new Map(protocol.seenSalts);
+    const interestScopes = new Map(protocol.interests.map((scope) => [
+      scope.key,
+      {
+        participantId: scope.participantId,
+        scopeId: scope.scopeId,
+        declared: scope.declared,
+        declaration: structuredClone(scope.declaration),
+        view: structuredClone(scope.view) as TView,
+        canonical: scope.canonical,
+        patchBackoffRemaining: scope.patchBackoffRemaining,
+        patchBackoffWindow: scope.patchBackoffWindow,
+      },
+    ]));
+    this.live = {
+      reducerState,
+      window: structuredClone(checkpoint.window),
+      transitionRevision: watermark.transitionRevision,
+      cursor: watermark.cursor,
+      tick: watermark.tick,
+      lastCheckpointTick: watermark.lastCheckpointTick,
+      events: [],
+      rejectionHistory: structuredClone(protocol.rejections),
+      receipts,
+      expiredReceiptKeys: new Set(protocol.expiredReceiptKeys),
+      views,
+      viewCanonical,
+      viewRevisions,
+      commitments,
+      nextCommitmentIds,
+      seenSalts,
+      interestScopes,
+    };
+    this.historicalSubmissionKeys.clear();
+    for (const key of protocol.historicalSubmissionKeys) {
+      this.historicalSubmissionKeys.add(key);
+    }
+    this.historicalInterestCommands.clear();
+    for (const [key, command] of protocol.historicalInterestCommands) {
+      this.historicalInterestCommands.set(key, command);
+    }
+    this.compactedRetentionFloor = checkpoint.retentionFloor;
+    if (this.digestState(this.live) !== checkpoint.stateDigest) {
+      throw new TypeError('checkpoint final state digest mismatch');
+    }
+    const restoredView = this.options.reducer.view(this.live.reducerState);
+    this.validatedParticipantsForView(restoredView);
   }
 
   private rehydrate(transcript: SessionTranscript<TLevel>): void {
@@ -2647,6 +3372,13 @@ class SessionKernelImpl<
         }
         this.evictReceipts(this.live);
       } else if (event.kind === 'rejection') {
+        this.live.rejectionHistory.push({
+          transitionRevision: event.transitionRevision,
+          tick: event.tick,
+          participantId: event.participantId,
+          submissionId: event.submissionId,
+          code: event.code,
+        });
         const identity = commitmentKey(event.participantId, event.commitmentId);
         this.live.seenSalts.set(
           event.attemptedReveal.salt,
@@ -2669,6 +3401,11 @@ class SessionKernelImpl<
         }
         signatureBytesFromBase64(event.prevChainHash, 'prevChainHash', 32);
         signatureBytesFromBase64(event.sig, 'sig', 64);
+      } else if (event.kind === 'checkpoint') {
+        if (event.tick !== this.live.tick || event.digest !== this.digestState(this.live)) {
+          throw new TypeError('transcript checkpoint digest does not match reconstructed state');
+        }
+        this.live.lastCheckpointTick = event.tick;
       }
       this.live.transitionRevision = Math.max(
         this.live.transitionRevision,
@@ -2687,7 +3424,7 @@ export function createSessionKernel<
   TView extends SessionView,
 >(
   options: SessionKernelOptions<TLevel, TState, TCommand, TView>,
-): SessionKernel<TCommand, TView> {
+): SessionKernel<TCommand, TView, TLevel> {
   return new SessionKernelImpl(options);
 }
 
@@ -2700,7 +3437,7 @@ export function rehydrateKernel<
 >(
   options: SessionKernelOptions<TLevel, TState, TCommand, TView>,
   transcript: SessionTranscript<TLevel> | readonly SessionEvent[],
-): SessionKernel<TCommand, TView> {
+): SessionKernel<TCommand, TView, TLevel> {
   if (!Array.isArray(transcript) && !isObjectRecord(transcript)) {
     throw new TypeError('transcript must be an object or an event array');
   }
@@ -2709,6 +3446,49 @@ export function rehydrateKernel<
     Array.isArray(transcript)
       ? { header: sessionHeaderFor(options), events: transcript }
       : transcript as SessionTranscript<TLevel>,
+  );
+}
+
+/** Restore live state from a durable checkpoint and its contiguous event tail. */
+export function rehydrateKernelFromCheckpoint<
+  TLevel,
+  TState,
+  TCommand extends JsonValue,
+  TView extends SessionView,
+>(
+  options: SessionKernelOptions<TLevel, TState, TCommand, TView>,
+  checkpoint: KernelCheckpoint<TLevel, TCommand>,
+  tail: readonly SessionEvent[],
+): SessionKernel<TCommand, TView, TLevel> {
+  if (!Array.isArray(tail)) throw new TypeError('checkpoint tail must be an event array');
+  let expectedRevision = checkpoint.watermark.transitionRevision + 1;
+  let expectedIndex = 0;
+  let seenEvent = false;
+  for (const event of tail) {
+    if (event.transitionRevision <= checkpoint.watermark.transitionRevision) {
+      throw new TypeError('checkpoint tail contains an event at or before its watermark');
+    }
+    if (!seenEvent && event.transitionRevision !== expectedRevision) {
+      throw new TypeError('checkpoint tail transition revisions are not contiguous');
+    }
+    if (event.transitionRevision === expectedRevision) {
+      // Continue the current committed transition.
+    } else if (event.transitionRevision === expectedRevision + 1) {
+      expectedRevision++;
+      expectedIndex = 0;
+    } else {
+      throw new TypeError('checkpoint tail transition revisions are not contiguous');
+    }
+    if (event.eventId !== eventId(options.sessionId, expectedRevision, expectedIndex)) {
+      throw new TypeError('checkpoint tail event ids are not contiguous');
+    }
+    expectedIndex++;
+    seenEvent = true;
+  }
+  return new SessionKernelImpl(
+    options,
+    { header: structuredClone(checkpoint.header), events: tail },
+    checkpoint,
   );
 }
 

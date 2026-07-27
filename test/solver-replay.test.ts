@@ -61,6 +61,20 @@ describe('generic grid solver', () => {
     });
   });
 
+  it('does not expand an ended state even if its view advertises actions', () => {
+    const ended: ActionReducer<Level, State> = {
+      ...reducer,
+      init: () => ({ at: 0, actionsUsed: 0 }),
+      view: (state) => ({
+        ...reducer.view(state),
+        status: 'ended',
+      }),
+    };
+    expect(solveGridLevel(ended, { goal: 3 }, { maxActions: 4 })).toEqual({
+      min: null, capped: false, explored: 1, actions: null,
+    });
+  });
+
   it('rejects invalid search bounds', () => {
     expect(() => solveGridLevel(reducer, { goal: 3 }, { maxActions: -1 })).toThrow(RangeError);
     expect(() => solveGridLevel(reducer, { goal: 3 }, { maxActions: 1, maxNodes: 0 }))

@@ -5,6 +5,7 @@ from jsonschema import Draft202012Validator
 
 from agilabs_arena import (
     GAOS_REPLAY_FORMAT_VERSION,
+    GAOS_REPLAY_SIGNED_FORMAT_VERSION,
     SUBMISSION_SIGNATURE_ALGORITHM,
     SUBMISSION_SIGNATURE_SCHEME,
     canonical_json,
@@ -216,6 +217,10 @@ def test_signed_v12_artifact_rechecks_cross_runtime_vectors() -> None:
     checked = recheck_replay_signatures(artifact)
     assert checked["state"] == "signed"
     assert checked["problems"] == []
+    v12 = json.loads(json.dumps(artifact))
+    v12["header"]["formatVersion"] = GAOS_REPLAY_SIGNED_FORMAT_VERSION
+    assert validate_replay_artifact(v12) == []
+    assert recheck_replay_signatures(v12)["state"] == "signed"
     assert verify_replay(
         artifact,
         lambda _: {"ok": True, "problems": []},

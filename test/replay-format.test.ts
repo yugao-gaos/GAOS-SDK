@@ -17,6 +17,7 @@ import {
   type ReplayGameRef,
   type ReplaySeatIntegrityReservation,
   type ActionReducer,
+  type SessionView,
   type TickView,
 } from '../src/engine/index.js';
 
@@ -93,6 +94,45 @@ describe('portable GAOS replay JSONL', () => {
     const artifact = parseReplayJsonl(fixture);
     expect(artifact.header.levels[0]!.seed).toBe(runLevelSeed(42, 0));
     expect(serializeReplayJsonl(artifact)).toBe(fixture);
+  });
+
+  it('round-trips and rechecks the cross-language v1.3 ended fixture', () => {
+    const fixture = readFileSync(
+      new URL(
+        '../fixtures/replay/gaos-replay-v1.3-ended.golden.jsonl',
+        import.meta.url,
+      ),
+      'utf8',
+    );
+    const artifact = parseReplayJsonl<{ room: string }>(fixture);
+    expect(artifact.header.formatVersion).toBe('1.3');
+    expect(artifact.header.levels[0]!.result).toEqual({
+      status: 'ended',
+      stars: null,
+      actionsUsed: 1,
+    });
+    expect(serializeReplayJsonl(artifact)).toBe(fixture);
+
+    const endedReducer: ActionReducer<{ room: string }, State, SessionView> = {
+      init: () => ({ at: 0, actionsUsed: 0 }),
+      apply: (state) => ({
+        at: 1,
+        actionsUsed: state.actionsUsed + 1,
+      }),
+      view: (state) => ({
+        status: state.at === 0 ? 'playing' : 'ended',
+      }),
+      replayMetrics: (state) => ({ actionsUsed: state.actionsUsed }),
+    };
+    expect(recheckReplayArtifact(artifact, () => endedReducer)).toMatchObject({
+      ok: true,
+      problems: [],
+      replayed: {
+        statuses: ['ended'],
+        totalStars: 0,
+        totalActionsUsed: 1,
+      },
+    });
   });
 
   it('publishes one manifest declaration consumers can reuse', () => {
@@ -176,6 +216,7 @@ describe('portable GAOS replay JSONL', () => {
 
   it('preserves opaque RFC-010 reservation slots in legacy v1.1 artifacts', () => {
     const reserved = structuredClone(runArtifact());
+    reserved.header.formatVersion = '1.1';
     const seatKey: ReplaySeatIntegrityReservation = {
       id: 'red',
       publicKey: 'reserved-key',

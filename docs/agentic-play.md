@@ -90,7 +90,7 @@ const result = await evaluateAgentEpisodes(
 
 For a scored or published evaluation, treat the evaluation driver as an
 ordinary session seat with an Ed25519 key. Sign its canonical submissions and
-publish the v1.2 replay, seat roster, declared signing tier, pinned historical
+publish the v1.3 replay, seat roster, declared signing tier, pinned historical
 adapter, and reported score together. A benchmark operator can then reproduce
 the computation and establish that the listed agent key authored the signed
 commands without trusting the submitter's database.

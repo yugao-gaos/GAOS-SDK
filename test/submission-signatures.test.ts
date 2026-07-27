@@ -267,7 +267,7 @@ describe('RFC-010 submission signatures', () => {
       seatKeys,
       signaturePolicy: { scheme: 'gaos.submission.ed25519.v1' },
     });
-    expect(artifact.header.formatVersion).toBe('1.2');
+    expect(artifact.header.formatVersion).toBe('1.3');
     expect(recheckReplaySignatures(artifact)).toMatchObject({
       state: 'signed',
       problems: [],
@@ -279,6 +279,12 @@ describe('RFC-010 submission signatures', () => {
         policySatisfied: true,
         chainHead: head,
       }],
+    });
+    const v12 = structuredClone(artifact);
+    v12.header.formatVersion = '1.2';
+    expect(recheckReplaySignatures(v12)).toMatchObject({
+      state: 'signed',
+      problems: [],
     });
 
     const suppressed = structuredClone(artifact);
@@ -611,7 +617,7 @@ describe('RFC-010 submission signatures', () => {
     }).verdict).toBe('rejected');
   });
 
-  it('projects a live signed kernel session into a trusted v1.2 artifact', async () => {
+  it('projects a live signed kernel session into a trusted v1.3 artifact', async () => {
     interface State { actionsUsed: number }
     const reducer: TickReducer<{}, State> = {
       init: () => ({ actionsUsed: 0 }),
@@ -682,7 +688,7 @@ describe('RFC-010 submission signatures', () => {
     }));
     kernel.commit(kernel.prepareAdvance());
     const artifact = finalizeReplay(kernel.liveTranscript(), { perm: [0] });
-    expect(artifact.header.formatVersion).toBe('1.2');
+    expect(artifact.header.formatVersion).toBe('1.3');
     const result = (await import('../src/engine/index.js')).recheckReplayArtifact(
       artifact,
       () => reducer,

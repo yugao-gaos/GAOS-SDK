@@ -18,7 +18,7 @@ export interface TranscriptHeader<TLevel> {
   seed: number;
   /** Wire action index to canonical action index. */
   perm: number[];
-  status: 'won' | 'failed';
+  status: 'won' | 'failed' | 'ended';
   stars: number | null;
   actionsUsed: number;
   /** Absent means `full` for v0.12/v0.13 transcript compatibility. */

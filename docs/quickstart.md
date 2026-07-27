@@ -55,7 +55,7 @@ npm install @yugao-gaos/turn-based-grid-sdk
 You can also pin a repository release without configuring the package registry:
 
 ```sh
-npm install 'git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.20.0'
+npm install 'git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.21.0'
 ```
 
 ## Choose the narrowest entry point
@@ -269,7 +269,7 @@ chainHead = submissionChainHashV1(envelope);
 ```
 
 Persist the envelope and new chain head so an exact transport retry reuses
-both. After terminal gameplay, `finalizeReplay` emits v1.2. Export a small
+both. After terminal gameplay, `finalizeReplay` emits v1.3. Export a small
 adapter module whose default export resolves the historical reducer and whose
 `semanticAdapterForLevel` export supplies the matching historical
 `commandToAction` function, then run:

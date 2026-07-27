@@ -44,8 +44,10 @@ import {
 
 /** Stable identifier carried by every SDK-owned portable replay. */
 export const GAOS_REPLAY_FORMAT_ID = 'gaos.replay' as const;
-/** Current schema version for signed submissions and per-seat audit chains. */
-export const GAOS_REPLAY_FORMAT_VERSION = '1.2' as const;
+/** Current schema version; adds replayable open-session termination. */
+export const GAOS_REPLAY_FORMAT_VERSION = '1.3' as const;
+/** Signed submission and per-seat audit-chain compatibility version. */
+export const GAOS_REPLAY_SIGNED_FORMAT_VERSION = '1.2' as const;
 /** Unsigned grouped/audit format accepted for migration compatibility. */
 export const GAOS_REPLAY_UNSIGNED_FORMAT_VERSION = '1.1' as const;
 /** Action-only compatibility version accepted by the parser and verifier. */
@@ -53,6 +55,7 @@ export const GAOS_REPLAY_LEGACY_FORMAT_VERSION = '1.0' as const;
 export type ReplayFormatVersion =
   | typeof GAOS_REPLAY_LEGACY_FORMAT_VERSION
   | typeof GAOS_REPLAY_UNSIGNED_FORMAT_VERSION
+  | typeof GAOS_REPLAY_SIGNED_FORMAT_VERSION
   | typeof GAOS_REPLAY_FORMAT_VERSION;
 /** Media type used by downloads, object storage, and module manifests. */
 export const GAOS_REPLAY_MIME = 'application/vnd.gaos.replay+jsonl' as const;
@@ -94,7 +97,7 @@ export interface ReplayGameRef {
 }
 
 export interface ReplayLevelResult {
-  status: 'won' | 'failed';
+  status: 'won' | 'failed' | 'ended';
   stars: number | null;
   actionsUsed: number;
   /** Product-specific scores or benchmark facts; core recheck ignores them. */
@@ -525,6 +528,12 @@ function validNonNegativeInteger(value: unknown): value is number {
 
 function isGroupedReplayVersion(value: unknown): boolean {
   return value === GAOS_REPLAY_UNSIGNED_FORMAT_VERSION
+    || value === GAOS_REPLAY_SIGNED_FORMAT_VERSION
+    || value === GAOS_REPLAY_FORMAT_VERSION;
+}
+
+function hasV12IntegritySemantics(value: unknown): boolean {
+  return value === GAOS_REPLAY_SIGNED_FORMAT_VERSION
     || value === GAOS_REPLAY_FORMAT_VERSION;
 }
 
@@ -640,9 +649,7 @@ export function createReplayArtifact<TLevel>(
   const header: ReplayHeader<TLevel> = {
     kind: 'header',
     format: GAOS_REPLAY_FORMAT_ID,
-    formatVersion: input.seatKeys === undefined && input.signaturePolicy === undefined
-      ? GAOS_REPLAY_UNSIGNED_FORMAT_VERSION
-      : GAOS_REPLAY_FORMAT_VERSION,
+    formatVersion: GAOS_REPLAY_FORMAT_VERSION,
     sessionId: input.sessionId,
     game: input.game,
     seed: input.seed,
@@ -734,11 +741,13 @@ export function validateReplayArtifact(value: unknown): string[] {
     problems.push(`header.format must be ${GAOS_REPLAY_FORMAT_ID}`);
   }
   if (header['formatVersion'] !== GAOS_REPLAY_FORMAT_VERSION
+    && header['formatVersion'] !== GAOS_REPLAY_SIGNED_FORMAT_VERSION
     && header['formatVersion'] !== GAOS_REPLAY_UNSIGNED_FORMAT_VERSION
     && header['formatVersion'] !== GAOS_REPLAY_LEGACY_FORMAT_VERSION) {
     problems.push(
       `header.formatVersion must be ${GAOS_REPLAY_LEGACY_FORMAT_VERSION}`
-      + `, ${GAOS_REPLAY_UNSIGNED_FORMAT_VERSION}, or ${GAOS_REPLAY_FORMAT_VERSION}`,
+      + `, ${GAOS_REPLAY_UNSIGNED_FORMAT_VERSION}, `
+      + `${GAOS_REPLAY_SIGNED_FORMAT_VERSION}, or ${GAOS_REPLAY_FORMAT_VERSION}`,
     );
   }
   if (header['formatVersion'] === GAOS_REPLAY_LEGACY_FORMAT_VERSION
@@ -769,11 +778,11 @@ export function validateReplayArtifact(value: unknown): string[] {
       problems.push(`header.${field} must be an object`);
     }
   }
-  if (header['formatVersion'] === GAOS_REPLAY_FORMAT_VERSION) {
+  if (hasV12IntegritySemantics(header['formatVersion'])) {
     const hasRoster = header['seatKeys'] !== undefined;
     const hasPolicy = header['signaturePolicy'] !== undefined;
     if (hasRoster !== hasPolicy) {
-      problems.push('v1.2 seatKeys and signaturePolicy must be declared together');
+      problems.push('v1.2+ seatKeys and signaturePolicy must be declared together');
     }
     if (hasPolicy) {
       const policy = header['signaturePolicy'];
@@ -903,12 +912,21 @@ export function validateReplayArtifact(value: unknown): string[] {
           `level ${index} result`,
           problems,
         );
-        if (result['status'] !== 'won' && result['status'] !== 'failed') {
-          problems.push(`level ${index} result.status must be won or failed`);
+        if (result['status'] !== 'won'
+          && result['status'] !== 'failed'
+          && (header['formatVersion'] !== GAOS_REPLAY_FORMAT_VERSION
+            || result['status'] !== 'ended')) {
+          problems.push(
+            `level ${index} result.status must be won or failed`
+            + (header['formatVersion'] === GAOS_REPLAY_FORMAT_VERSION ? ' or ended' : ''),
+          );
         }
         if (result['stars'] !== null
           && (typeof result['stars'] !== 'number' || !Number.isFinite(result['stars']))) {
           problems.push(`level ${index} result.stars must be a finite number or null`);
+        }
+        if (result['status'] === 'ended' && result['stars'] !== null) {
+          problems.push(`level ${index} ended result.stars must be null`);
         }
         if (!validNonNegativeInteger(result['actionsUsed'])) {
           problems.push(`level ${index} result.actionsUsed must be a non-negative safe integer`);
@@ -1036,7 +1054,7 @@ export function validateReplayArtifact(value: unknown): string[] {
           );
         }
       }
-      if (header['formatVersion'] === GAOS_REPLAY_FORMAT_VERSION) {
+      if (hasV12IntegritySemantics(header['formatVersion'])) {
         validateV12IntegrityFields(action, `action ${String(action['n'])}`, problems);
       }
       if (Number.isSafeInteger(action['tick']) && (action['tick'] as number) < 0) {
@@ -1151,7 +1169,7 @@ export function validateReplayArtifact(value: unknown): string[] {
     if (!isGroupedReplayVersion(header['formatVersion'])) {
       problems.push(
         `records require header.formatVersion ${GAOS_REPLAY_UNSIGNED_FORMAT_VERSION}`
-        + ` or ${GAOS_REPLAY_FORMAT_VERSION}`,
+        + `, ${GAOS_REPLAY_SIGNED_FORMAT_VERSION}, or ${GAOS_REPLAY_FORMAT_VERSION}`,
       );
     }
     if (!Array.isArray(records)) {
@@ -1221,7 +1239,7 @@ export function validateReplayArtifact(value: unknown): string[] {
             problems.push(`${label} ${field} must be a non-negative safe integer`);
           }
         }
-        if (header['formatVersion'] === GAOS_REPLAY_FORMAT_VERSION) {
+        if (hasV12IntegritySemantics(header['formatVersion'])) {
           validateV12IntegrityFields(candidate, label, problems);
         }
         for (const field of ['boardId', 'zoneId', 'seat'] as const) {
@@ -1481,7 +1499,7 @@ export function validateReplayArtifact(value: unknown): string[] {
               || record['timeoutPolicyRef'].length === 0)) {
             problems.push(`timeout ${index} timeoutPolicyRef must be a non-empty string`);
           }
-          if (header['formatVersion'] === GAOS_REPLAY_FORMAT_VERSION) {
+          if (hasV12IntegritySemantics(header['formatVersion'])) {
             const timeoutPolicy = header['timeoutPolicy'];
             if (timeoutPolicy === undefined) {
               if (record['timeoutPolicyRef'] !== undefined) {
@@ -1511,8 +1529,11 @@ export function validateReplayArtifact(value: unknown): string[] {
             problems.push(`extension ${index} record must be an object`);
           }
         } else if (kind === 'interest') {
-          if (header['formatVersion'] !== GAOS_REPLAY_FORMAT_VERSION) {
-            problems.push(`interest ${index} requires formatVersion ${GAOS_REPLAY_FORMAT_VERSION}`);
+          if (!hasV12IntegritySemantics(header['formatVersion'])) {
+            problems.push(
+              `interest ${index} requires formatVersion `
+              + `${GAOS_REPLAY_SIGNED_FORMAT_VERSION} or ${GAOS_REPLAY_FORMAT_VERSION}`,
+            );
           }
           validateV12IntegrityFields(record, `interest ${index}`, problems);
           if (record['clientTime'] === undefined
@@ -1553,7 +1574,7 @@ export function validateReplayArtifact(value: unknown): string[] {
             problems.push(`checkpoint ${index} digest must be an unsigned 32-bit integer`);
           }
         } else if (kind === 'commit-mismatch') {
-          if (header['formatVersion'] === GAOS_REPLAY_FORMAT_VERSION) {
+          if (hasV12IntegritySemantics(header['formatVersion'])) {
             validateV12IntegrityFields(record, `commit-mismatch ${index}`, problems);
           }
           if (!validNonNegativeInteger(record['tick'])) {
@@ -1598,7 +1619,7 @@ export function validateReplayArtifact(value: unknown): string[] {
               `seat-signature ${index} participantId must be a non-empty string`,
             );
           }
-          if (header['formatVersion'] === GAOS_REPLAY_FORMAT_VERSION) {
+          if (hasV12IntegritySemantics(header['formatVersion'])) {
             if (!validNonNegativeInteger(record['clientTime'])) {
               problems.push(
                 `seat-signature ${index} clientTime must be a non-negative safe integer`,
@@ -1794,7 +1815,7 @@ function signatureSubmissions(artifact: ReplayArtifact<unknown>): Array<
 export function recheckReplaySignatures(
   artifact: ReplayArtifact<unknown>,
 ): ReplaySignatureCheck {
-  if (artifact.header.formatVersion !== GAOS_REPLAY_FORMAT_VERSION
+  if (!hasV12IntegritySemantics(artifact.header.formatVersion)
     || artifact.header.seatKeys === undefined
     || artifact.header.signaturePolicy === undefined) {
     return { state: 'unsigned', problems: [], seats: [] };

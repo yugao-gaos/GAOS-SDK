@@ -5,7 +5,7 @@ agents, and let any third party verify the result.**
 
 [Documentation](https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/) ·
 [Playable demos](https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/demos/) ·
-[v0.20 release notes](docs/releases.md) ·
+[v0.21 release notes](docs/releases.md) ·
 [Discord](https://discord.gg/vdvUgcqPU)
 
 GAOS is an open-source TypeScript and Python SDK for **Game-as-a-Benchmark**:
@@ -41,7 +41,7 @@ reproducible.
 
 ### 2. Third-party-verifiable runs
 
-Portable `gaos.replay` v1.2 evidence combines deterministic re-simulation,
+Portable `gaos.replay` v1.3 evidence combines deterministic re-simulation,
 Ed25519 seat signatures, roster-bound hash chains, and independent command and
 timeout reconstruction. The offline verifier returns an explicit verdict:
 `trusted`, `unverifiable`, or `rejected`.
@@ -133,7 +133,7 @@ policy that produced it. Those remain product and scoring-authority policy. See
 ## Start building
 
 ```sh
-npm install 'git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.20.0'
+npm install 'git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.21.0'
 ```
 
 Choose the path that matches your project:

@@ -15,6 +15,7 @@ import {
   runLevelSeed,
   serializeReplayJsonl,
   type ReplayGameRef,
+  type SessionView,
   type TickReducer,
   type TickView,
 } from '../src/engine/index.js';
@@ -28,6 +29,7 @@ import {
   finalizeReplay,
   finalizeRunReplay,
   rehydrateKernel,
+  rehydrateKernelFromCheckpoint,
   type ObservationDelta,
   type SessionEvent,
   type SessionKernelOptions,
@@ -245,7 +247,7 @@ describe('./session kernel', () => {
     kernel.abort(advance);
   });
 
-  it('rehydrates pending intents and finalizes an atomically recheckable v1.1 replay', () => {
+  it('rehydrates pending intents and finalizes an atomically recheckable v1.3 replay', () => {
     const original = createSessionKernel(options());
     const red = original.prepareIngest(submission('red', 'red-1', 1));
     original.commit(red);
@@ -260,7 +262,7 @@ describe('./session kernel', () => {
     recovered.commit(advance);
 
     const artifact = finalizeReplay(recovered.liveTranscript(), { perm: [1, 0] });
-    expect(artifact.header.formatVersion).toBe('1.1');
+    expect(artifact.header.formatVersion).toBe('1.3');
     expect(artifact.actions.every((action) => (
       action.wireId === 'Action 2' && action.canonicalId === 'Action 1'
     ))).toBe(true);
@@ -277,6 +279,74 @@ describe('./session kernel', () => {
       ok: true,
       problems: [],
     });
+  });
+
+  it('finalizes a reducer-replayable ended session without inventing an outcome', () => {
+    const endedReducer: TickReducer<null, { ended: boolean }, SessionView> = {
+      init: () => ({ ended: false }),
+      advance: () => ({ ended: true }),
+      view: (state) => ({ status: state.ended ? 'ended' : 'playing' }),
+      replayMetrics: (state) => ({ actionsUsed: state.ended ? 1 : 0 }),
+    };
+    const kernel = createSessionKernel({
+      sessionId: 'ended-session',
+      game: {
+        id: 'tests/ended-session',
+        version: '1',
+        adapter: { id: 'tests/ended-session/reducer', version: '1' },
+      },
+      levelId: 'room',
+      reducer: endedReducer,
+      level: null,
+      seed: 1,
+      seedPolicy: 'explicit',
+      seats: ['host'],
+      cadence: { mode: 'turns' },
+      hostTime: 'none',
+      commandToAction: () => ({ id: 'Action 1', seat: 'host' }),
+    });
+    kernel.commit(kernel.prepareIngest({
+      protocol: PROTOCOL_ID,
+      protocolVersion: PROTOCOL_VERSION,
+      sessionId: 'ended-session',
+      tickId: makeTickId('ended-session', 0),
+      revision: 0,
+      participantId: 'host',
+      submissionId: 'end',
+      command: { amount: 0 },
+    }));
+    kernel.commit(kernel.prepareAdvance());
+
+    const artifact = finalizeReplay(kernel.liveTranscript(), { perm: [0] });
+    expect(artifact.header.formatVersion).toBe('1.3');
+    expect(artifact.header.levels[0]!.result).toEqual({
+      status: 'ended',
+      stars: null,
+      actionsUsed: 1,
+    });
+    expect(artifact.header.totals.totalStars).toBe(0);
+  });
+
+  it('rejects an ended reducer view that reports stars', () => {
+    const invalidReducer: TickReducer<null, null, SessionView> = {
+      init: () => null,
+      advance: () => null,
+      view: () => ({ status: 'ended', stars: 1 }),
+      replayMetrics: () => ({ actionsUsed: 0 }),
+    };
+    expect(() => createSessionKernel({
+      sessionId: 'invalid-ended-session',
+      game,
+      levelId: 'room',
+      reducer: invalidReducer,
+      level: null,
+      seed: 1,
+      seedPolicy: 'explicit',
+      seats: ['host'],
+      cadence: { mode: 'turns' },
+      hostTime: 'none',
+      commandToAction: () => ({ id: 'Action 1', seat: 'host' }),
+    })).toThrow(/ended session view must not report stars/);
   });
 
   it('rehydrates exact pending receipts after either seat acceptance', () => {
@@ -924,10 +994,17 @@ describe('./session kernel', () => {
     live.commit(rejected);
 
     const recovered = rehydrateKernel(secretOptions, live.liveTranscript());
-    for (const kernel of [live, recovered]) {
-      expect(kernel.snapshot('alpha', rejected.baseTransitionRevision).rejections)
+    const checkpointRecovered = rehydrateKernelFromCheckpoint(
+      secretOptions,
+      live.checkpoint(),
+      [],
+    );
+    for (const kernel of [live, recovered, checkpointRecovered]) {
+      const before = kernel.snapshot('alpha', rejected.baseTransitionRevision);
+      const after = kernel.snapshot('alpha', rejected.nextTransitionRevision);
+      expect('status' in before ? before.status : before.rejections)
         .toEqual([rejected.result.rejections[0]]);
-      expect(kernel.snapshot('alpha', rejected.nextTransitionRevision).rejections)
+      expect('status' in after ? after.status : after.rejections)
         .toEqual([]);
       expect(() => kernel.prepareIngest(submit(
         1,
@@ -1089,7 +1166,9 @@ describe('./session kernel', () => {
     expect(exactRetry.result.status).toBe('duplicate');
     kernel.commit(exactRetry);
     expect(() => kernel.prepareIngest(submission('red', 'late', 1)))
-      .toThrowError(SessionAdvanceError);
+      .toThrowError(expect.objectContaining<Partial<IntentCollectionError>>({
+        code: 'stale_tick',
+      }));
     expect(() => kernel.prepareTimeout(
       { timeoutId: 'late', reason: 'elapsed', tick: 1 },
       { id: 'Action 1', index: 1 },
@@ -1142,7 +1221,7 @@ describe('./session kernel', () => {
     kernel.abort(advance);
   });
 
-  it('returns typed unknown_submission after receipt eviction', () => {
+  it('preserves stable cursor precedence after receipt eviction', () => {
     const kernel = createSessionKernel({
       ...options(),
       limits: { receiptRetention: 0 },
@@ -1151,13 +1230,10 @@ describe('./session kernel', () => {
     kernel.commit(kernel.prepareIngest(submission('blue', 'blue-old', 1)));
     kernel.commit(kernel.prepareAdvance());
     expect(kernel.cursor()).toBe(kernel.tick());
-    try {
-      kernel.prepareIngest(submission('red', 'red-old', 1));
-      throw new Error('expected the expired receipt to be rejected');
-    } catch (error) {
-      expect(error).toBeInstanceOf(SessionConflictError);
-      expect((error as SessionConflictError).code).toBe('unknown_submission');
-    }
+    expect(() => kernel.prepareIngest(submission('red', 'red-old', 1)))
+      .toThrowError(expect.objectContaining<Partial<IntentCollectionError>>({
+        code: 'stale_tick',
+      }));
   });
 
   it('never reapplies an accepted submission ID after bounded receipt cleanup', () => {

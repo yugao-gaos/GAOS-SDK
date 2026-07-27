@@ -85,7 +85,7 @@ export default () => reducer;
     expect(JSON.parse(output)).toMatchObject({
       verdict: 'unverifiable',
       replayOk: true,
-      formatVersion: '1.1',
+      formatVersion: '1.3',
       signatures: { state: 'unsigned' },
     });
 

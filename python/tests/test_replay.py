@@ -28,6 +28,12 @@ FIXTURE = (
     / "replay"
     / "gaos-replay-v1.golden.jsonl"
 )
+ENDED_FIXTURE = (
+    Path(__file__).parents[2]
+    / "fixtures"
+    / "replay"
+    / "gaos-replay-v1.3-ended.golden.jsonl"
+)
 SCHEMA = (
     Path(__file__).parents[2]
     / "schemas"
@@ -77,6 +83,29 @@ def test_golden_fixture_conforms_to_published_json_schema():
     Draft202012Validator.check_schema(schema)
     Draft202012Validator(schema).validate(
         parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
+    )
+
+def test_v13_ended_fixture_round_trips_and_conforms_to_schema():
+    jsonl = ENDED_FIXTURE.read_text(encoding="utf-8")
+    artifact = parse_replay_jsonl(jsonl)
+
+    assert artifact["header"]["formatVersion"] == GAOS_REPLAY_FORMAT_VERSION
+    assert artifact["header"]["levels"][0]["result"] == {
+        "status": "ended",
+        "stars": None,
+        "actionsUsed": 1,
+    }
+    assert validate_replay_artifact(artifact) == []
+    assert serialize_replay_jsonl(artifact) == jsonl
+
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    Draft202012Validator(schema).validate(artifact)
+
+    legacy = copy.deepcopy(artifact)
+    legacy["header"]["formatVersion"] = GAOS_REPLAY_UNSIGNED_FORMAT_VERSION
+    assert any(
+        "result.status must be won or failed" in problem
+        for problem in validate_replay_artifact(legacy)
     )
 
 
