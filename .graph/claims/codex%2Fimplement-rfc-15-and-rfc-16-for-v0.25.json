@@ -3,7 +3,8 @@
   "git_user": "yugao-gaos <yu.gao@gaos.ca>",
   "session_id": "codex-mcp-27461-e28d618cc716249375c8ca5338f2327b",
   "branch": "orch/attempt/codex-implement-rfc-15-and-rfc-16-for-v0.25",
-  "status": "claimed",
+  "status": "tested",
   "claimed_at": "2026-07-27T21:35:21.963Z",
-  "lease_until": "2026-07-27T22:35:21.963Z"
+  "lease_until": "2026-07-27T22:35:21.963Z",
+  "completed_at": "2026-07-27T21:50:32.779Z"
 }
