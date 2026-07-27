@@ -40,6 +40,15 @@ Every command submission binds the command to the current `sessionId`,
 Reuse the same `submissionId` for an exact retry. Use a new ID for a new
 logical control step. A host rejects stale cursors and conflicting retries.
 
+A session using RFC-010 may also carry `clientTime`, `prevChainHash`, and
+`sig`. These fields authenticate the canonical command plus the existing
+session/seat/id/cursor/tick fields; they do not change collection or reducer
+semantics. A chained submission carries both `clientTime` and
+`prevChainHash`; `sig` is present for direct tier-1 or periodic-policy
+attestation. Exact retries reuse the identical signed bytes.
+[Trust and verification](/trust-and-verification) defines the scheme and
+threat boundary.
+
 ## Simultaneous resolution
 
 The protocol collector stores one intent per participant without mutating its

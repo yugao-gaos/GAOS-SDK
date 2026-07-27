@@ -24,7 +24,21 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - run: npm run dmath:evidence
       - run: npm pack --dry-run
+
+  dmath-runtimes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: npm run dmath:browsers
+      - run: npm run dmath:workerd
 
   python:
     strategy:

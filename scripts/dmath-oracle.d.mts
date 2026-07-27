@@ -1,0 +1,10 @@
+export const ORACLE_BITS: bigint;
+export const ORACLE_ONE: bigint;
+export const ORACLE_PI: bigint;
+export function numberToOracle(value: number): bigint;
+export function oracleToNumber(value: bigint): number;
+export function oracleSin(value: number): number;
+export function oracleCos(value: number): number;
+export function oracleAtan2(y: number, x: number): number;
+export function float64Bits(value: number): bigint;
+export function ulpDistance(left: number, right: number): number;

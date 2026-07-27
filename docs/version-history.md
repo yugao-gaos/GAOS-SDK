@@ -3,9 +3,94 @@
 GAOS uses the v0.x line to refine its contracts before v1.0. Products should
 review the migration notes when updating across minor versions.
 
-::: tip Latest release: v0.18.0
-The simulation, protocol, replay, and agent surfaces now share one tick model.
+::: tip Current release: v0.20.0
+Portable replay now adds roster-bound Ed25519 submission chains and explicit
+`trusted` / `unverifiable` / `rejected` offline verdicts.
 :::
+
+## v0.20.0 — signed portable evidence
+
+Released July 26, 2026 after Arena and TabletopLabs returned their v0.19
+integration findings. v0.20 makes the resulting signed artifacts fully
+third-party verifiable with a pinned historical adapter and no GAOS service.
+
+- `gaos.replay` v1.2 validates and verifies
+  `gaos.submission.ed25519.v1`, with canonical command/cursor/time material for
+  chained submissions, order-independent roster hashing, roster-bound chain
+  genesis, and per-seat `signingTier.N`.
+- Commit/reveal and rejected reveal submissions require tier-1 signatures.
+  High-rate submissions can be covered by periodic signed chain heads recorded
+  in the durable `seat-signature` lane.
+- TypeScript and zero-dependency Python share RFC 8032 checks, deterministic
+  signing, three complete framed vectors, and independent chain verification.
+- Replay facts remain separate: `ok` is computation consistency,
+  `signatures.state` is `signed` / `partial` / `unsigned`, and `verdict` is
+  `trusted` / `unverifiable` / `rejected`.
+- `semantics` independently reports signed command and timeout action
+  reconstruction. Tick-bounded policies fix timeout position at
+  `windowRef + windowTicks`; wall-clock earliness is not claimed.
+- Offline `gaos verify` and `gaos-verify` commands compose signature facts with
+  a pinned product adapter. No GAOS service, account, or network is involved.
+- The session hot path reuses canonical seat-view bytes and one cloned delta
+  graph, removing the pre-pin serialization duplication without changing the
+  wire contract.
+- Tier-2-signed `(seat, scopeId)` interest declarations narrow partitioned
+  views without widening visibility, survive replay, and emit independently
+  reconstructible delivery streams.
+- Observation codec v2 is the only v0.20 delivery codec. It uses bounded safe
+  JSON patches with snapshot fallback; adaptive delivery backs off after an
+  uneconomic probe with an exponential per-scope circuit breaker, while
+  `patchStrategy: 'never'` keeps v2 snapshots and skips diff CPU entirely.
+  Derived observation caches use copy-on-write ownership without weakening
+  public snapshot isolation. Clients migrate from snapshot-only v1 through
+  `applyObservationDelta`. Repair origins, opaque product action payloads,
+  pre-ingest legality, typed view failures, play-all-level runs, and host
+  recovery helpers incorporate the two product migrations' findings.
+- `SessionView` separates generic lifecycle observations from the
+  action/grid-shaped `TickView`; non-HUD reducers report deterministic replay
+  counters through `replayMetrics`, while existing reducers remain unchanged.
+- Arena chooser and dialogue navigation is classified as host/UI state.
+  Confirmed choices become normal SDK actions, so no seat-local state-changing
+  kernel transition or revision exception is introduced.
+
+[Trust and verification →](/trust-and-verification) ·
+[Portable replay →](/mechanisms/replay)
+
+## v0.19.0 — authoritative sessions and integrity
+
+Prepared July 25, 2026.
+
+- New optional `./session` kernel with persist-before-publish prepared
+  transitions, explicit commit/abort lifecycle, mutable-state isolation,
+  durable partial-window intents, crash rehydration, and per-seat observation
+  revisions with canonical applied-submission acknowledgements and routable
+  rejection identities recoverable by durable transition watermark. Accepted
+  submission IDs are permanently single-use.
+- Multi-level `finalizeRunReplay` projection with derived level seeds, global
+  action/record numbering, aggregate totals, and run-terminal validation.
+- `gaos.replay` v1.1 grouped resolutions preserve one reducer call per
+  authoritative resolution and add timeout, extension, and mismatch audit
+  records. The parser continues to accept and reproduce v1.0 artifacts;
+  TypeScript and Python share Unicode-code-point canonical key order,
+  JavaScript-safe integers, and strict schema semantics.
+- `dmath-1` contexts provide deterministic `sin`, `cos`, `atan2`, `clamp`,
+  and `roundTo`, frozen for the first time by this release with a 512-bit
+  independent oracle and Node/Chromium/Firefox/WebKit/workerd bit-vector CI.
+- `gaos.commit.sha256.v1` provides byte-exact framing, canonical payload
+  validation, synchronous SHA-256 replay verification, published complete
+  preimage vectors, and explicit non-fatal replay diagnostics. The v1.1 audit
+  lane is advisory host attestation; additive v1.2 signature/chain/roster
+  fields are reserved for RFC-010 under `seatKeys`, `clientTime`,
+  `timeoutPolicy`, and `seat-signature`. Session construction requires an
+  explicit UTC-epoch clock provider or `'none'`; event `hostTime` is advisory
+  and optional, and portable projection is opt-in.
+- Migration: the final API/wire name is `timeout`, not `deadline`, and
+  `finalizeRunReplay` source transcripts must use `seedPolicy: 'explicit'`.
+  Hosts must also add the explicit `hostTime` policy; timestamp-free
+  persisted events remain valid.
+
+[Sessions and integrity →](/session-and-integrity) ·
+[Portable replay →](/mechanisms/replay)
 
 ## v0.18.0 — one coherent tick model
 
@@ -37,8 +122,8 @@ Released July 24, 2026.
 - Lossless adapter from the existing `TranscriptHeader`/`TranscriptAction`
   pair, allowing Arena and creator-platform results to share verifier tooling.
 - Public documentation and capability map present GAOS as a general game SDK,
-  with tabletop games as one supported family and grids as one optional
-  mechanism.
+  spanning card, puzzle, tactics, simulation, and hybrid games, with grids as
+  one optional mechanism.
 - Six playable browser demos cover card, puzzle, hex, graph, hybrid, and
   real-time scheduled game loops.
 

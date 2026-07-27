@@ -15,6 +15,7 @@ import {
   validateReplayArtifact,
   type ReplayArtifact,
   type ReplayGameRef,
+  type ReplaySeatIntegrityReservation,
   type ActionReducer,
   type TickView,
 } from '../src/engine/index.js';
@@ -145,6 +146,105 @@ describe('portable GAOS replay JSONL', () => {
     );
   });
 
+  it('rejects unknown properties at every frozen replay boundary', () => {
+    const artifact = structuredClone(runArtifact()) as ReplayArtifact<Level>
+      & { unexpected?: boolean };
+    artifact.unexpected = true;
+    expect(validateReplayArtifact(artifact)).toContain('artifact has unknown property unexpected');
+
+    const nested = structuredClone(runArtifact());
+    (nested.header.game.adapter as unknown as Record<string, unknown>)['extra'] = true;
+    expect(validateReplayArtifact(nested))
+      .toContain('header.game.adapter has unknown property extra');
+
+    const action = structuredClone(runArtifact());
+    (action.actions[0] as unknown as Record<string, unknown>)['extra'] = true;
+    expect(validateReplayArtifact(action))
+      .toContain('action 0 has unknown property extra');
+  });
+
+  it('rejects inconsistent grouped records instead of discarding gameplay', () => {
+    const artifact = structuredClone(runArtifact());
+    artifact.header.formatVersion = '1.1';
+    artifact.records = [];
+
+    expect(validateReplayArtifact(artifact).join('\n'))
+      .toMatch(/actions must exactly match the projection of records/);
+    expect(() => serializeReplayJsonl(artifact))
+      .toThrow(/actions must exactly match the projection of records/);
+  });
+
+  it('preserves opaque RFC-010 reservation slots in legacy v1.1 artifacts', () => {
+    const reserved = structuredClone(runArtifact());
+    const seatKey: ReplaySeatIntegrityReservation = {
+      id: 'red',
+      publicKey: 'reserved-key',
+      alg: 'reserved-algorithm',
+    };
+    reserved.header.seatKeys = [seatKey];
+    reserved.header.signaturePolicy = { scheme: 'reserved', N: 8 };
+    reserved.header.timeoutPolicy = { mode: 'ticks', maximum: 90 };
+    Object.assign(reserved.actions[0]!, {
+      submissionId: 'reserved-submission',
+      canonicalCommand: '{"move":1}',
+      cursor: 0,
+      clientTime: 1_785_032_000_000,
+      prevChainHash: 'reserved-chain-link',
+      sig: 'reserved-signature',
+    });
+
+    expect(validateReplayArtifact(reserved)).toEqual([]);
+    const parsed = parseReplayJsonl(serializeReplayJsonl(reserved));
+    expect(parsed).toEqual(reserved);
+
+    const periodic = structuredClone(reserved);
+    periodic.actions = [];
+    periodic.records = [{
+      kind: 'seat-signature',
+      n: 0,
+      levelIndex: 0,
+      tick: 12,
+      participantId: 'red',
+      clientTime: 1_785_032_000_000,
+      prevChainHash: 'reserved-chain-link',
+      sig: 'reserved-periodic-signature',
+      hostTime: 1_785_032_000_100,
+    }];
+    expect(validateReplayArtifact(periodic)).toEqual([]);
+    expect(parseReplayJsonl(serializeReplayJsonl(periodic))).toEqual(periodic);
+
+    const legacy = structuredClone(reserved);
+    legacy.header.formatVersion = '1.0';
+    expect(validateReplayArtifact(legacy).join('\n')).toMatch(
+      /integrity reservations require|v1\.1 fields require/,
+    );
+  });
+
+  it('rejects v1.0 commitment fields and aborts before reducer resolution for unknown dmath', () => {
+    const legacy = structuredClone(runArtifact());
+    legacy.header.formatVersion = '1.0';
+    legacy.actions[0]!.commit = {
+      commitmentId: 0,
+      scheme: 'gaos.commit.sha256.v1',
+      hash: '00'.repeat(32),
+    };
+    expect(validateReplayArtifact(legacy).join('\n'))
+      .toMatch(/v1\.1 fields require formatVersion 1.1/);
+
+    const unsupported = structuredClone(runArtifact());
+    unsupported.header.extensions = {
+      dmath: { algorithm: 'future', backend: 'js' },
+    };
+    let reducerResolved = false;
+    const checked = recheckReplayArtifact(unsupported, () => {
+      reducerResolved = true;
+      return reducer;
+    });
+    expect(checked.ok).toBe(false);
+    expect(checked.problems.join('\n')).toMatch(/cannot construct replay dmath algorithm/);
+    expect(reducerResolved).toBe(false);
+  });
+
   it('detects seed, total, ordering, and adapter tampering', () => {
     const artifact = runArtifact();
     const wrongSeed = structuredClone(artifact);
@@ -225,5 +325,13 @@ describe('portable GAOS replay JSONL', () => {
     const foreign = serializeReplayJsonl(artifact)
       .replace('"format":"gaos.replay"', '"format":"vendor.replay"');
     expect(() => parseReplayJsonl(foreign)).toThrow(/header\.format must be gaos\.replay/);
+
+    const unsafe = structuredClone(runArtifact());
+    unsafe.header.levels[0]!.level.goal = Number.MAX_SAFE_INTEGER + 1;
+    expect(() => serializeReplayJsonl(unsafe)).toThrow(/JavaScript safe range/);
+
+    const surrogate = structuredClone(runArtifact());
+    surrogate.header.sessionId = '\ud800';
+    expect(() => serializeReplayJsonl(surrogate)).toThrow(/unpaired surrogates/);
   });
 });

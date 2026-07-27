@@ -1,6 +1,6 @@
 {
   "name": "@yugao-gaos/turn-based-grid-sdk",
-  "version": "0.18.0",
+  "version": "0.20.0",
   "description": "Deterministic game mechanisms and multiplayer infrastructure for agent-ready games.",
   "license": "Apache-2.0",
   "type": "module",
@@ -10,6 +10,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
+    "gaos": "./dist/gaos.js",
     "gaos-agent": "./dist/gaos-agent.js"
   },
   "exports": {
@@ -25,6 +26,10 @@
       "types": "./dist/engine/index.d.ts",
       "import": "./dist/engine/index.js"
     },
+    "./session": {
+      "types": "./dist/session.d.ts",
+      "import": "./dist/session.js"
+    },
     "./agent": {
       "types": "./dist/agent/index.d.ts",
       "import": "./dist/agent/index.js"
@@ -34,7 +39,10 @@
       "import": "./dist/agent-cli/index.js"
     },
     "./schemas/gaos.replay-v1.schema.json": "./schemas/gaos.replay-v1.schema.json",
-    "./fixtures/replay/gaos-replay-v1.golden.jsonl": "./fixtures/replay/gaos-replay-v1.golden.jsonl"
+    "./fixtures/replay/gaos-replay-v1.golden.jsonl": "./fixtures/replay/gaos-replay-v1.golden.jsonl",
+    "./fixtures/commitment/gaos.commit.sha256.v1.vectors.json": "./fixtures/commitment/gaos.commit.sha256.v1.vectors.json",
+    "./fixtures/signatures/gaos.submission.ed25519.v1.vectors.json": "./fixtures/signatures/gaos.submission.ed25519.v1.vectors.json",
+    "./fixtures/dmath/dmath-1.vectors.json": "./fixtures/dmath/dmath-1.vectors.json"
   },
   "files": [
     "dist",
@@ -47,6 +55,11 @@
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
+    "dmath:evidence": "npm run build && node scripts/generate-dmath-evidence.mjs",
+    "dmath:browsers": "npm run build && node scripts/check-dmath-browsers.mjs",
+    "dmath:workerd": "npm run build && node scripts/check-dmath-workerd.mjs",
+    "signatures:benchmark": "npm run build && node scripts/benchmark-signatures.mjs",
+    "observations:benchmark": "npm run build && node scripts/benchmark-observation-codec.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "prepare": "npm run build",
@@ -65,9 +78,11 @@
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
+    "playwright": "^1.62.0",
     "typescript": "^5.5.4",
     "vitepress": "1.6.4",
-    "vitest": "^3.2.7"
+    "vitest": "^3.2.7",
+    "workerd": "^1.20260724.1"
   },
   "overrides": {
     "vite": "6.4.3"

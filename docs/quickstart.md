@@ -55,7 +55,7 @@ npm install @yugao-gaos/turn-based-grid-sdk
 You can also pin a repository release without configuring the package registry:
 
 ```sh
-npm install 'git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.18.0'
+npm install 'git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.20.0'
 ```
 
 ## Choose the narrowest entry point
@@ -238,10 +238,57 @@ original submission ID. The [tick protocol v1 guide](/protocol-v1) covers
 cursors, idempotency, pending envelopes, timeouts, and low-level transport
 behavior.
 
+## Sign and verify a run offline
+
+For a scored run, generate one Ed25519 key per seat, put the public keys in
+`SessionKernelOptions.seatKeys`, and set:
+
+```ts
+signaturePolicy: { scheme: 'gaos.submission.ed25519.v1' }
+```
+
+Before submitting a command, construct its exact envelope and attach the
+result:
+
+```ts
+const envelope = {
+  sessionId,
+  seat,
+  submissionId,
+  cursor: kernel.cursor(),
+  tick: kernel.tick(),
+  clientTime: Date.now(),
+  command,
+  prevChainHash: chainHead,
+};
+
+submission.clientTime = envelope.clientTime;
+submission.prevChainHash = envelope.prevChainHash;
+submission.sig = await signSubmissionV1(privateKey, envelope);
+chainHead = submissionChainHashV1(envelope);
+```
+
+Persist the envelope and new chain head so an exact transport retry reuses
+both. After terminal gameplay, `finalizeReplay` emits v1.2. Export a small
+adapter module whose default export resolves the historical reducer and whose
+`semanticAdapterForLevel` export supplies the matching historical
+`commandToAction` function, then run:
+
+```sh
+gaos verify run.gaos-replay.jsonl --adapter ./historical-adapter.mjs
+```
+
+The command prints `trusted` only when replay, signatures, chains, the
+declared periodic policy, and command-to-action reconstruction all check. It
+uses no service or network. See
+[trust and verification](/trust-and-verification) for complete imports,
+periodic signatures, Python, key handling, and limits.
+
 ## Next steps
 
 - Learn [which layer owns each API](/architecture).
 - Browse the [complete mechanism reference](/mechanisms/).
 - Integrate [same-tick recursive settlement](/settlement).
 - Connect [model drivers, tools, and agent CLIs](/agentic-play).
+- Publish [signed evidence anyone can verify](/trust-and-verification).
 - Use the [Python SDK and Gymnasium-compatible environment API](/python).
