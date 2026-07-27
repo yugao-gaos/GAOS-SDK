@@ -1,6 +1,6 @@
 {
   "name": "@yugao-gaos/turn-based-grid-sdk",
-  "version": "0.22.0",
+  "version": "0.24.0",
   "description": "Deterministic game mechanisms and multiplayer infrastructure for agent-ready games.",
   "license": "Apache-2.0",
   "type": "module",
@@ -46,6 +46,18 @@
       "types": "./dist/benchmark.d.ts",
       "import": "./dist/benchmark.js"
     },
+    "./evidence": {
+      "types": "./dist/evidence.d.ts",
+      "import": "./dist/evidence.js"
+    },
+    "./presentation-client": {
+      "types": "./dist/presentation-client.d.ts",
+      "import": "./dist/presentation-client.js"
+    },
+    "./leaderboard": {
+      "types": "./dist/leaderboard.d.ts",
+      "import": "./dist/leaderboard.js"
+    },
     "./agent": {
       "types": "./dist/agent/index.d.ts",
       "import": "./dist/agent/index.js"
@@ -59,15 +71,27 @@
     "./fixtures/replay/gaos-replay-v1.3-ended.golden.jsonl": "./fixtures/replay/gaos-replay-v1.3-ended.golden.jsonl",
     "./fixtures/commitment/gaos.commit.sha256.v1.vectors.json": "./fixtures/commitment/gaos.commit.sha256.v1.vectors.json",
     "./fixtures/signatures/gaos.submission.ed25519.v1.vectors.json": "./fixtures/signatures/gaos.submission.ed25519.v1.vectors.json",
+    "./fixtures/signatures/gaos.submission.ed25519.v2.vectors.json": "./fixtures/signatures/gaos.submission.ed25519.v2.vectors.json",
     "./fixtures/dmath/dmath-1.vectors.json": "./fixtures/dmath/dmath-1.vectors.json",
     "./schemas/gaos.presentation-frame-v1.schema.json": "./schemas/gaos.presentation-frame-v1.schema.json",
     "./schemas/gaos.benchmark-manifest-v1.schema.json": "./schemas/gaos.benchmark-manifest-v1.schema.json",
-    "./fixtures/ecosystem/presentation-frame-v1.golden.json": "./fixtures/ecosystem/presentation-frame-v1.golden.json"
+    "./fixtures/ecosystem/presentation-frame-v1.golden.json": "./fixtures/ecosystem/presentation-frame-v1.golden.json",
+    "./fixtures/ecosystem/presentation-client-v1.golden.json": "./fixtures/ecosystem/presentation-client-v1.golden.json",
+    "./schemas/gaos.command-v1.schema.json": "./schemas/gaos.command-v1.schema.json",
+    "./schemas/gaos.receipt-v1.schema.json": "./schemas/gaos.receipt-v1.schema.json",
+    "./schemas/gaos.observation-v1.schema.json": "./schemas/gaos.observation-v1.schema.json",
+    "./schemas/gaos.replay-reference-v1.schema.json": "./schemas/gaos.replay-reference-v1.schema.json",
+    "./schemas/gaos.seat-control-v2.schema.json": "./schemas/gaos.seat-control-v2.schema.json",
+    "./schemas/gaos.evidence-verdict-v2.schema.json": "./schemas/gaos.evidence-verdict-v2.schema.json",
+    "./schemas/gaos.dynamic-control-evidence-v2.schema.json": "./schemas/gaos.dynamic-control-evidence-v2.schema.json",
+    "./schemas/gaos.benchmark-bundle-v1.schema.json": "./schemas/gaos.benchmark-bundle-v1.schema.json"
   },
   "files": [
     "dist",
     "schemas",
     "fixtures",
+    "examples/clients",
+    "examples/leaderboard",
     "README.md"
   ],
   "scripts": {

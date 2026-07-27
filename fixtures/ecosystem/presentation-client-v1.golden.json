@@ -1,0 +1,74 @@
+{
+  "schema": "gaos.presentation-client-fixture.v1",
+  "messages": [
+    {
+      "schema": "gaos.observation.v1",
+      "type": "snapshot",
+      "transitionRevision": 4,
+      "tick": 10,
+      "view": { "entities": [{ "id": "unit-1", "x": 2, "y": 3 }] },
+      "digest": "snapshot-4",
+      "futureOptionalField": { "preserve": true }
+    },
+    {
+      "schema": "gaos.observation.v1",
+      "type": "patch",
+      "baseTransitionRevision": 3,
+      "transitionRevision": 4,
+      "tick": 10,
+      "patch": { "entityId": "unit-1", "x": 99, "y": 99 },
+      "digest": "invalid"
+    },
+    {
+      "schema": "gaos.receipt.v1",
+      "type": "acknowledgement",
+      "submissionId": "move-1"
+    },
+    {
+      "schema": "gaos.receipt.v1",
+      "type": "rejection",
+      "submissionId": "bad-1",
+      "reason": "inactive-controller"
+    },
+    {
+      "schema": "gaos.observation.v1",
+      "type": "snapshot",
+      "transitionRevision": 4,
+      "tick": 10,
+      "view": { "entities": [{ "id": "unit-1", "x": 2, "y": 3 }] },
+      "digest": "snapshot-4"
+    },
+    {
+      "schema": "gaos.observation.v1",
+      "type": "digest-mismatch",
+      "expected": "snapshot-4",
+      "actual": "tampered"
+    },
+    {
+      "schema": "gaos.observation.v1",
+      "type": "snapshot",
+      "transitionRevision": 4,
+      "tick": 10,
+      "view": { "entities": [{ "id": "unit-1", "x": 2, "y": 3 }] },
+      "digest": "snapshot-4"
+    },
+    {
+      "schema": "gaos.observation.v1",
+      "type": "patch",
+      "baseTransitionRevision": 4,
+      "transitionRevision": 5,
+      "tick": 11,
+      "patch": { "entityId": "unit-1", "x": 3, "y": 3 },
+      "digest": "snapshot-5"
+    }
+  ],
+  "expected": {
+    "transitionRevision": 5,
+    "tick": 11,
+    "entityId": "unit-1",
+    "x": 3,
+    "y": 3,
+    "acknowledged": ["move-1"],
+    "rejected": ["bad-1"]
+  }
+}

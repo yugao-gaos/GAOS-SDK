@@ -3,11 +3,45 @@
 GAOS uses the v0.x line to refine its contracts before v1.0. Products should
 review the migration notes when updating across minor versions.
 
-::: tip Current release: v0.22.0
-RFC-013 adds ecosystem hosting and presentation
-boundaries, controller epochs, research descriptors, and neutral benchmark
-planning.
+::: tip Current release: v0.24.0
+RFC-014 and RFC-015 complete portable dynamic-control evidence and verifiable
+benchmark execution/publication.
 :::
+
+## v0.24.0: verifiable benchmark publication
+
+Released July 27, 2026 as the RFC-015 publication release.
+
+- Bounded parallel execution, interruption, and resume preserve the authored
+  plan and deterministic aggregate.
+- Reproducible `gaos.benchmark-bundle.v1` packaging and independent
+  verification reject missing, duplicate, modified, or incompatible evidence
+  and recompute every score.
+- Manifest-pinned external authority facts remain separate from replay,
+  reproduction, openness, model identity, and hidden-test facts.
+- Qualified payoff, action-efficiency, and rating helpers enforce declared
+  preconditions.
+- The neutral leaderboard starter includes SQLite/PostgreSQL schemas, object
+  storage and worker-queue boundaries, artifact download, and local verification.
+
+[Verifiable benchmark publication →](/benchmark-publication)
+
+## v0.23.0: interoperability and dynamic-control evidence
+
+Released July 27, 2026 as the RFC-014 interoperability release.
+
+- A versioned executable host-conformance report covers the common lifecycle
+  failures and repair/control transitions.
+- Host and rendering-engine guides state the simulation and evidence authority
+  boundary for every supported integration.
+- TypeScript, C#, C++, and GDScript-compatible clients share schemas and one
+  golden presentation fixture.
+- `gaos.submission.ed25519.v2` binds commands to authenticated controller
+  epochs, signed handoffs, checkpoint continuity, and offline verifier facts.
+- Product-pinned external trust reports cryptographic, pin, expiry, revocation,
+  and subject-binding facts without GAOS private-key custody.
+
+[Interoperability and dynamic-control evidence →](/interoperability)
 
 ## v0.22.0: ecosystem and benchmark contracts
 
@@ -28,9 +62,7 @@ Released July 27, 2026 as the RFC-013 foundation release.
 
 [Ecosystem bridges and benchmark contracts →](/ecosystem-bridges)
 
-The remaining roadmap is split by release: RFC-014 targets v0.23
-interoperability and dynamic-control evidence, and RFC-015 targets v0.24
-verifiable benchmark execution and publication.
+RFC-014 and RFC-015 build additively on these foundations in v0.23 and v0.24.
 
 ## v0.21.0: durable long-running sessions
 

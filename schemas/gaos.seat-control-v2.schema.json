@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gaos.dev/schemas/gaos.seat-control-v2.schema.json",
+  "title": "GAOS dynamic seat-control history",
+  "type": "object",
+  "required": ["format", "formatVersion", "sessionId", "transitionRevision", "seats", "epochs"],
+  "properties": {
+    "format": { "const": "gaos.seat-control" },
+    "formatVersion": { "const": "1.0" },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "transitionRevision": { "type": "integer", "minimum": 0 },
+    "seats": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "epochs": { "type": "array", "items": { "type": "object" } }
+  },
+  "additionalProperties": false
+}

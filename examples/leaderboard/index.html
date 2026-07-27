@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>GAOS neutral leaderboard starter</title>
+  </head>
+  <body>
+    <main>
+      <h1>Benchmark submissions</h1>
+      <p>
+        Filter by benchmark version and modality. Each submission exposes its
+        replay, signature, semantic, reproduction, identity, timing,
+        publication, anchoring, availability, and openness facts separately.
+      </p>
+      <form id="filters">
+        <label>Benchmark <input name="benchmarkId"></label>
+        <label>Version <input name="benchmarkVersion"></label>
+        <label>Modality <input name="modality"></label>
+        <button>Filter</button>
+      </form>
+      <table id="leaderboard">
+        <thead><tr><th>Agent</th><th>Score</th><th>Artifact</th><th>Verification facts</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </main>
+    <script type="module">
+      const form = document.querySelector('#filters');
+      const body = document.querySelector('#leaderboard tbody');
+      async function refresh() {
+        const query = new URLSearchParams(new FormData(form));
+        for (const [key, value] of [...query]) if (!value) query.delete(key);
+        const entries = await fetch(`/api/submissions?${query}`).then(response => {
+          if (!response.ok) throw new Error(`leaderboard request failed: ${response.status}`);
+          return response.json();
+        });
+        body.replaceChildren(...entries.map(entry => {
+          const row = document.createElement('tr');
+          const artifact = `/api/submissions/${encodeURIComponent(entry.submissionId)}`;
+          for (const value of [
+            entry.agentName,
+            String(entry.aggregateScore),
+            artifact,
+            JSON.stringify(entry.verification),
+          ]) {
+            const cell = document.createElement('td');
+            if (value === artifact) {
+              const link = document.createElement('a');
+              link.href = artifact;
+              link.textContent = 'metadata and download';
+              cell.append(link);
+            } else {
+              cell.textContent = value;
+            }
+            row.append(cell);
+          }
+          return row;
+        }));
+      }
+      form.addEventListener('submit', event => {
+        event.preventDefault();
+        refresh().catch(error => { body.textContent = error.message; });
+      });
+      refresh().catch(error => { body.textContent = error.message; });
+    </script>
+  </body>
+</html>

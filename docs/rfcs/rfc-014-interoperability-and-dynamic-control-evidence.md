@@ -1,6 +1,6 @@
 # RFC-014 — Interoperability and dynamic-control evidence
 
-Status: **proposed** · Target: v0.23 · Compatibility: additive client and host
+Status: **implemented** · Target: v0.23 · Compatibility: additive client and host
 surfaces plus a new evidence/signature format; existing artifacts retain their
 interpretation · Depends on: RFC-006, RFC-010, RFC-012,
 [RFC-013](rfc-013-ecosystem-bridges-and-benchmark-tooling.md)

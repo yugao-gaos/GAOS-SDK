@@ -3,6 +3,34 @@
 For the public chronological changelog, see the
 [complete version history](/version-history).
 
+## v0.24.0
+
+Released July 27, 2026. This release implements RFC-015: deterministic
+bounded-parallel benchmark execution and resume, reproducible portable bundles,
+independent replay/score verification, qualified research metrics, and a
+neutral dual-database leaderboard starter.
+
+### Migration from v0.23
+
+All APIs are additive. Existing `LeaderboardEntry` fields retain their v0.22
+meaning; expanded independent facts require `gaos.leaderboard-entry.v2`.
+Benchmark verification requires a manifest obtained independently of the
+submitted artifact. See [verifiable benchmark publication](/benchmark-publication).
+
+## v0.23.0
+
+Released July 27, 2026. This release implements RFC-014: executable host
+conformance, host/engine authority guides, portable presentation clients,
+authenticated controller epochs, signature v2, and product-supplied external
+trust verification.
+
+### Migration from v0.22
+
+Existing fixed-roster sessions, replay v1.0–v1.3, and
+`gaos.submission.ed25519.v1` are unchanged. Dynamic controller evidence opts
+into `gaos.submission.ed25519.v2` and its new artifact identity. See
+[interoperability and dynamic-control evidence](/interoperability).
+
 ## v0.22.0
 
 Released July 27, 2026. This release implements RFC-013: portable
@@ -17,9 +45,8 @@ All new TypeScript APIs are additive. Existing fixed-roster sessions and
 upgrade or reinterpret `gaos.submission.ed25519.v1` evidence.
 
 See [ecosystem bridges and benchmark contracts](/ecosystem-bridges) and the
-[versioned roadmap](/roadmap). Interoperability and dynamic-control evidence
-are specified separately by RFC-014 for v0.23; executable benchmark
-publication is specified by RFC-015 for v0.24.
+[versioned roadmap](/roadmap). RFC-014 and RFC-015 ship additively in v0.23
+and v0.24.
 
 ## v0.21.0
 

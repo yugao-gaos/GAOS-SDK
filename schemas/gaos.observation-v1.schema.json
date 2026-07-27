@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gaos.dev/schemas/gaos.observation-v1.schema.json",
+  "title": "GAOS snapshot or patch",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["schema", "type", "transitionRevision", "tick", "view"],
+      "properties": {
+        "schema": { "const": "gaos.observation.v1" },
+        "type": { "const": "snapshot" },
+        "transitionRevision": { "type": "integer", "minimum": 0 },
+        "tick": { "type": "integer", "minimum": 0 },
+        "view": {}
+      },
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "required": ["schema", "type", "baseTransitionRevision", "transitionRevision", "tick", "patch"],
+      "properties": {
+        "schema": { "const": "gaos.observation.v1" },
+        "type": { "const": "patch" },
+        "baseTransitionRevision": { "type": "integer", "minimum": 0 },
+        "transitionRevision": { "type": "integer", "minimum": 0 },
+        "tick": { "type": "integer", "minimum": 0 },
+        "patch": {}
+      },
+      "additionalProperties": true
+    }
+  ]
+}

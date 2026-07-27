@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gaos.dev/schemas/gaos.benchmark-bundle-v1.schema.json",
+  "title": "GAOS benchmark bundle",
+  "type": "object",
+  "required": ["schema", "contentDigest", "manifest", "manifestDigest", "submission", "episodes", "scores"],
+  "properties": {
+    "schema": { "const": "gaos.benchmark-bundle.v1" },
+    "contentDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "manifest": { "type": "object" },
+    "manifestDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "submission": { "type": "object" },
+    "episodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "plan", "replay", "terminalOutcome", "score", "replayDigest"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "plan": { "type": "object" },
+          "replay": {},
+          "terminalOutcome": {},
+          "score": { "type": "number" },
+          "replayDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "scores": { "type": "object" }
+  },
+  "additionalProperties": false
+}

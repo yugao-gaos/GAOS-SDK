@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gaos.dev/schemas/gaos.replay-reference-v1.schema.json",
+  "title": "GAOS replay reference",
+  "type": "object",
+  "required": ["schema", "format", "digest"],
+  "properties": {
+    "schema": { "const": "gaos.replay-reference.v1" },
+    "format": { "type": "string", "minLength": 1 },
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "url": { "type": "string" }
+  },
+  "additionalProperties": true
+}

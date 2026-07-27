@@ -43,6 +43,7 @@ from .replay import (
 from .signatures import (
     SUBMISSION_SIGNATURE_ALGORITHM,
     SUBMISSION_SIGNATURE_SCHEME,
+    SUBMISSION_SIGNATURE_SCHEME_V2,
     canonical_submission_command_v1,
     ed25519_public_key_from_seed,
     periodic_signature_preimage_v1,
@@ -52,6 +53,11 @@ from .signatures import (
     sign_ed25519_base64,
     sign_periodic_chain_head_v1,
     sign_submission_v1,
+    sign_submission_v2,
+    submission_chain_hash_v2,
+    submission_epoch_genesis_hash_v2,
+    submission_preimage_v2,
+    controller_handoff_preimage_v2,
     submission_chain_hash_v1,
     submission_genesis_hash_v1,
     submission_preimage_v1,
@@ -60,6 +66,10 @@ from .signatures import (
     verify_ed25519_base64,
 )
 from .verify import verify_replay
+from .dynamic_control import (
+    DYNAMIC_CONTROL_EVIDENCE_FORMAT,
+    verify_dynamic_control_evidence_v2,
+)
 
 __all__ = [
     "PROTOCOL_ID",
@@ -100,6 +110,7 @@ __all__ = [
     "serialize_replay_jsonl",
     "SUBMISSION_SIGNATURE_ALGORITHM",
     "SUBMISSION_SIGNATURE_SCHEME",
+    "SUBMISSION_SIGNATURE_SCHEME_V2",
     "canonical_submission_command_v1",
     "ed25519_public_key_from_seed",
     "periodic_signature_preimage_v1",
@@ -109,6 +120,11 @@ __all__ = [
     "sign_ed25519_base64",
     "sign_periodic_chain_head_v1",
     "sign_submission_v1",
+    "sign_submission_v2",
+    "submission_chain_hash_v2",
+    "submission_epoch_genesis_hash_v2",
+    "submission_preimage_v2",
+    "controller_handoff_preimage_v2",
     "submission_chain_hash_v1",
     "submission_genesis_hash_v1",
     "submission_preimage_v1",
@@ -116,5 +132,7 @@ __all__ = [
     "verify_ed25519",
     "verify_ed25519_base64",
     "verify_replay",
+    "DYNAMIC_CONTROL_EVIDENCE_FORMAT",
+    "verify_dynamic_control_evidence_v2",
 ]
-__version__ = "0.22.0"
+__version__ = "0.24.0"

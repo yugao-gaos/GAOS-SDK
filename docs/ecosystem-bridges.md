@@ -91,9 +91,9 @@ identity attestation, and hidden-test compliance remain five distinct claims.
 `EvidenceTrustClaims` keeps them separate; no single checkmark implies all.
 
 Generated engine clients, complete hosting guides, executable conformance, and
-dynamic-control evidence are planned for v0.23 in RFC-014. Runner
-resume/packing, portable submission verification, remaining qualified research
-tooling, and the neutral deployable leaderboard are planned for v0.24 in
+dynamic-control evidence ship in v0.23 through RFC-014. Runner resume/packing,
+portable submission verification, remaining qualified research tooling, and
+the neutral deployable leaderboard ship in v0.24 through
 [RFC-015](/rfcs/rfc-015-verifiable-benchmark-publication).
 
 Those releases keep external trust product-owned. A product supplies pinned

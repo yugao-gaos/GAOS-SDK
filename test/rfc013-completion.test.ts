@@ -110,7 +110,7 @@ describe('RFC-013 dynamic seat control', () => {
     expect(() => SeatControlLedger.rehydrate(damaged)).toThrow(/digest|continuity/);
   });
 
-  it('rejects stale prepared control transitions', () => {
+  it('allows only one in-flight prepared control transition', () => {
     const ledger = new SeatControlLedger('stale', { alpha: null, beta: null });
     const first = ledger.prepareSeatControl([{
       seat: 'alpha',
@@ -118,14 +118,19 @@ describe('RFC-013 dynamic seat control', () => {
       controller: { controllerId: 'a', kind: 'service' },
       reason: 'substituted',
     }], { mode: 'host-policy', policy: 'assignment' });
-    const stale = ledger.prepareSeatControl([{
+    expect(() => ledger.prepareSeatControl([{
       seat: 'beta',
       status: 'occupied',
       controller: { controllerId: 'b', kind: 'service' },
       reason: 'substituted',
-    }], { mode: 'host-policy', policy: 'assignment' });
+    }], { mode: 'host-policy', policy: 'assignment' })).toThrow(/already prepared/);
     ledger.commit(first);
-    expect(() => ledger.commit(stale)).toThrow(/stale/);
+    expect(() => ledger.prepareSeatControl([{
+      seat: 'beta',
+      status: 'occupied',
+      controller: { controllerId: 'b', kind: 'service' },
+      reason: 'substituted',
+    }], { mode: 'host-policy', policy: 'assignment' })).not.toThrow();
   });
 
   it('rejects malformed declared-seat and epoch checkpoint graphs', () => {
@@ -173,6 +178,12 @@ describe('RFC-013 dynamic seat control', () => {
       value.epochs.find(({ seat, epoch }) => seat === 'alpha' && epoch === 1)!
         .effectiveTransitionRevision = 0;
     }, /invalid epoch ordering/);
+    expectRejected((value) => {
+      value.sessionId = '';
+    }, /sessionId/);
+    expectRejected((value) => {
+      value.transitionRevision = 2;
+    }, /missing committed.*revision 2/);
   });
 });
 
