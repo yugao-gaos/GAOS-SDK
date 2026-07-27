@@ -122,8 +122,8 @@ Released July 24, 2026.
 - Lossless adapter from the existing `TranscriptHeader`/`TranscriptAction`
   pair, allowing Arena and creator-platform results to share verifier tooling.
 - Public documentation and capability map present GAOS as a general game SDK,
-  with tabletop games as one supported family and grids as one optional
-  mechanism.
+  spanning card, puzzle, tactics, simulation, and hybrid games, with grids as
+  one optional mechanism.
 - Six playable browser demos cover card, puzzle, hex, graph, hybrid, and
   real-time scheduled game loops.
 
