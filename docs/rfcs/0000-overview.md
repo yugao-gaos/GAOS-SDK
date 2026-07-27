@@ -1,11 +1,11 @@
 # GAOS SDK — RFC sequence and release roadmap
 
-Status: implemented through v0.22; roadmap through v0.24 ·
+Status: implemented through v0.24 ·
 Target: v0.13 → v1.0 arc · Baseline: v0.12.0 export surface
 
 ::: info Design record and roadmap
 RFC-001 through RFC-013 record the design path that led to the current SDK.
-RFC-014 and RFC-015 define planned release scope. For supported APIs and
+RFC-014 and RFC-015 are shipped in v0.24. For supported APIs and
 current terminology, use the
 [architecture map](/architecture), [capability map](/capabilities), and
 [mechanism reference](/mechanisms/).

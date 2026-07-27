@@ -32,7 +32,7 @@ features:
 
 ---
 
-<div class="release-proof" aria-label="GAOS v0.22 release facts">
+<div class="release-proof" aria-label="GAOS v0.24 release facts">
   <span><strong>Game-as-a-Benchmark</strong></span>
   <span><strong>v0.24</strong> verifiable benchmark publication</span>
   <span><strong>TypeScript + Python</strong></span>
