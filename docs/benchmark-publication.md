@@ -42,8 +42,8 @@ carried by the bundle as authoritative.
 Manifest authority requirements pin claim, purpose, authority, key ids,
 schemas, algorithms, roots, and revocation policy. A manifest copied only from
 the submitted artifact cannot anchor itself. GAOS accepts public material and
-portable receipts through the v0.23 external-trust interfaces and never takes
-private-key custody.
+portable receipts through the RFC-014 external-trust interfaces incorporated
+into v0.24 and never takes private-key custody.
 
 The neutral starter under `examples/leaderboard` includes a runnable Node HTTP
 server, SQLite persistence, a durable artifact directory, verifier queue,

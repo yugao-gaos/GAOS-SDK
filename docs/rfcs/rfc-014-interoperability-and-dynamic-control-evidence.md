@@ -1,6 +1,7 @@
 # RFC-014 — Interoperability and dynamic-control evidence
 
-Status: **implemented** · Target: v0.23 · Compatibility: additive client and host
+Status: **implemented in v0.24** · Historical target: v0.23 compatibility
+milestone (no separate artifact) · Compatibility: additive client and host
 surfaces plus a new evidence/signature format; existing artifacts retain their
 interpretation · Depends on: RFC-006, RFC-010, RFC-012,
 [RFC-013](rfc-013-ecosystem-bridges-and-benchmark-tooling.md)
@@ -30,7 +31,8 @@ Every integration guide must identify one category.
 #### Direct host
 
 A platform that executes the GAOS TypeScript core inside its authoritative
-match runtime invokes the RFC-013 host lifecycle directly. v0.23 must document:
+match runtime invokes the RFC-013 host lifecycle directly. RFC-014 must
+document:
 
 - Nakama as a TypeScript authoritative match runtime;
 - Colyseus as a Node.js room server;
@@ -94,7 +96,7 @@ runtime and adapter version passed which conformance version.
 
 ## 3 — Cross-language presentation clients
 
-v0.23 must publish:
+RFC-014 must publish:
 
 - JSON Schema for commands, receipts, snapshots, patches, presentation frames,
   replay references, seat-control records, and evidence verdicts;
@@ -348,7 +350,7 @@ signature and evidence format when dynamic control is used. Existing reducers,
 fixed-roster sessions, clients, and v1.0–v1.3 replay artifacts remain supported
 with their original interpretation.
 
-v0.23 is complete only when:
+The RFC-014 compatibility milestone is complete only when:
 
 1. every named host and engine guide states its authority boundary;
 2. the host conformance kit is executable, versioned, and passes the reference

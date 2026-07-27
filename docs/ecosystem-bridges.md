@@ -71,8 +71,9 @@ connection state:
 The v0.22 ledger preserves claimed handoff signature material but does not
 reinterpret the v1 submission signature scheme. Cryptographic v2 handoff
 verification, replay evidence integration, and TypeScript/Python golden
-vectors are the v0.23 scope of
+vectors are the historical v0.23 target scope of
 [RFC-014](/rfcs/rfc-014-interoperability-and-dynamic-control-evidence).
+They are incorporated into the official v0.24 release.
 
 ## Research and benchmark primitives
 
@@ -90,11 +91,13 @@ Evidence verification, organizer reproduction, open implementation, model
 identity attestation, and hidden-test compliance remain five distinct claims.
 `EvidenceTrustClaims` keeps them separate; no single checkmark implies all.
 
-Generated engine clients, complete hosting guides, executable conformance, and
-dynamic-control evidence ship in v0.23 through RFC-014. Runner resume/packing,
-portable submission verification, remaining qualified research tooling, and
-the neutral deployable leaderboard ship in v0.24 through
-[RFC-015](/rfcs/rfc-015-verifiable-benchmark-publication).
+Generated engine clients, complete hosting guides, executable conformance,
+dynamic-control evidence, runner resume/packing, portable submission
+verification, remaining qualified research tooling, and the neutral
+deployable leaderboard all ship in v0.24. RFC-014 records the historical
+compatibility milestone, and
+[RFC-015](/rfcs/rfc-015-verifiable-benchmark-publication) completes the
+publication path.
 
 Those releases keep external trust product-owned. A product supplies pinned
 public keys or certificate roots, policy, and signer or service adapters to
