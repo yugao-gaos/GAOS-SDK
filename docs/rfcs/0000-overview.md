@@ -44,7 +44,7 @@ Two standing design rules govern every RFC in this batch:
 | [010](rfc-010-submission-signatures-and-interest.md) | Submission signatures, audit chains, and generic interest management | v0.20 | 006, 008 |
 | [011](rfc-011-arena-migration-findings.md) | Arena's open asks of the SDK | v0.21 review | 006, 009, 010 |
 | [012](rfc-012-post-migration-gaps.md) | SDK gaps after the TabletopLabs migration completed | v0.21 review | 006, 009 |
-| [013](rfc-013-ecosystem-bridges-and-benchmark-tooling.md) | Ecosystem bridges, game semantics, and verifiable benchmark tooling | proposed v0.22+ | 006, 010, 012 |
+| [013](rfc-013-ecosystem-bridges-and-benchmark-tooling.md) | Ecosystem bridges, dynamic seat control, and verifiable benchmark tooling | proposed v0.22+ | 006, 010, 012 |
 
 Sequencing rationale: RFC-001/002 are contract-level and mostly mechanical —
 they unblock naming and addressing for everything else. RFC-003 is the one
