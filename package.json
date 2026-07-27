@@ -83,6 +83,7 @@
     "./schemas/gaos.replay-reference-v1.schema.json": "./schemas/gaos.replay-reference-v1.schema.json",
     "./schemas/gaos.seat-control-v2.schema.json": "./schemas/gaos.seat-control-v2.schema.json",
     "./schemas/gaos.evidence-verdict-v2.schema.json": "./schemas/gaos.evidence-verdict-v2.schema.json",
+    "./schemas/gaos.dynamic-control-evidence-v2.schema.json": "./schemas/gaos.dynamic-control-evidence-v2.schema.json",
     "./schemas/gaos.benchmark-bundle-v1.schema.json": "./schemas/gaos.benchmark-bundle-v1.schema.json"
   },
   "files": [

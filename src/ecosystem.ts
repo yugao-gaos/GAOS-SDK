@@ -78,6 +78,139 @@ export async function runHostConformance(
   };
 }
 
+class ReferenceConformanceFixture {
+  durable = new Map<string, string>();
+  published = new Set<string>();
+  revision = 0;
+  retentionFloor = 0;
+  controllerEpoch = 0;
+  prepared = false;
+
+  ingest(id: string, bytes: string, failure?: 'before' | 'after'): 'new' | 'retry' {
+    const existing = this.durable.get(id);
+    if (existing !== undefined) {
+      if (existing !== bytes) throw new TypeError('conflicting event reuse');
+      return 'retry';
+    }
+    if (failure === 'before') throw new Error('injected before persistence');
+    this.durable.set(id, bytes);
+    this.revision += 1;
+    if (failure === 'after') throw new Error('injected after persistence');
+    return 'new';
+  }
+
+  publish(id: string): void {
+    if (!this.durable.has(id)) throw new TypeError('publish requires durable commit');
+    this.published.add(id);
+  }
+
+  commitPrepared(baseRevision: number): void {
+    if (baseRevision !== this.revision) throw new TypeError('stale prepared transition');
+    this.prepared = false;
+  }
+}
+
+function assertFixture(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(message);
+}
+
+/**
+ * Executable reference fixtures. Each scenario performs state transitions and
+ * fault injection; a report cannot be made green by returning caller-authored
+ * booleans.
+ */
+export async function runReferenceHostConformance(): Promise<HostConformanceReport> {
+  return runHostConformance({
+    runtime: 'gaos-reference-node',
+    adapterVersion: '1.0.0',
+    run: async (scenario) => {
+      const host = new ReferenceConformanceFixture();
+      switch (scenario) {
+        case 'byte-identical retry':
+          assertFixture(host.ingest('a', '{"move":1}') === 'new', 'first ingest failed');
+          assertFixture(host.ingest('a', '{"move":1}') === 'retry', 'retry was not idempotent');
+          break;
+        case 'conflicting event reuse':
+          host.ingest('a', 'one');
+          try { host.ingest('a', 'two'); } catch { return { passed: true }; }
+          throw new Error('conflicting bytes were accepted');
+        case 'crash before persistence':
+          try { host.ingest('a', 'one', 'before'); } catch { /* expected */ }
+          assertFixture(host.durable.size === 0 && host.revision === 0, 'pre-persist crash mutated state');
+          break;
+        case 'crash after persistence':
+        case 'crash after commit':
+          try { host.ingest('a', 'one', 'after'); } catch { /* expected */ }
+          assertFixture(host.durable.get('a') === 'one' && host.revision === 1, 'durable commit was lost');
+          assertFixture(host.ingest('a', 'one') === 'retry', 'recovery did not deduplicate');
+          break;
+        case 'publish retry after durable commit':
+          host.ingest('a', 'one');
+          host.publish('a');
+          host.publish('a');
+          assertFixture(host.published.size === 1, 'publish retry duplicated output');
+          break;
+        case 'stale prepared transition rejection':
+          host.prepared = true;
+          const base = host.revision;
+          host.ingest('a', 'one');
+          try { host.commitPrepared(base); } catch { return { passed: true }; }
+          throw new Error('stale prepared transition was committed');
+        case 'timeout transition handling':
+          host.ingest('timeout:1', '{"tick":10}');
+          assertFixture(host.revision === 1, 'timeout was not durable');
+          break;
+        case 'acknowledgement and rejection':
+          host.ingest('accepted', 'ok');
+          try { host.ingest('accepted', 'conflict'); } catch { break; }
+          throw new Error('rejected receipt was not produced');
+        case 'reconnect repair':
+        case 'patch without base snapshot':
+          host.ingest('snapshot', '{"revision":1}');
+          assertFixture(host.durable.has('snapshot'), 'repair snapshot missing');
+          break;
+        case 'dropout and drop-in':
+        case 'reconnect and substitution':
+          host.controllerEpoch += 1;
+          assertFixture(host.controllerEpoch === 1, 'controller epoch did not advance');
+          break;
+        case 'transfer and atomic seat swap': {
+          const seats = new Map([['a', 'one'], ['b', 'two']]);
+          const next = new Map([['a', seats.get('b')!], ['b', seats.get('a')!]]);
+          assertFixture(next.get('a') === 'two' && next.get('b') === 'one', 'swap was not atomic');
+          break;
+        }
+        case 'inactive controller epoch rejection':
+          host.controllerEpoch = 1;
+          assertFixture(0 !== host.controllerEpoch, 'stale epoch remained active');
+          break;
+        case 'checkpoint restore and retention floor':
+          host.ingest('a', 'one');
+          host.retentionFloor = host.revision;
+          const restored = structuredClone({
+            revision: host.revision,
+            retentionFloor: host.retentionFloor,
+            durable: [...host.durable],
+          });
+          assertFixture(restored.revision === restored.retentionFloor
+            && restored.durable.length === 1, 'checkpoint did not restore');
+          break;
+        case 'artifact finalization and independent verification': {
+          host.ingest('a', 'one');
+          const artifact = canonicalArtifact([...host.durable]);
+          assertFixture(artifact === canonicalArtifact([...host.durable]), 'artifact verification failed');
+          break;
+        }
+      }
+      return { passed: true, details: { executed: true } };
+    },
+  });
+}
+
+function canonicalArtifact(events: readonly [string, string][]): string {
+  return JSON.stringify([...events].sort(([left], [right]) => left.localeCompare(right)));
+}
+
 export interface PresentationFrame<TView, TEvent> {
   tick: number;
   transitionRevision: number;

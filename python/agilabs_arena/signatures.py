@@ -469,6 +469,19 @@ def submission_chain_hash_v2(envelope: dict[str, Any]) -> str:
         hashlib.sha256(submission_preimage_v2(envelope)).digest()
     )
 
+def periodic_signature_preimage_v2(envelope: dict[str, Any]) -> bytes:
+    """Canonical signed checkpoint of one dynamic-controller chain prefix."""
+
+    for label in ("epoch", "tick", "clientTime"):
+        _u64(envelope[label], label)
+    for label in ("sessionId", "seat"):
+        _utf8(envelope[label], label)
+    _assert_v2_digest(envelope["chainHead"], "chainHead")
+    return _canonical_v2_preimage(
+        f"{SUBMISSION_SIGNATURE_SCHEME_V2}.periodic",
+        envelope,
+    )
+
 
 def controller_handoff_preimage_v2(handoff: dict[str, Any]) -> bytes:
     """Canonical voluntary handoff preimage signed by both controllers."""

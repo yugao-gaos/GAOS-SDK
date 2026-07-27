@@ -2,7 +2,8 @@
 
 GAOS is the simulation authority in every native integration below. Networking,
 accounts, matchmaking, storage, rendering, and external trust remain product
-responsibilities. Run `runHostConformance()` before claiming compatibility; its
+responsibilities. Run the built-in `runReferenceHostConformance()` and the
+product adapter through `runHostConformance()` before claiming compatibility; each
 `gaos.host-conformance.v1` report names the runtime, adapter version, every
 fixture, and the pass/fail result.
 
@@ -30,7 +31,8 @@ epoch. A patch without its base triggers snapshot repair.
 | Godot | GDScript or C# decodes the same fixture over WebSocket. Nodes/scenes are projections; GAOS remains authoritative. | Map stable ids to Nodes. Preserve unknown optional fields, request repair after a missing base/digest mismatch, replace durable projection, and do not replay old cues. |
 | Unreal Engine | C++ decodes GAOS messages and projects entities into Actors/UObjects. Native replication may distribute the projection but must not become a second simulation authority. | Emit Blueprint events only for unseen presentation-event ids. On reconnect, reconcile the snapshot and retain engine-native objects only when their stable ids still exist. |
 
-The hand-maintained examples live under `examples/clients`. They decode
+The executable examples live under `examples/clients`. The release test compiles
+and runs TypeScript/Node, C#/.NET, C++17, and GDScript/Godot against
 `fixtures/ecosystem/presentation-client-v1.golden.json`. The fixture includes an
 unknown optional field so integrations can verify compatible minor-field
 preservation. These examples intentionally do not prescribe a UI, art, camera,
@@ -47,8 +49,9 @@ presented as controller consent.
 
 `verifyDynamicControlEvidenceV2()` rehydrates and validates the full
 seat-control history, resolves every command at its exact transition revision,
-checks epoch-local chains and handoff signatures, identifies host-policy
-epochs, and reports incomplete tails. The v2 golden vectors are shared with the
+checks checkpointed epoch genesis/final heads and periodic signatures, requires
+a voluntary handoff to name the exact computed outgoing head, identifies
+host-policy epochs, and reports unsigned or incomplete tails. The v2 golden vectors are shared with the
 Python SDK. Existing replay v1.0–v1.3 and
 `gaos.submission.ed25519.v1` retain their original interpretation.
 

@@ -2,6 +2,7 @@ import type {
   LeaderboardEntryV2,
   SubmissionVerificationFacts,
 } from './benchmark.js';
+import { bytesToHex, sha256 } from './engine/commitment.js';
 
 export interface LeaderboardObjectStore {
   put(digest: string, bytes: Uint8Array): Promise<void>;
@@ -38,6 +39,9 @@ export class LeaderboardService {
       throw new TypeError('leaderboard submission requires the V2 schema');
     }
     assertIndependentVerificationFacts(entry.verification);
+    if (entry.artifactDigest !== bytesToHex(sha256(bundle))) {
+      throw new TypeError('artifact digest does not match submitted bundle bytes');
+    }
     if (this.entries.has(entry.submissionId)) {
       throw new TypeError(`duplicate leaderboard submission ${entry.submissionId}`);
     }

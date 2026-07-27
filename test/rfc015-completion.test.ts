@@ -1,9 +1,12 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
+  attachBenchmarkAttestations,
   benchmarkManifestDigest,
+  benchmarkPackageDigest,
   packBenchmarkRun,
   runBenchmark,
   verifyBenchmarkBundle,
@@ -22,6 +25,14 @@ import {
   type GameDescriptor,
 } from '../src/engine/research.js';
 import { LeaderboardService } from '../src/leaderboard.js';
+import {
+  externalAttestationPreimage,
+  type ExternalAttestation,
+} from '../src/evidence.js';
+import {
+  generateSubmissionKeyPair,
+  signEd25519Base64,
+} from '../src/engine/submission-signatures.js';
 
 const manifest: BenchmarkManifest = {
   schema: 'gaos.benchmark-manifest',
@@ -79,6 +90,20 @@ function facts(): SubmissionVerificationFacts {
   };
 }
 
+function verifiedEpisode(
+  episode: Parameters<Parameters<typeof verifyBenchmarkBundle>[2]>[0],
+  signatures: 'verified' | 'not-required' | 'unverified' = 'not-required',
+) {
+  return Promise.resolve({
+    replayValid: true,
+    score: (episode.terminalOutcome as { score: number }).score,
+    terminalOutcome: structuredClone(episode.terminalOutcome),
+    signatures,
+    semantics: 'verified' as const,
+    evidenceComplete: 'verified' as const,
+  });
+}
+
 describe('RFC-015 release gate', () => {
   it('keeps sequential, parallel, interrupted, resumed, and all agent paths deterministic', async () => {
     const sequential = await runBenchmark(manifest, adapter('local'));
@@ -112,10 +137,8 @@ describe('RFC-015 release gate', () => {
     shuffled.checkpoint.completed = [...shuffled.checkpoint.completed].reverse();
     expect(packBenchmarkRun(manifest, shuffled, first.bundle.submission).digest)
       .toBe(first.digest);
-    const verify = (episode: typeof first.bundle.episodes[number]) => Promise.resolve({
-      replayValid: true,
-      score: (episode.terminalOutcome as { score: number }).score,
-    });
+    const verify = (episode: typeof first.bundle.episodes[number]) =>
+      verifiedEpisode(episode);
     const valid = await verifyBenchmarkBundle(first.bundle, manifest, verify);
     expect(valid).toMatchObject({
       valid: true,
@@ -138,6 +161,37 @@ describe('RFC-015 release gate', () => {
     const incompatible = structuredClone(first.bundle);
     incompatible.manifestDigest = '0'.repeat(64);
     expect((await verifyBenchmarkBundle(incompatible, manifest, verify)).valid).toBe(false);
+    const wrongPlan = structuredClone(first.bundle);
+    wrongPlan.episodes[0]!.plan.maxSteps += 1;
+    expect((await verifyBenchmarkBundle(wrongPlan, manifest, verify)).valid).toBe(false);
+    const reordered = structuredClone(first.bundle);
+    reordered.episodes = [
+      reordered.episodes[1]!,
+      reordered.episodes[0]!,
+      ...reordered.episodes.slice(2),
+    ];
+    expect((await verifyBenchmarkBundle(reordered, manifest, verify)).valid).toBe(false);
+    const wrongOutcome = structuredClone(first.bundle);
+    wrongOutcome.episodes[0]!.terminalOutcome = { score: 999 };
+    expect((await verifyBenchmarkBundle(
+      wrongOutcome,
+      manifest,
+      (episode) => verifiedEpisode({
+        ...episode,
+        terminalOutcome: { score: episode.score },
+      }),
+    )).valid).toBe(false);
+    expect(benchmarkPackageDigest(first.files)).toBe(first.digest);
+    expect(Object.keys(first.files).sort()).toEqual([
+      'README.md',
+      ...first.bundle.episodes.map(
+        ({ id }) => `episodes/${encodeURIComponent(id)}.gaos-replay.jsonl`,
+      ),
+      'manifest.json',
+      'scores.json',
+      'submission.json',
+      'verification.json',
+    ].sort());
   });
 
   it('pins required external authority facts to the independent manifest', async () => {
@@ -158,20 +212,76 @@ describe('RFC-015 release gate', () => {
       agentId: 'fixture-agent',
       agentKind: 'local',
     });
-    const verify = (episode: typeof bundle.episodes[number]) => Promise.resolve({
-      replayValid: true,
-      score: (episode.terminalOutcome as { score: number }).score,
-    });
+    const verify = (episode: typeof bundle.episodes[number]) =>
+      verifiedEpisode(episode, 'not-required');
     expect((await verifyBenchmarkBundle(bundle, required, verify)).valid).toBe(false);
-    expect((await verifyBenchmarkBundle(bundle, required, verify, [{
-      cryptographicallyValid: true,
-      authorityPinned: true,
-      policyAccepted: true,
-      authority: { authorityId: 'organizer', keyId: 'current', purpose: 'identity' },
-      reasons: [],
-    }])).valid).toBe(true);
+    const keyPair = await generateSubmissionKeyPair();
+    const jwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey);
+    const authority = {
+      authorityId: 'organizer',
+      keyId: 'current',
+      purpose: 'identity' as const,
+    };
+    const unsigned = {
+      schema: 'gaos.identity.v1',
+      authority,
+      subjectDigest: bundle.contentDigest,
+      algorithm: 'Ed25519',
+      payload: { model: 'fixture' },
+    };
+    const attestation: ExternalAttestation = {
+      ...unsigned,
+      signature: await signEd25519Base64(
+        keyPair.privateKey,
+        externalAttestationPreimage(unsigned),
+      ),
+    };
+    const attested = attachBenchmarkAttestations(bundle, [attestation]);
+    const resolver = {
+      resolveKey: async () => ({ format: 'jwk' as const, key: jwk }),
+    };
+    expect((await verifyBenchmarkBundle(
+      attested,
+      required,
+      verify,
+      { externalTrustResolver: resolver },
+    )).valid).toBe(true);
+    const substituted = structuredClone(attested);
+    substituted.episodes[0]!.score += 1;
+    expect((await verifyBenchmarkBundle(
+      substituted,
+      required,
+      verify,
+      { externalTrustResolver: resolver },
+    )).valid).toBe(false);
     expect(benchmarkManifestDigest({ ...required, benchmark: { ...required.benchmark, version: '2' } }))
       .not.toBe(bundle.manifestDigest);
+  });
+
+  it('cannot accept required signatures while episode signatures are unverified', async () => {
+    const signedManifest: BenchmarkManifest = {
+      ...manifest,
+      submission: {
+        requireSignedSeats: true,
+        requireCompleteCoverage: true,
+      },
+    };
+    const run = await runBenchmark(signedManifest, adapter('local'));
+    const { bundle } = packBenchmarkRun(signedManifest, run, {
+      submissionId: 'signed',
+      agentId: 'fixture-agent',
+      agentKind: 'local',
+    });
+    const unverified = await verifyBenchmarkBundle(
+      bundle,
+      signedManifest,
+      (episode) => verifiedEpisode(episode, 'unverified'),
+    );
+    expect(unverified.valid).toBe(false);
+    expect(unverified.facts.signatures).toBe('unverified');
+    expect(unverified.facts.reasons).toContain(
+      'signed-seat evidence is required but was not verified',
+    );
   });
 
   it('ships qualified research metrics and rejects unsupported formal assumptions', () => {
@@ -236,6 +346,8 @@ describe('RFC-015 release gate', () => {
     }, {
       enqueue: async (submissionId) => { queued.push(submissionId); },
     });
+    const serviceBundle = new Uint8Array([1, 2, 3]);
+    const serviceDigest = createHash('sha256').update(serviceBundle).digest('hex');
     await service.submit({
       schema: 'gaos.leaderboard-entry.v2',
       benchmarkId: 'reference',
@@ -246,18 +358,94 @@ describe('RFC-015 release gate', () => {
       aggregateScore: 1,
       taskScores: { a: 1 },
       uncertainty: 0.1,
-      artifactDigest: 'digest',
+      artifactDigest: serviceDigest,
       evidenceVerdict: 'trusted',
       reproduced: false,
       verification: facts(),
-    }, new Uint8Array([1, 2, 3]));
+    }, serviceBundle);
     expect(service.list({ benchmarkVersion: '1', modality: 'text' })).toHaveLength(1);
     expect(service.metadata('s1')).toMatchObject({
       artifactDownload: '/api/submissions/s1/artifact',
       entry: { verification: { replay: 'verified', organizerReproduced: 'not-observed' } },
     });
-    expect(await service.artifact('s1')).toEqual(new Uint8Array([1, 2, 3]));
+    expect(await service.artifact('s1')).toEqual(serviceBundle);
     expect(queued).toEqual(['s1']);
+  });
+
+  it('runs the deployable SQLite HTTP leaderboard, object store, and verifier queue', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'gaos-leaderboard-'));
+    const { startLeaderboardServer } = await import(
+      '../examples/leaderboard/server.mjs'
+    ) as {
+      startLeaderboardServer(options: {
+        database: string;
+        objects: string;
+        port: number;
+      }): import('node:http').Server;
+    };
+    const server = startLeaderboardServer({
+      database: join(directory, 'leaderboard.sqlite'),
+      objects: join(directory, 'objects'),
+      port: 0,
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (address === null || typeof address === 'string') throw new Error('missing address');
+      const base = `http://127.0.0.1:${address.port}`;
+      expect(await (await fetch(base)).text()).toContain('Benchmark submissions');
+      const bundleBytes = Buffer.from('bundle bytes');
+      const artifactDigest = createHash('sha256').update(bundleBytes).digest('hex');
+      const entry = {
+        schema: 'gaos.leaderboard-entry.v2',
+        benchmarkId: 'reference',
+        benchmarkVersion: '1',
+        submissionId: 'http-1',
+        agentName: 'agent',
+        modality: 'text',
+        aggregateScore: 3,
+        taskScores: { a: 3 },
+        uncertainty: 0.2,
+        artifactDigest,
+        evidenceVerdict: 'trusted',
+        reproduced: false,
+        verification: facts(),
+      };
+      const submitted = await fetch(`${base}/api/submissions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          entry,
+          bundleBase64: bundleBytes.toString('base64'),
+        }),
+      });
+      expect(submitted.status).toBe(202);
+      expect(await (await fetch(
+        `${base}/api/submissions?benchmarkVersion=1&modality=text`,
+      )).json()).toMatchObject([{ submissionId: 'http-1', taskScores: { a: 3 } }]);
+      expect(await (await fetch(`${base}/api/submissions/http-1`)).json())
+        .toMatchObject({
+          artifactDownload: '/api/submissions/http-1/artifact',
+          entry: { verification: { replay: 'verified' } },
+        });
+      expect(Buffer.from(await (await fetch(
+        `${base}/api/submissions/http-1/artifact`,
+      )).arrayBuffer()).toString()).toBe('bundle bytes');
+      expect(await (await fetch(`${base}/api/verifier/dequeue`, {
+        method: 'POST',
+      })).json()).toMatchObject({
+        submission_id: 'http-1',
+        artifact_digest: artifactDigest,
+        status: 'pending',
+      });
+      expect(await (await fetch(`${base}/api/verifier/dequeue`, {
+        method: 'POST',
+      })).json()).toBeNull();
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => error ? reject(error) : resolve()));
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('runs the init/run/pack/verify CLI workflow with an independent manifest', async () => {
@@ -284,7 +472,14 @@ export default {
   }
 };
 export async function verifyEpisode(episode) {
-  return { replayValid: true, score: episode.terminalOutcome.score };
+  return {
+    replayValid: true,
+    score: episode.terminalOutcome.score,
+    terminalOutcome: episode.terminalOutcome,
+    signatures: 'not-required',
+    semantics: 'verified',
+    evidenceComplete: 'verified'
+  };
 }
 `);
       const output: string[] = [];

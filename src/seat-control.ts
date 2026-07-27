@@ -205,6 +205,9 @@ export class SeatControlLedger {
     changes: readonly SeatControlChange[],
     authorization: SeatControlAuthorization,
   ): PreparedSeatControl {
+    if (this.activePrepared.size !== 0) {
+      throw new TypeError('another seat-control transition is already prepared');
+    }
     if (changes.length === 0) throw new TypeError('seat-control transition must contain changes');
     const seen = new Set<string>();
     const nextRevision = this.revision + 1;
@@ -313,6 +316,9 @@ export class SeatControlLedger {
     if (checkpoint.format !== 'gaos.seat-control' || checkpoint.formatVersion !== '1.0') {
       throw new TypeError('unsupported seat-control checkpoint');
     }
+    if (typeof checkpoint.sessionId !== 'string' || checkpoint.sessionId.length === 0) {
+      throw new TypeError('checkpoint sessionId must be a non-empty string');
+    }
     if (!Array.isArray(checkpoint.seats) || checkpoint.seats.length === 0
       || checkpoint.seats.some((seat) => typeof seat !== 'string' || seat.length === 0)) {
       throw new TypeError('checkpoint must declare non-empty logical seats');
@@ -362,6 +368,25 @@ export class SeatControlLedger {
           if (epoch.authorizationEvidence?.mode !== epoch.authorization) {
             throw new TypeError(`conflicting authorization evidence for ${seat}`);
           }
+          if (epoch.authorization === 'controller-handoff') {
+            const authorization = epoch.authorizationEvidence;
+            if (authorization?.mode !== 'controller-handoff'
+              || !authorization.outgoingSignatures[seat]
+              || (epoch.status === 'occupied'
+                && !authorization.incomingSignatures[seat])) {
+              throw new TypeError(`incomplete controller-handoff authorization for ${seat}`);
+            }
+            if (epoch.previousChainHead === undefined) {
+              throw new TypeError(`controller handoff is missing previous chain head for ${seat}`);
+            }
+          } else {
+            const authorization = epoch.authorizationEvidence;
+            if (authorization?.mode !== 'host-policy'
+              || typeof authorization.policy !== 'string'
+              || authorization.policy.length === 0) {
+              throw new TypeError(`invalid host-policy authorization for ${seat}`);
+            }
+          }
         }
         if (epoch.status === 'occupied') {
           assertController(epoch.controller);
@@ -387,9 +412,33 @@ export class SeatControlLedger {
       )) {
       throw new TypeError('invalid seat-control transition revision');
     }
+    const committedRevisions = new Set(
+      [...rebuilt.values()].flat()
+        .map((epoch) => epoch.effectiveTransitionRevision)
+        .filter((revision) => revision > 0),
+    );
+    for (let revision = 1; revision <= checkpoint.transitionRevision; revision += 1) {
+      if (!committedRevisions.has(revision)) {
+        throw new TypeError(`missing committed seat-control transition revision ${revision}`);
+      }
+      const atRevision = [...rebuilt.values()].flat().filter(
+        (epoch) => epoch.effectiveTransitionRevision === revision,
+      );
+      const authorization = canonicalJson(
+        atRevision[0]!.authorizationEvidence as unknown as JsonValue,
+      );
+      if (atRevision.some((epoch) =>
+        epoch.authorization !== atRevision[0]!.authorization
+        || canonicalJson(epoch.authorizationEvidence as unknown as JsonValue) !== authorization)) {
+        throw new TypeError(`conflicting atomic authorization at revision ${revision}`);
+      }
+    }
     ledger.history = rebuilt;
     ledger.revision = checkpoint.transitionRevision;
     if (checkpoint.prepared !== undefined) {
+      if (!Array.isArray(checkpoint.prepared) || checkpoint.prepared.length > 1) {
+        throw new TypeError('checkpoint may contain at most one prepared transition');
+      }
       for (const pending of checkpoint.prepared) {
         if (pending.baseTransitionRevision !== ledger.revision
           || pending.nextTransitionRevision !== ledger.revision + 1
@@ -412,11 +461,51 @@ export class SeatControlLedger {
             || epoch.previousEpochDigest !== previous.digest) {
             throw new TypeError(`invalid prepared epoch continuity for ${epoch.seat}`);
           }
+          if (epoch.reason === 'genesis' || epoch.reason === 'reconnected'
+            || epoch.authorization === 'genesis'
+            || epoch.authorizationEvidence?.mode !== epoch.authorization) {
+            throw new TypeError(`invalid prepared epoch metadata for ${epoch.seat}`);
+          }
+          if (epoch.status === 'occupied') {
+            assertController(epoch.controller);
+          } else if (epoch.status === 'vacant') {
+            if (epoch.controller !== undefined) {
+              throw new TypeError(`vacant prepared epoch includes a controller for ${epoch.seat}`);
+            }
+          } else {
+            throw new TypeError(`invalid prepared epoch status for ${epoch.seat}`);
+          }
+          if (epoch.authorization === 'controller-handoff') {
+            const authorization = epoch.authorizationEvidence;
+            if (authorization?.mode !== 'controller-handoff'
+              || !authorization.outgoingSignatures[epoch.seat]
+              || (epoch.status === 'occupied'
+                && !authorization.incomingSignatures[epoch.seat])
+              || epoch.previousChainHead === undefined) {
+              throw new TypeError(`incomplete prepared handoff for ${epoch.seat}`);
+            }
+          } else {
+            const authorization = epoch.authorizationEvidence;
+            if (authorization?.mode !== 'host-policy'
+              || typeof authorization.policy !== 'string'
+              || authorization.policy.length === 0) {
+              throw new TypeError(`invalid prepared host policy for ${epoch.seat}`);
+            }
+          }
           const { digest, ...base } = epoch;
           if (digest !== epochDigest(base)) {
             throw new TypeError(`invalid prepared epoch digest for ${epoch.seat}`);
           }
           history.push(structuredClone(epoch));
+        }
+        const preparedAuthorization = canonicalJson(
+          pending.epochs[0]!.authorizationEvidence as unknown as JsonValue,
+        );
+        if (pending.epochs.some((epoch: SeatControlEpoch) =>
+          epoch.authorization !== pending.epochs[0]!.authorization
+          || canonicalJson(epoch.authorizationEvidence as unknown as JsonValue)
+            !== preparedAuthorization)) {
+          throw new TypeError('conflicting atomic authorization in prepared transition');
         }
         const restored: PreparedSeatControl = {
           baseTransitionRevision: pending.baseTransitionRevision,

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from agilabs_arena.signatures import (
     controller_handoff_preimage_v2,
+    periodic_signature_preimage_v2,
     sign_ed25519_base64,
     sign_submission_v2,
     submission_chain_hash_v2,
@@ -136,16 +137,55 @@ def test_python_offline_verifier_matches_the_dynamic_control_contract():
             canonical_json(epoch_one_base).encode()
         ).hexdigest(),
     }
+    epoch_one_genesis = submission_epoch_genesis_hash_v2({
+        "sessionId": "offline-session",
+        "seat": "alpha",
+        "epoch": 1,
+        "controllerId": "agent-b",
+        "publicKey": public_key,
+        "transitionDigest": epoch_one["digest"],
+        "previousEpochDigest": genesis_epoch["digest"],
+        "previousChainHead": chain_head,
+    })
     result = verify_dynamic_control_evidence_v2({
         "format": "gaos.dynamic-control-evidence.v2",
         "sessionId": "offline-session",
-        "control": {
-            "format": "gaos.seat-control",
-            "formatVersion": "1.0",
+        "checkpoint": {
+            "format": "gaos.dynamic-control-checkpoint.v2",
             "sessionId": "offline-session",
-            "transitionRevision": 1,
-            "seats": ["alpha"],
-            "epochs": [genesis_epoch, epoch_one],
+            "control": {
+                "format": "gaos.seat-control",
+                "formatVersion": "1.0",
+                "sessionId": "offline-session",
+                "transitionRevision": 1,
+                "seats": ["alpha"],
+                "epochs": [genesis_epoch, epoch_one],
+            },
+            "signatureStates": [{
+                "seat": "alpha",
+                "epoch": 0,
+                "genesisHash": chain_genesis,
+                "lastChainHead": chain_head,
+                "lastSignedChainHead": chain_head,
+                "lastPeriodicTick": 1,
+                "lastPeriodicClientTime": 1,
+                "lastPeriodicSignature": sign_ed25519_base64(
+                    seed,
+                    periodic_signature_preimage_v2({
+                        "sessionId": "offline-session",
+                        "seat": "alpha",
+                        "epoch": 0,
+                        "tick": 1,
+                        "clientTime": 1,
+                        "chainHead": chain_head,
+                    }),
+                ),
+            }, {
+                "seat": "alpha",
+                "epoch": 1,
+                "genesisHash": epoch_one_genesis,
+                "lastChainHead": epoch_one_genesis,
+            }],
         },
         "commands": [{
             "envelope": command,

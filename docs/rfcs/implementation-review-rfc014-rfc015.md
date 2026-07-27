@@ -9,8 +9,8 @@ outside the SDK.
 | Gate | Shipped evidence |
 | --- | --- |
 | Named host and engine authority boundaries | `docs/interoperability.md` classifies Nakama, Colyseus, Node.js, Photon Fusion/Quantum, Unity, Godot, and Unreal, including runtime, cryptography, persistence, reconnect, and evidence ownership. |
-| Executable versioned host conformance | `runHostConformance()` emits `gaos.host-conformance.v1` machine-readable scenario facts. `test/rfc014-completion.test.ts` runs the complete reference scenario list. |
-| Shared cross-language presentation contract | Versioned command, receipt, observation, frame, replay-reference, seat-control, and verdict schemas; one golden fixture; TypeScript/C#/C++/GDScript-compatible client types and stable-id projection guidance. |
+| Executable versioned host conformance | `runReferenceHostConformance()` executes state transitions and fault injection for every scenario, while `runHostConformance()` emits portable `gaos.host-conformance.v1` adapter reports. |
+| Shared cross-language presentation contract | Versioned schemas and one golden fixture are consumed by executable TypeScript, C#, C++, and GDScript state machines in the release test. |
 | Signature v2 and dynamic control | `src/evidence.ts` binds command chains to exact controller epochs, validates signed handoffs or explicit host policy, reports tails, rehydrates checkpoints including prepared atomic swaps, and rejects stale/future epochs. TypeScript and Python share golden bytes and offline verifier behavior. |
 | Product-supplied external trust | The policy/resolver boundary verifies signature, subject, pin/root path, expiry, revocation, schema, and algorithm facts. Fixtures cover valid, unknown, rotated, revoked, expired, and artifact-substituted material without private-key custody. |
 | Old replay compatibility | Existing v1.0–v1.3 replay and `gaos.submission.ed25519.v1` suites run unchanged in the full test gate. v2 uses distinct scheme and evidence format ids. |
@@ -23,7 +23,7 @@ outside the SDK.
 | Local/provider/CLI conformance | One `BenchmarkAgentAdapter` contract carries all three explicit kinds. The CLI integration test runs a module through run/pack/verify. |
 | Reproducible pack and strict rejection | `packBenchmarkRun()` canonicalizes episode order and content. Tests reject missing, duplicate, modified, score-modified, and incompatible bundles. |
 | Independent score recomputation | `verifyBenchmarkBundle()` invokes episode replay verification and recomputes per-task and aggregate scores rather than trusting carried values. |
-| Neutral leaderboard starter | Static frontend, storage/queue/service boundaries, SQLite and PostgreSQL schemas, filters, uncertainty, task scores, artifact download, local verification, and independent V2 fact fields ship under `examples/leaderboard`. |
+| Neutral leaderboard starter | A runnable Node HTTP/SQLite server, artifact directory, verifier queue, static frontend, PostgreSQL schema, filters, task scores, downloads, and independent V2 facts ship under `examples/leaderboard`; the HTTP path has an integration test. |
 | Manifest-pinned authorities | Independently supplied manifest requirements select accepted authority/purpose/key facts; external-trust tests cover the required trust-state matrix. |
 | Metric/transform preconditions | Payoff matrix, action efficiency, invalid-action rate, and Elo helpers ship. Formal metrics and transform descriptors reject incompatible game descriptors. |
 

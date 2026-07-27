@@ -2,8 +2,10 @@ import { bytesToHex, sha256 } from './engine/commitment.js';
 import { canonicalJson, type JsonValue } from './protocol.js';
 import type {
   ExternalAttestation,
+  ExternalTrustResolver,
   ExternalTrustResult,
 } from './evidence.js';
+import { verifyExternalAttestation } from './evidence.js';
 
 export interface BenchmarkIdentity {
   id: string;
@@ -187,6 +189,8 @@ export interface BenchmarkBundleEpisode {
 
 export interface BenchmarkBundle {
   schema: 'gaos.benchmark-bundle.v1';
+  /** Digest of all authoritative contents, excluding attestations and this field. */
+  contentDigest: string;
   manifest: BenchmarkManifest;
   manifestDigest: string;
   submission: {
@@ -207,9 +211,33 @@ export interface BenchmarkBundleVerification {
     id: string;
     replayValid: boolean;
     score: number;
+    terminalOutcome: JsonValue;
+    signatures: VerificationState;
+    semantics: VerificationState;
+    evidenceComplete: VerificationState;
     reasons: string[];
   }[];
   facts: SubmissionVerificationFacts;
+}
+
+export interface BenchmarkEpisodeVerification {
+  replayValid: boolean;
+  score: number;
+  terminalOutcome: JsonValue;
+  signatures: VerificationState;
+  semantics: VerificationState;
+  evidenceComplete: VerificationState;
+  reasons?: string[];
+}
+
+export interface BenchmarkVerificationOptions {
+  externalTrustResolver?: ExternalTrustResolver;
+}
+
+export interface BenchmarkPackage {
+  bundle: BenchmarkBundle;
+  files: Readonly<Record<string, string>>;
+  digest: string;
 }
 
 function assertNonEmpty(value: unknown, field: string): asserts value is string {
@@ -360,6 +388,11 @@ export async function runBenchmark(
   if (!Number.isSafeInteger(parallelism) || parallelism < 1) {
     throw new RangeError('parallelism must be a positive safe integer');
   }
+  if (options.maxNewEpisodes !== undefined
+    && (!Number.isSafeInteger(options.maxNewEpisodes)
+      || options.maxNewEpisodes < 0)) {
+    throw new RangeError('maxNewEpisodes must be a non-negative safe integer');
+  }
   const completed = new Map<number, BenchmarkEpisodeResult>();
   if (options.resume !== undefined) {
     if (options.resume.schema !== 'gaos.benchmark-run-checkpoint.v1'
@@ -419,7 +452,7 @@ export function packBenchmarkRun(
   manifest: BenchmarkManifest,
   run: BenchmarkRun,
   submission: BenchmarkBundle['submission'],
-): { bundle: BenchmarkBundle; digest: string } {
+): BenchmarkPackage {
   if (run.status !== 'complete' || run.aggregate === undefined) {
     throw new TypeError('only a complete benchmark run can be packed');
   }
@@ -430,35 +463,96 @@ export function packBenchmarkRun(
   const episodes = [...run.checkpoint.completed]
     .sort((left, right) => left.plan.index - right.plan.index)
     .map((result): BenchmarkBundleEpisode => {
+      const replay = typeof result.replay === 'string'
+        ? `${result.replay.replace(/\n*$/, '')}\n`
+        : structuredClone(result.replay);
       const replayDigest = bytesToHex(
-        sha256(encoder.encode(canonicalJson(result.replay))),
+        sha256(encoder.encode(canonicalJson(replay))),
       );
       return {
         id: episodeId(result.plan),
         plan: structuredClone(result.plan),
-        replay: structuredClone(result.replay),
+        replay,
         terminalOutcome: structuredClone(result.terminalOutcome),
         score: result.score,
         replayDigest,
       };
     });
-  const bundle: BenchmarkBundle = {
-    schema: 'gaos.benchmark-bundle.v1',
+  const unsignedSubmission = {
+    submissionId: submission.submissionId,
+    agentId: submission.agentId,
+    agentKind: submission.agentKind,
+  };
+  const content = {
+    schema: 'gaos.benchmark-bundle.v1' as const,
     manifest: structuredClone(manifest),
     manifestDigest: expectedDigest,
-    submission: structuredClone(submission),
+    submission: unsignedSubmission,
     episodes,
     scores: structuredClone(run.aggregate),
   };
+  const contentDigest = bytesToHex(
+    sha256(encoder.encode(canonicalJson(content as unknown as JsonValue))),
+  );
+  if (submission.attestations?.some(
+    (attestation) => attestation.subjectDigest !== contentDigest,
+  )) {
+    throw new TypeError('submission attestation is not bound to the bundle content digest');
+  }
+  const bundle: BenchmarkBundle = {
+    ...content,
+    contentDigest,
+    submission: structuredClone(submission),
+  };
+  const files = benchmarkBundleFiles(bundle);
   return {
     bundle,
-    digest: bytesToHex(
-      sha256(encoder.encode(canonicalJson(bundle as unknown as JsonValue))),
-    ),
+    files,
+    digest: benchmarkPackageDigest(files),
   };
 }
 
-function emptyVerificationFacts(): SubmissionVerificationFacts {
+/** Stable digest signed by external attestations; attestations cannot self-bind. */
+export function benchmarkBundleContentDigest(bundle: BenchmarkBundle): string {
+  const content = {
+    schema: bundle.schema,
+    manifest: bundle.manifest,
+    manifestDigest: bundle.manifestDigest,
+    submission: {
+      submissionId: bundle.submission.submissionId,
+      agentId: bundle.submission.agentId,
+      agentKind: bundle.submission.agentKind,
+    },
+    episodes: bundle.episodes,
+    scores: bundle.scores,
+  };
+  return bytesToHex(
+    sha256(encoder.encode(canonicalJson(content as unknown as JsonValue))),
+  );
+}
+
+/** Attach receipts only after their subject is the already-computed content digest. */
+export function attachBenchmarkAttestations(
+  bundle: BenchmarkBundle,
+  attestations: readonly ExternalAttestation[],
+): BenchmarkBundle {
+  const digest = benchmarkBundleContentDigest(bundle);
+  if (digest !== bundle.contentDigest) {
+    throw new TypeError('cannot attest a bundle with a mismatched content digest');
+  }
+  if (attestations.some((attestation) => attestation.subjectDigest !== digest)) {
+    throw new TypeError('attestation subject does not match bundle content digest');
+  }
+  return {
+    ...structuredClone(bundle),
+    submission: {
+      ...structuredClone(bundle.submission),
+      attestations: structuredClone(attestations),
+    },
+  };
+}
+
+export function emptyVerificationFacts(): SubmissionVerificationFacts {
   return {
     replay: 'not-observed',
     signatures: 'not-observed',
@@ -478,6 +572,95 @@ function emptyVerificationFacts(): SubmissionVerificationFacts {
   };
 }
 
+/** Exact, portable `.gaos-bench` directory contents from RFC-015 §4. */
+export function benchmarkBundleFiles(
+  bundle: BenchmarkBundle,
+  verification: SubmissionVerificationFacts = emptyVerificationFacts(),
+): Readonly<Record<string, string>> {
+  const files: Record<string, string> = {
+    'manifest.json': `${canonicalJson(bundle.manifest as unknown as JsonValue)}\n`,
+    'submission.json': `${canonicalJson({
+      ...bundle.submission,
+      contentDigest: bundle.contentDigest,
+      manifestDigest: bundle.manifestDigest,
+      schema: bundle.schema,
+    } as unknown as JsonValue)}\n`,
+    'scores.json': `${canonicalJson({
+      aggregate: bundle.scores,
+      episodes: bundle.episodes.map((episode) => ({
+        id: episode.id,
+        plan: episode.plan,
+        terminalOutcome: episode.terminalOutcome,
+        score: episode.score,
+        replayDigest: episode.replayDigest,
+        replayEncoding: typeof episode.replay === 'string' ? 'jsonl' : 'json',
+      })),
+    } as unknown as JsonValue)}\n`,
+    'verification.json': `${canonicalJson(verification as unknown as JsonValue)}\n`,
+    'README.md': [
+      '# GAOS benchmark submission',
+      '',
+      `Content digest: \`${bundle.contentDigest}\``,
+      '',
+      'Verify independently with:',
+      '',
+      '```sh',
+      'gaos benchmark verify submission.gaos-bench --manifest benchmark.json --adapter adapter.mjs',
+      '```',
+      '',
+    ].join('\n'),
+  };
+  for (const episode of bundle.episodes) {
+    files[`episodes/${encodeURIComponent(episode.id)}.gaos-replay.jsonl`] =
+      typeof episode.replay === 'string'
+        ? `${episode.replay.replace(/\n*$/, '')}\n`
+        : `${canonicalJson(episode.replay)}\n`;
+  }
+  return files;
+}
+
+/** Hash sorted path/length/content tuples, independent of traversal metadata. */
+export function benchmarkPackageDigest(
+  files: Readonly<Record<string, string>>,
+): string {
+  const parts = Object.keys(files).sort().map((path) => {
+    const bytes = encoder.encode(files[path]!);
+    return `${path}\0${bytes.length}\0${files[path]!}`;
+  });
+  return bytesToHex(sha256(encoder.encode(parts.join(''))));
+}
+
+function combinedState(
+  values: readonly VerificationState[],
+  notRequired: boolean,
+): VerificationState {
+  if (notRequired) return 'not-required';
+  if (values.some((value) => value === 'failed')) return 'failed';
+  if (values.length > 0 && values.every((value) => value === 'verified')) {
+    return 'verified';
+  }
+  return 'unverified';
+}
+
+function authorityFact(
+  claim: BenchmarkAuthorityRequirement['claim'],
+): keyof Pick<
+  SubmissionVerificationFacts,
+  | 'accountIdentityAttested'
+  | 'timeAttested'
+  | 'publicationLogged'
+  | 'tailAnchored'
+  | 'modelIdentityAttested'
+  | 'hiddenTestCompliant'
+> {
+  if (claim === 'identity') return 'accountIdentityAttested';
+  if (claim === 'time') return 'timeAttested';
+  if (claim === 'publication') return 'publicationLogged';
+  if (claim === 'tail-anchor') return 'tailAnchored';
+  if (claim === 'model-identity') return 'modelIdentityAttested';
+  return 'hiddenTestCompliant';
+}
+
 /**
  * Verify a portable bundle against an independently supplied manifest.
  * Carried episode and aggregate scores are comparison data, never authority.
@@ -487,15 +670,12 @@ export async function verifyBenchmarkBundle(
   manifest: BenchmarkManifest,
   verifyEpisode: (
     episode: BenchmarkBundleEpisode,
-  ) => Promise<{ replayValid: boolean; score: number; reasons?: string[] }>,
-  externalFacts: readonly ExternalTrustResult[] = [],
+  ) => Promise<BenchmarkEpisodeVerification>,
+  options: BenchmarkVerificationOptions = {},
 ): Promise<BenchmarkBundleVerification> {
   const facts = emptyVerificationFacts();
-  facts.externalAuthorities = structuredClone([...externalFacts]);
   const reasons = facts.reasons;
-  const bundleDigest = bytesToHex(
-    sha256(encoder.encode(canonicalJson(bundle as unknown as JsonValue))),
-  );
+  const bundleDigest = benchmarkPackageDigest(benchmarkBundleFiles(bundle));
   if (bundle.schema !== 'gaos.benchmark-bundle.v1') {
     reasons.push('unsupported benchmark bundle schema');
   }
@@ -504,6 +684,10 @@ export async function verifyBenchmarkBundle(
     || benchmarkManifestDigest(bundle.manifest) !== manifestDigest) {
     reasons.push('bundle manifest does not match independently supplied manifest');
   }
+  const contentDigest = benchmarkBundleContentDigest(bundle);
+  if (bundle.contentDigest !== contentDigest) {
+    reasons.push('bundle content digest mismatch');
+  }
   const plan = planBenchmarkEpisodes(manifest);
   const expectedIds = new Set(plan.map(episodeId));
   const seen = new Set<string>();
@@ -511,27 +695,61 @@ export async function verifyBenchmarkBundle(
     id: string;
     replayValid: boolean;
     score: number;
+    terminalOutcome: JsonValue;
+    signatures: VerificationState;
+    semantics: VerificationState;
+    evidenceComplete: VerificationState;
     reasons: string[];
   }[] = [];
   const recomputed: BenchmarkEpisodeResult[] = [];
-  for (const episode of bundle.episodes) {
+  for (const [bundleIndex, episode] of bundle.episodes.entries()) {
     const localReasons: string[] = [];
     if (!expectedIds.has(episode.id)) localReasons.push('episode is not required by manifest');
     if (seen.has(episode.id)) localReasons.push('duplicate episode');
     seen.add(episode.id);
+    const expectedPlan = plan[bundleIndex];
+    if (expectedPlan === undefined
+      || episode.plan.index !== bundleIndex
+      || canonicalJson(expectedPlan as unknown as JsonValue)
+        !== canonicalJson(episode.plan as unknown as JsonValue)) {
+      localReasons.push('episode plan does not exactly match the authored plan');
+    }
     if (episode.id !== episodeId(episode.plan)) localReasons.push('episode id does not match plan');
     const replayDigest = bytesToHex(
       sha256(encoder.encode(canonicalJson(episode.replay))),
     );
     if (episode.replayDigest !== replayDigest) localReasons.push('replay digest mismatch');
-    const checked = await verifyEpisode(structuredClone(episode));
+    let checked: BenchmarkEpisodeVerification;
+    try {
+      checked = await verifyEpisode(structuredClone(episode));
+    } catch (error) {
+      checked = {
+        replayValid: false,
+        score: Number.NaN,
+        terminalOutcome: null,
+        signatures: 'failed',
+        semantics: 'failed',
+        evidenceComplete: 'failed',
+        reasons: [
+          `episode verifier failed: ${error instanceof Error ? error.message : String(error)}`,
+        ],
+      };
+    }
     localReasons.push(...(checked.reasons ?? []));
     if (!checked.replayValid) localReasons.push('episode replay verification failed');
     if (checked.score !== episode.score) localReasons.push('carried episode score is incorrect');
+    if (canonicalJson(checked.terminalOutcome)
+      !== canonicalJson(episode.terminalOutcome)) {
+      localReasons.push('carried terminal outcome is incorrect');
+    }
     episodeFacts.push({
       id: episode.id,
       replayValid: checked.replayValid,
       score: checked.score,
+      terminalOutcome: structuredClone(checked.terminalOutcome),
+      signatures: checked.signatures,
+      semantics: checked.semantics,
+      evidenceComplete: checked.evidenceComplete,
       reasons: localReasons,
     });
     if (localReasons.length === 0) {
@@ -539,7 +757,7 @@ export async function verifyBenchmarkBundle(
         plan: structuredClone(episode.plan),
         score: checked.score,
         replay: structuredClone(episode.replay),
-        terminalOutcome: structuredClone(episode.terminalOutcome),
+        terminalOutcome: structuredClone(checked.terminalOutcome),
         observations: { steps: 0 },
       });
     }
@@ -559,18 +777,79 @@ export async function verifyBenchmarkBundle(
       reasons.push('carried task or aggregate scores are incorrect');
     }
   }
-  const authoritiesAccepted = manifest.authorityRequirements?.every((requirement) =>
-    !requirement.required || externalFacts.some((result) =>
-      result.policyAccepted
-      && result.authority?.authorityId === requirement.authorityId
-      && result.authority.purpose === requirement.purpose
-      && (requirement.keyIds === undefined
-        || requirement.keyIds.includes(result.authority.keyId)))) ?? true;
-  if (!authoritiesAccepted) reasons.push('required external authority evidence is missing');
+  for (const requirement of manifest.authorityRequirements ?? []) {
+    const field = authorityFact(requirement.claim);
+    const candidates = (bundle.submission.attestations ?? []).filter(
+      (attestation) =>
+        attestation.authority.authorityId === requirement.authorityId
+        && attestation.authority.purpose === requirement.purpose
+        && requirement.acceptedSchemas.includes(attestation.schema)
+        && (requirement.keyIds === undefined
+          || requirement.keyIds.includes(attestation.authority.keyId)),
+    );
+    const results: ExternalTrustResult[] = [];
+    if (options.externalTrustResolver !== undefined) {
+      for (const attestation of candidates) {
+        results.push(await verifyExternalAttestation(
+          attestation,
+          contentDigest,
+          {
+            pinnedKeys: requirement.keyIds === undefined
+              ? [attestation.authority]
+              : requirement.keyIds.map((keyId) => ({
+                authorityId: requirement.authorityId,
+                keyId,
+                purpose: requirement.purpose,
+              })),
+            ...(requirement.pinnedRootDigests === undefined
+              ? {}
+              : { pinnedRootDigests: requirement.pinnedRootDigests }),
+            acceptedSchemas: requirement.acceptedSchemas,
+            ...(requirement.acceptedAlgorithms === undefined
+              ? {}
+              : { acceptedAlgorithms: requirement.acceptedAlgorithms }),
+            ...(requirement.revocationPolicy === undefined
+              ? {}
+              : { revocationPolicy: requirement.revocationPolicy }),
+          },
+          options.externalTrustResolver,
+        ));
+      }
+    }
+    facts.externalAuthorities.push(...results);
+    const accepted = results.some((result) => result.policyAccepted);
+    facts[field] = accepted
+      ? 'verified'
+      : requirement.required ? 'failed' : 'not-observed';
+    if (requirement.required && !accepted) {
+      reasons.push(
+        `required ${requirement.claim} attestation from ${requirement.authorityId} is missing or invalid`,
+      );
+    }
+  }
   facts.replay = episodeFacts.every((fact) => fact.replayValid) ? 'verified' : 'failed';
-  facts.semantics = reasons.length === 0 ? 'verified' : 'failed';
-  facts.evidenceComplete = seen.size === expectedIds.size ? 'verified' : 'failed';
-  facts.signatures = manifest.submission.requireSignedSeats ? 'unverified' : 'not-required';
+  facts.signatures = combinedState(
+    episodeFacts.map((fact) => fact.signatures),
+    !manifest.submission.requireSignedSeats,
+  );
+  facts.semantics = combinedState(
+    episodeFacts.map((fact) => fact.semantics),
+    false,
+  );
+  facts.evidenceComplete = combinedState(
+    episodeFacts.map((fact) => fact.evidenceComplete),
+    !manifest.submission.requireCompleteCoverage,
+  );
+  if (manifest.submission.requireSignedSeats && facts.signatures !== 'verified') {
+    reasons.push('signed-seat evidence is required but was not verified');
+  }
+  if (manifest.submission.requireCompleteCoverage
+    && facts.evidenceComplete !== 'verified') {
+    reasons.push('complete evidence coverage is required but was not verified');
+  }
+  if (facts.semantics !== 'verified') {
+    reasons.push('episode semantics were not verified');
+  }
   return {
     valid: reasons.length === 0,
     bundleDigest,

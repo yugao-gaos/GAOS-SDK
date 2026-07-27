@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   packBenchmarkRun,
@@ -8,9 +8,11 @@ import {
   type BenchmarkAgentAdapter,
   type BenchmarkBundle,
   type BenchmarkBundleEpisode,
+  type BenchmarkEpisodeVerification,
   type BenchmarkManifest,
   type BenchmarkRun,
 } from './benchmark.js';
+import type { ExternalTrustResolver } from './evidence.js';
 
 export interface BenchmarkCliIo {
   cwd?: string;
@@ -29,7 +31,8 @@ interface AgentModule {
   createBenchmarkAgent?: () => BenchmarkAgentAdapter | Promise<BenchmarkAgentAdapter>;
   verifyEpisode?: (
     episode: BenchmarkBundleEpisode,
-  ) => Promise<{ replayValid: boolean; score: number; reasons?: string[] }>;
+  ) => Promise<BenchmarkEpisodeVerification>;
+  externalTrustResolver?: ExternalTrustResolver;
 }
 
 function usage(): string {
@@ -69,6 +72,71 @@ const TEMPLATE: BenchmarkManifest = {
   scoring: { plugin: './score.mjs', aggregation: 'mean' },
   submission: { requireSignedSeats: false, requireCompleteCoverage: true },
 };
+
+async function writePackageDirectory(
+  path: string,
+  files: Readonly<Record<string, string>>,
+): Promise<void> {
+  await mkdir(path, { recursive: true });
+  for (const [relative, contents] of Object.entries(files)) {
+    const target = resolve(path, relative);
+    const root = `${resolve(path)}/`;
+    if (!target.startsWith(root)) {
+      throw new TypeError(`package path escapes output directory: ${relative}`);
+    }
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, contents, { flag: 'wx' });
+  }
+}
+
+async function readPackageDirectory(path: string): Promise<BenchmarkBundle> {
+  const manifest = JSON.parse(
+    await readFile(resolve(path, 'manifest.json'), 'utf8'),
+  ) as BenchmarkManifest;
+  const submissionFile = JSON.parse(
+    await readFile(resolve(path, 'submission.json'), 'utf8'),
+  ) as BenchmarkBundle['submission'] & {
+    schema: BenchmarkBundle['schema'];
+    contentDigest: string;
+    manifestDigest: string;
+  };
+  const scoreFile = JSON.parse(
+    await readFile(resolve(path, 'scores.json'), 'utf8'),
+  ) as {
+    aggregate: BenchmarkBundle['scores'];
+    episodes: Array<Omit<BenchmarkBundleEpisode, 'replay'> & {
+      replayEncoding: 'json' | 'jsonl';
+    }>;
+  };
+  const episodes: BenchmarkBundleEpisode[] = [];
+  for (const metadata of scoreFile.episodes) {
+    const replayText = await readFile(
+      resolve(path, `episodes/${encodeURIComponent(metadata.id)}.gaos-replay.jsonl`),
+      'utf8',
+    );
+    const replay: BenchmarkBundleEpisode['replay'] =
+      metadata.replayEncoding === 'json'
+        ? JSON.parse(replayText) as BenchmarkBundleEpisode['replay']
+        : replayText;
+    const { replayEncoding: _encoding, ...episode } = metadata;
+    episodes.push({ ...episode, replay });
+  }
+  const {
+    schema,
+    contentDigest,
+    manifestDigest,
+    ...submission
+  } = submissionFile;
+  return {
+    schema,
+    contentDigest,
+    manifest,
+    manifestDigest,
+    submission,
+    episodes,
+    scores: scoreFile.aggregate,
+  };
+}
 
 /** Filesystem CLI for deterministic benchmark run/resume/pack/verify. */
 export async function runBenchmarkCli(
@@ -134,7 +202,7 @@ export async function runBenchmarkCli(
         agentKind: saved.run.checkpoint.agent.kind,
       });
       const output = resolve(cwd, option(argv, 'output') ?? 'submission.gaos-bench');
-      await writeFile(output, `${JSON.stringify(packed.bundle, null, 2)}\n`);
+      await writePackageDirectory(output, packed.files);
       stdout(`${JSON.stringify({ path: output, digest: packed.digest })}\n`);
       return 0;
     }
@@ -145,9 +213,7 @@ export async function runBenchmarkCli(
       if (!manifestPath || !adapterPath) {
         throw new TypeError('verify requires independent --manifest and --adapter paths');
       }
-      const bundle = JSON.parse(
-        await readFile(resolve(cwd, argv[2]), 'utf8'),
-      ) as BenchmarkBundle;
+      const bundle = await readPackageDirectory(resolve(cwd, argv[2]));
       const manifest = JSON.parse(
         await readFile(resolve(cwd, manifestPath), 'utf8'),
       ) as BenchmarkManifest;
@@ -157,7 +223,16 @@ export async function runBenchmarkCli(
       if (typeof loaded.verifyEpisode !== 'function') {
         throw new TypeError('adapter module must export verifyEpisode(episode)');
       }
-      const result = await verifyBenchmarkBundle(bundle, manifest, loaded.verifyEpisode);
+      const result = await verifyBenchmarkBundle(
+        bundle,
+        manifest,
+        loaded.verifyEpisode,
+        {
+          ...(loaded.externalTrustResolver === undefined
+            ? {}
+            : { externalTrustResolver: loaded.externalTrustResolver }),
+        },
+      );
       stdout(`${JSON.stringify(result)}\n`);
       return result.valid ? 0 : 1;
     }

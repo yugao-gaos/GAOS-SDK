@@ -1,8 +1,14 @@
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   controllerHandoffPreimageV2,
   externalAttestationPreimage,
+  periodicSignaturePreimageV2,
   submissionChainHashV2,
   submissionEpochGenesisHashV2,
   submissionPreimageV2,
@@ -23,10 +29,11 @@ import {
 import {
   HOST_CONFORMANCE_VERSION,
   RFC014_HOST_CONFORMANCE_SCENARIOS,
-  runHostConformance,
+  runReferenceHostConformance,
 } from '../src/ecosystem.js';
 import { PresentationClient } from '../src/presentation-client.js';
 import { SeatControlLedger } from '../src/seat-control.js';
+import { canonicalJson } from '../src/protocol.js';
 
 interface V2Vectors {
   publicKey: string;
@@ -142,6 +149,43 @@ describe('RFC-014 release gate', () => {
       },
     });
     ledger.commit(prepared);
+    const incomingEpoch = ledger.current('alpha');
+    const incomingGenesisHead = submissionEpochGenesisHashV2({
+      sessionId: 'session',
+      seat: 'alpha',
+      epoch: 1,
+      controllerId: 'agent',
+      publicKey: incomingPublic,
+      transitionDigest: incomingEpoch.digest,
+      previousEpochDigest: incomingEpoch.previousEpochDigest,
+      previousChainHead: chainHead,
+    });
+    const periodicEnvelope = {
+      sessionId: 'session',
+      seat: 'alpha',
+      epoch: 0,
+      tick: 1,
+      clientTime: 1,
+      chainHead,
+    };
+    const signatureStates = [{
+      seat: 'alpha',
+      epoch: 0,
+      genesisHash: genesisHead,
+      lastChainHead: chainHead,
+      lastSignedChainHead: chainHead,
+      lastPeriodicTick: 1,
+      lastPeriodicClientTime: 1,
+      lastPeriodicSignature: await signEd25519Base64(
+        outgoing.privateKey,
+        periodicSignaturePreimageV2(periodicEnvelope),
+      ),
+    }, {
+      seat: 'alpha',
+      epoch: 1,
+      genesisHash: incomingGenesisHead,
+      lastChainHead: incomingGenesisHead,
+    }];
     expect(() => ledger.authorize('alpha', 0, undefined, 0)).not.toThrow();
     expect(() => ledger.authorize('alpha', 0, undefined, 1)).toThrow(/inactive/);
     expect(() => ledger.authorize('alpha', 1, undefined, 0)).toThrow(/inactive/);
@@ -149,7 +193,12 @@ describe('RFC-014 release gate', () => {
     const checked = verifyDynamicControlEvidenceV2({
       format: 'gaos.dynamic-control-evidence.v2',
       sessionId: 'session',
-      control: ledger.checkpoint(),
+      checkpoint: {
+        format: 'gaos.dynamic-control-checkpoint.v2',
+        sessionId: 'session',
+        control: ledger.checkpoint(),
+        signatureStates,
+      },
       commands: [{ envelope, signature }],
     });
     expect(checked).toMatchObject({
@@ -161,14 +210,87 @@ describe('RFC-014 release gate', () => {
       authorization: 'controller-handoff',
       authorizationValid: true,
     });
+    const invalidPeriodicStates = structuredClone(signatureStates);
+    invalidPeriodicStates[0]!.lastPeriodicSignature = signature;
+    expect(verifyDynamicControlEvidenceV2({
+      format: 'gaos.dynamic-control-evidence.v2',
+      sessionId: 'session',
+      checkpoint: {
+        format: 'gaos.dynamic-control-checkpoint.v2',
+        sessionId: 'session',
+        control: ledger.checkpoint(),
+        signatureStates: invalidPeriodicStates,
+      },
+      commands: [{ envelope, signature }],
+    }).valid).toBe(false);
     const stale = structuredClone(envelope);
     stale.transitionRevision = 1;
     expect(verifyDynamicControlEvidenceV2({
       format: 'gaos.dynamic-control-evidence.v2',
       sessionId: 'session',
-      control: ledger.checkpoint(),
+      checkpoint: {
+        format: 'gaos.dynamic-control-checkpoint.v2',
+        sessionId: 'session',
+        control: ledger.checkpoint(),
+        signatureStates,
+      },
       commands: [{ envelope: stale, signature }],
     }).valid).toBe(false);
+
+    const forgedControl = structuredClone(ledger.checkpoint());
+    const forgedIncoming = forgedControl.epochs.find((epoch) => epoch.epoch === 1)!;
+    forgedIncoming.previousChainHead = genesisHead;
+    const forgedHandoff = {
+      ...handoff,
+      outgoingChainHead: genesisHead,
+    };
+    const forgedHandoffBytes = controllerHandoffPreimageV2(forgedHandoff);
+    forgedIncoming.authorizationEvidence = {
+      mode: 'controller-handoff',
+      outgoingSignatures: {
+        alpha: await signEd25519Base64(outgoing.privateKey, forgedHandoffBytes),
+      },
+      incomingSignatures: {
+        alpha: await signEd25519Base64(incoming.privateKey, forgedHandoffBytes),
+      },
+    };
+    const { digest: _oldDigest, ...forgedIncomingBase } = forgedIncoming;
+    forgedIncoming.digest = createHash('sha256')
+      .update(canonicalJson(forgedIncomingBase as never))
+      .digest('hex');
+    const forgedIncomingGenesis = submissionEpochGenesisHashV2({
+      sessionId: 'session',
+      seat: 'alpha',
+      epoch: 1,
+      controllerId: 'agent',
+      publicKey: incomingPublic,
+      transitionDigest: forgedIncoming.digest,
+      previousEpochDigest: forgedIncoming.previousEpochDigest,
+      previousChainHead: genesisHead,
+    });
+    const forged = verifyDynamicControlEvidenceV2({
+      format: 'gaos.dynamic-control-evidence.v2',
+      sessionId: 'session',
+      checkpoint: {
+        format: 'gaos.dynamic-control-checkpoint.v2',
+        sessionId: 'session',
+        control: forgedControl,
+        signatureStates: [
+          signatureStates[0]!,
+          {
+            seat: 'alpha',
+            epoch: 1,
+            genesisHash: forgedIncomingGenesis,
+            lastChainHead: forgedIncomingGenesis,
+          },
+        ],
+      },
+      commands: [{ envelope, signature }],
+    });
+    expect(forged.valid).toBe(false);
+    expect(forged.reasons).toContain(
+      'voluntary handoff does not continue exact chain head for alpha:0',
+    );
   });
 
   it('applies product pins, expiry, revocation, and artifact subject binding independently', async () => {
@@ -295,6 +417,20 @@ describe('RFC-014 release gate', () => {
     ], { mode: 'host-policy', policy: 'atomic recovery' });
     const checkpoint = ledger.checkpoint();
     expect(checkpoint.prepared).toHaveLength(1);
+    const duplicatePrepared = structuredClone(checkpoint);
+    duplicatePrepared.prepared = [
+      duplicatePrepared.prepared![0]!,
+      structuredClone(duplicatePrepared.prepared![0]!),
+    ];
+    expect(() => SeatControlLedger.rehydrate(duplicatePrepared)).toThrow(/at most one/);
+    const incompletePrepared = structuredClone(checkpoint);
+    incompletePrepared.prepared![0]!.epochs[0]!.authorizationEvidence = {
+      mode: 'host-policy',
+      policy: '',
+    };
+    expect(() => SeatControlLedger.rehydrate(incompletePrepared)).toThrow(
+      /prepared host policy|prepared epoch digest/,
+    );
     const restored = SeatControlLedger.rehydrate(checkpoint);
     const [pending] = restored.preparedTransitions();
     expect(pending?.epochs.map(({ seat }) => seat).sort()).toEqual(['alpha', 'beta']);
@@ -304,14 +440,12 @@ describe('RFC-014 release gate', () => {
   });
 
   it('executes every versioned host fixture and emits machine-readable facts', async () => {
-    const report = await runHostConformance({
-      runtime: 'reference-node',
-      adapterVersion: '1.0.0',
-      run: async (scenario) => ({ passed: scenario.length > 0 }),
-    });
+    const report = await runReferenceHostConformance();
     expect(report.schema).toBe(HOST_CONFORMANCE_VERSION);
     expect(report.scenarios).toHaveLength(RFC014_HOST_CONFORMANCE_SCENARIOS.length);
     expect(report.passed).toBe(true);
+    expect(report.scenarios.every(({ details }) =>
+      details === undefined || (details as { executed?: boolean }).executed === true)).toBe(true);
   });
 
   it('repairs missing patch bases and never replays old presentation cues', () => {
@@ -354,6 +488,7 @@ describe('RFC-014 release gate', () => {
       'gaos.replay-reference-v1.schema.json',
       'gaos.seat-control-v2.schema.json',
       'gaos.evidence-verdict-v2.schema.json',
+      'gaos.dynamic-control-evidence-v2.schema.json',
     ]) {
       const schema = JSON.parse(readFileSync(
         new URL(`../schemas/${name}`, import.meta.url),
@@ -397,4 +532,60 @@ describe('RFC-014 release gate', () => {
       expect(guide).toContain(platform);
     }
   });
+
+  it('executes the same presentation state machine in TypeScript, C#, C++, and GDScript', () => {
+    const fixturePath = fileURLToPath(new URL(
+      '../fixtures/ecosystem/presentation-client-v1.golden.json',
+      import.meta.url,
+    ));
+    const expected = (JSON.parse(readFileSync(fixturePath, 'utf8')) as {
+      expected: unknown;
+    }).expected;
+    const temporary = mkdtempSync(join(tmpdir(), 'gaos-clients-'));
+    const cppBinary = join(temporary, 'gaos-cpp-client');
+    execFileSync('/usr/bin/c++', [
+      '-std=c++17',
+      fileURLToPath(new URL('../examples/clients/cpp/run_fixture.cpp', import.meta.url)),
+      '-o',
+      cppBinary,
+    ]);
+    const project = fileURLToPath(new URL(
+      '../examples/clients/csharp/GaosPresentation.csproj',
+      import.meta.url,
+    ));
+    const artifacts = join(temporary, 'dotnet');
+    execFileSync('/usr/local/bin/dotnet', [
+      'build', project, '--artifacts-path', artifacts, '--nologo',
+    ]);
+    const commands: [string, string[]][] = [
+      [process.execPath, [
+        fileURLToPath(new URL(
+          '../examples/clients/typescript/run-fixture.mjs',
+          import.meta.url,
+        )),
+        fixturePath,
+      ]],
+      [cppBinary, [fixturePath]],
+      ['/usr/local/bin/dotnet', [
+        join(artifacts, 'bin/GaosPresentation/debug/GaosPresentation.dll'),
+        fixturePath,
+      ]],
+      ['/opt/homebrew/bin/godot', [
+        '--headless',
+        '--script',
+        fileURLToPath(new URL(
+          '../examples/clients/gdscript/run_fixture.gd',
+          import.meta.url,
+        )),
+        '--',
+        fixturePath,
+      ]],
+    ];
+    for (const [executable, args] of commands) {
+      const output = execFileSync(executable, args, { encoding: 'utf8' });
+      const jsonLine = output.trim().split('\n').reverse()
+        .find((line: string) => line.startsWith('{'));
+      expect(JSON.parse(jsonLine!)).toEqual(expected);
+    }
+  }, 30_000);
 });

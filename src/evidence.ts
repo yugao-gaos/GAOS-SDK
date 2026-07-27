@@ -57,10 +57,47 @@ export interface DynamicControlSignedCommand {
   signature: string;
 }
 
+export interface DynamicControlPeriodicEnvelopeV2 {
+  sessionId: string;
+  seat: string;
+  epoch: number;
+  tick: number;
+  clientTime: number;
+  chainHead: string;
+}
+
+export interface DynamicControlPeriodicSignatureV2 {
+  envelope: DynamicControlPeriodicEnvelopeV2;
+  signature: string;
+}
+
+/**
+ * Persisted verifier state for one controller epoch. `lastChainHead` is the
+ * exact head after all commands included in the evidence. The optional
+ * periodic signature closes the prefix ending at `lastSignedChainHead`.
+ */
+export interface DynamicControlEpochSignatureStateV2 {
+  seat: string;
+  epoch: number;
+  genesisHash: string;
+  lastChainHead: string;
+  lastSignedChainHead?: string;
+  lastPeriodicTick?: number;
+  lastPeriodicClientTime?: number;
+  lastPeriodicSignature?: string;
+}
+
+export interface DynamicControlCheckpointV2 {
+  format: 'gaos.dynamic-control-checkpoint.v2';
+  sessionId: string;
+  control: SeatControlCheckpoint;
+  signatureStates: readonly DynamicControlEpochSignatureStateV2[];
+}
+
 export interface DynamicControlEvidenceV2 {
   format: typeof DYNAMIC_CONTROL_EVIDENCE_FORMAT;
   sessionId: string;
-  control: SeatControlCheckpoint;
+  checkpoint: DynamicControlCheckpointV2;
   commands: readonly DynamicControlSignedCommand[];
 }
 
@@ -150,6 +187,23 @@ export function submissionChainHashV2(
   return signatureBytesToBase64(sha256(submissionPreimageV2(envelope)));
 }
 
+/** Canonical periodic checkpoint preimage for a controller epoch. */
+export function periodicSignaturePreimageV2(
+  envelope: DynamicControlPeriodicEnvelopeV2,
+): Uint8Array {
+  assertSafeUnsigned(envelope.epoch, 'epoch');
+  assertSafeUnsigned(envelope.tick, 'tick');
+  assertSafeUnsigned(envelope.clientTime, 'clientTime');
+  if (!envelope.sessionId || !envelope.seat) {
+    throw new TypeError('periodic signature identifiers must be non-empty');
+  }
+  digestBytes(envelope.chainHead, 'chainHead');
+  return canonicalPreimage(
+    `${SUBMISSION_SIGNATURE_SCHEME_V2}.periodic`,
+    envelope as unknown as JsonValue,
+  );
+}
+
 export function controllerHandoffPreimageV2(
   handoff: ControllerHandoffV2,
 ): Uint8Array {
@@ -214,25 +268,43 @@ export function verifyDynamicControlEvidenceV2(
       reasons: ['unsupported dynamic-control evidence format'],
     };
   }
-  if (evidence.sessionId !== evidence.control.sessionId) {
+  const checkpoint = evidence.checkpoint;
+  const control = checkpoint?.control;
+  if (checkpoint?.format !== 'gaos.dynamic-control-checkpoint.v2'
+    || checkpoint.sessionId !== evidence.sessionId) {
+    reasons.push('invalid dynamic-control checkpoint');
+  }
+  if (control === undefined || evidence.sessionId !== control.sessionId) {
     reasons.push('control history belongs to a different session');
   }
   let ledger: SeatControlLedger | undefined;
   try {
-    ledger = SeatControlLedger.rehydrate(evidence.control);
+    ledger = SeatControlLedger.rehydrate(control);
   } catch (error) {
     reasons.push(error instanceof Error ? error.message : 'invalid control history');
   }
   const epochFacts: EpochVerificationFact[] = [];
   const commandHeads = new Map<string, string>();
   const commandCounts = new Map<string, number>();
+  const states = new Map<string, DynamicControlEpochSignatureStateV2>();
+  const rawStates = Array.isArray(checkpoint?.signatureStates)
+    ? checkpoint.signatureStates
+    : [];
+  if (!Array.isArray(checkpoint?.signatureStates)) {
+    reasons.push('signatureStates must be an array');
+  }
+  for (const state of rawStates) {
+    const key = `${state.seat}:${state.epoch}`;
+    if (states.has(key)) reasons.push(`duplicate signature state for ${key}`);
+    states.set(key, state);
+  }
   if (ledger !== undefined) {
-    for (const epoch of evidence.control.epochs) {
+    for (const epoch of control.epochs) {
       const epochReasons: string[] = [];
       let authorizationValid = true;
       if (epoch.authorization === 'controller-handoff') {
         const handoff = handoffFromEpoch(evidence.sessionId, epoch);
-        const previous = evidence.control.epochs.find(
+        const previous = control.epochs.find(
           (candidate) => candidate.seat === epoch.seat
             && candidate.epoch === epoch.epoch - 1,
         );
@@ -276,12 +348,61 @@ export function verifyDynamicControlEvidenceV2(
         unsignedTail: false,
         reasons: epochReasons,
       });
+      const key = `${epoch.seat}:${epoch.epoch}`;
+      const state = states.get(key);
+      if (epoch.status === 'occupied'
+        && (epoch.controller?.publicKey === undefined
+          || epoch.controller.signingTier === undefined)) {
+        reasons.push(`occupied dynamic-control epoch is missing signing policy for ${key}`);
+      }
+      if (epoch.status === 'occupied' && state === undefined) {
+        reasons.push(`missing signature state for ${key}`);
+      }
+      if (epoch.status === 'occupied' && epoch.controller?.publicKey !== undefined) {
+        try {
+          const genesisHash = submissionEpochGenesisHashV2({
+            sessionId: evidence.sessionId,
+            seat: epoch.seat,
+            epoch: epoch.epoch,
+            controllerId: epoch.controller.controllerId,
+            publicKey: epoch.controller.publicKey,
+            transitionDigest: epoch.digest,
+            ...(epoch.previousEpochDigest === undefined
+              ? {}
+              : { previousEpochDigest: epoch.previousEpochDigest }),
+            ...(epoch.previousChainHead === undefined
+              ? {}
+              : { previousChainHead: epoch.previousChainHead }),
+          });
+          if (state !== undefined && state.genesisHash !== genesisHash) {
+            reasons.push(`signature state genesis does not match ${key}`);
+          }
+          commandHeads.set(key, genesisHash);
+        } catch (error) {
+          reasons.push(error instanceof Error ? error.message : `invalid epoch genesis for ${key}`);
+        }
+      }
+    }
+    for (const key of states.keys()) {
+      if (!epochFacts.some((fact) => `${fact.seat}:${fact.epoch}` === key)) {
+        reasons.push(`signature state belongs to unknown epoch ${key}`);
+      }
     }
   }
 
   let commandsValid = ledger !== undefined;
-  const ordered = [...evidence.commands].sort((left, right) =>
+  const rawCommands = Array.isArray(evidence.commands) ? evidence.commands : [];
+  if (!Array.isArray(evidence.commands)) {
+    commandsValid = false;
+    reasons.push('commands must be an array');
+  }
+  const ordered = [...rawCommands].sort((left, right) =>
     left.envelope.cursor - right.envelope.cursor);
+  if (ordered.some((command, index) =>
+    index > 0 && command.envelope.cursor === ordered[index - 1]!.envelope.cursor)) {
+    commandsValid = false;
+    reasons.push('signed commands contain duplicate cursors');
+  }
   for (const command of ordered) {
     try {
       if (command.envelope.sessionId !== evidence.sessionId) {
@@ -297,20 +418,10 @@ export function verifyDynamicControlEvidenceV2(
         throw new TypeError('active controller epoch has no signing key');
       }
       const key = `${active.seat}:${active.epoch}`;
-      const expectedHead = commandHeads.get(key) ?? submissionEpochGenesisHashV2({
-        sessionId: evidence.sessionId,
-        seat: active.seat,
-        epoch: active.epoch,
-        controllerId: active.controller.controllerId,
-        publicKey: active.controller.publicKey,
-        transitionDigest: active.digest,
-        ...(active.previousEpochDigest === undefined
-          ? {}
-          : { previousEpochDigest: active.previousEpochDigest }),
-        ...(active.previousChainHead === undefined
-          ? {}
-          : { previousChainHead: active.previousChainHead }),
-      });
+      const expectedHead = commandHeads.get(key);
+      if (expectedHead === undefined) {
+        throw new TypeError('signed command references an epoch without signature state');
+      }
       if (command.envelope.prevChainHash !== expectedHead) {
         throw new TypeError('signed command does not continue its epoch chain');
       }
@@ -331,15 +442,66 @@ export function verifyDynamicControlEvidenceV2(
 
   for (const fact of epochFacts) {
     const key = `${fact.seat}:${fact.epoch}`;
-    const epoch = evidence.control.epochs.find(
+    const epoch = control?.epochs.find(
       (candidate) => candidate.seat === fact.seat && candidate.epoch === fact.epoch,
     )!;
-    const next = evidence.control.epochs.find(
+    const next = control?.epochs.find(
       (candidate) => candidate.seat === fact.seat && candidate.epoch === fact.epoch + 1,
     );
-    fact.unsignedTail = (commandCounts.get(key) ?? 0) > 0
-      && next !== undefined
-      && next.previousChainHead !== commandHeads.get(key);
+    const state = states.get(key);
+    const computedHead = commandHeads.get(key);
+    if (state !== undefined && computedHead !== undefined
+      && state.lastChainHead !== computedHead) {
+      commandsValid = false;
+      reasons.push(`checkpoint chain head does not match ${key}`);
+    }
+    let periodicValid = true;
+    const hasPeriodic = state?.lastSignedChainHead !== undefined
+      || state?.lastPeriodicTick !== undefined
+      || state?.lastPeriodicClientTime !== undefined
+      || state?.lastPeriodicSignature !== undefined;
+    if (hasPeriodic) {
+      if (state?.lastSignedChainHead === undefined
+        || state.lastPeriodicTick === undefined
+        || state.lastPeriodicClientTime === undefined
+        || state.lastPeriodicSignature === undefined
+        || epoch.controller?.publicKey === undefined) {
+        periodicValid = false;
+      } else {
+        try {
+          periodicValid = verifyEd25519Base64(
+            epoch.controller.publicKey,
+            periodicSignaturePreimageV2({
+              sessionId: evidence.sessionId,
+              seat: epoch.seat,
+              epoch: epoch.epoch,
+              tick: state.lastPeriodicTick,
+              clientTime: state.lastPeriodicClientTime,
+              chainHead: state.lastSignedChainHead,
+            }),
+            state.lastPeriodicSignature,
+          );
+        } catch {
+          periodicValid = false;
+        }
+      }
+      if (!periodicValid) {
+        commandsValid = false;
+        reasons.push(`periodic signature state is invalid for ${key}`);
+      }
+    }
+    fact.unsignedTail = state !== undefined
+      && state.lastSignedChainHead !== undefined
+      && state.lastSignedChainHead !== state.lastChainHead;
+    if (next?.authorization === 'controller-handoff'
+      && (computedHead === undefined || next.previousChainHead !== computedHead)) {
+      commandsValid = false;
+      fact.unsignedTail = true;
+      reasons.push(`voluntary handoff does not continue exact chain head for ${key}`);
+    } else if (next?.authorization === 'host-policy'
+      && next.previousChainHead !== computedHead) {
+      fact.unsignedTail = true;
+    }
     if (fact.unsignedTail) {
       fact.reasons.push('epoch has an unsigned or incompletely closed tail');
     }

@@ -7,6 +7,8 @@ CREATE TABLE benchmark_submissions (
   aggregate_score DOUBLE PRECISION NOT NULL,
   uncertainty DOUBLE PRECISION,
   artifact_digest TEXT NOT NULL UNIQUE,
+  evidence_verdict TEXT NOT NULL,
+  reproduced BOOLEAN NOT NULL,
   verification_json JSONB NOT NULL,
   eligibility_json JSONB
 );
@@ -20,3 +22,9 @@ CREATE TABLE benchmark_task_scores (
 
 CREATE INDEX benchmark_submission_filters
   ON benchmark_submissions(benchmark_id, benchmark_version, modality);
+
+CREATE TABLE verifier_queue (
+  submission_id TEXT PRIMARY KEY REFERENCES benchmark_submissions(submission_id),
+  artifact_digest TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending'
+);
