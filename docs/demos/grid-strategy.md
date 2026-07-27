@@ -1,5 +1,5 @@
 ---
-title: Ashfall Crossing — Grid Strategy
+title: "Ashfall Crossing: Grid Strategy"
 aside: false
 outline: false
 pageClass: demo-page

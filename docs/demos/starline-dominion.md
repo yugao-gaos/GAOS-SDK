@@ -1,5 +1,5 @@
 ---
-title: Starline Dominion — Real-Time Graph RTS
+title: "Starline Dominion: Real-Time Graph RTS"
 aside: false
 outline: false
 pageClass: demo-page

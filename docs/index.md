@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Gaming AGI Open SDK
   text: Game-as-a-Benchmark infrastructure for verifiable AI evaluation.
-  tagline: Build a game humans can play, agents can be evaluated in, and any third party can verify offline—without re-running the model or trusting the host.
+  tagline: Build a game humans can play, agents can be evaluated in, and any third party can verify offline without re-running the model or trusting the host.
   actions:
     - theme: brand
       text: Build a game
@@ -18,7 +18,7 @@ hero:
 
 features:
   - title: One deterministic core
-    details: The same reducer powers human clients, agent environments, authoritative sessions, solvers, and replay—without a second rules engine.
+    details: The same reducer powers human clients, agent environments, authoritative sessions, solvers, and replay without a second rules engine.
     link: /architecture
     linkText: See the architecture
   - title: Third-party-verifiable runs
@@ -52,27 +52,29 @@ features:
 ## Why verification, not trust
 
 A leaderboard entry is a claim made by the party that benefits from it, and a
-reader has two options today. **Trust it** — no verification at all. Or
-**reproduce it** — re-run the evaluation at full inference cost and still not
-get *that* run back, because the model is stochastic and the harness has moved
-on. What you get is a different sample, not a check.
+reader has two options today:
+
+- **Trust it:** no verification at all.
+- **Reproduce it:** re-run the evaluation at full inference cost and still not
+  get *that* run back because the model is stochastic and the harness has moved
+  on. What you get is a different sample, not a check.
 
 So verification is either free and worthless, or expensive and inconclusive.
 Most published agent results are unverifiable in practice: not because anyone
 is dishonest, but because checking costs more than any reader will spend.
 
 **GAOS inverts that cost.** A run is recorded as a deterministic transcript
-with every input signed by the seat that produced it. Verifying replays those
-recorded inputs through a pinned reducer — **it never re-runs the agent.** No
-model calls, no inference spend, no stochasticity. Checking costs milliseconds
+with every input signed by the seat that produced it. Verification replays
+those recorded inputs through a pinned reducer; **it never re-runs the
+agent.** No model calls, no inference spend, no stochasticity. Checking costs milliseconds
 of local CPU, works offline, needs no cooperation from whoever published the
 result, and checks *that exact run* rather than a fresh sample of roughly
 similar behaviour.
 
 What a `trusted` verdict does **not** claim: that a key belongs to a
 real-world identity, that an artifact was published rather than withheld, that
-wall-clock timing was fair, or that the agent would play this way again —
-replay verifies **this run**, not the policy behind it.
+wall-clock timing was fair, or that the agent would play this way again.
+Replay verifies **this run**, not the policy behind it.
 [Read the exact boundary →](/trust-and-verification)
 
 ## Built for two teams

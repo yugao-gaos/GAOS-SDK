@@ -12,14 +12,14 @@ GAOS is an open-source TypeScript and Python SDK for **Game-as-a-Benchmark**:
 games that humans and agents can both play across turn-based, simultaneous
 WEGO, and fixed-tick real-time systems. One reducer drives the game, the agent
 environment, the authoritative session, and deterministic replay. Signed runs
-can be checked offline by anyone with the pinned game adapter—without trusting
+can be checked offline by anyone with the pinned game adapter, without trusting
 the host or a GAOS-operated service.
 
 **The problem it solves:** agent evaluation results are self-published, and
 checking one today means re-running the whole evaluation at the full inference
-cost of the original — after which you still have a different sample rather
-than that run. GAOS keeps producing a result expensive and makes validation
-nearly free. [Why verification, not trust →](#why-verification-not-trust)
+cost of the original. Even then, you have a different sample rather than that
+run. GAOS keeps producing a result expensive and makes validation nearly free.
+[Why verification, not trust →](#why-verification-not-trust)
 
 ## What is Game-as-a-Benchmark?
 
@@ -27,7 +27,7 @@ nearly free. [Why verification, not trust →](#why-verification-not-trust)
 environment. Humans and agents face the same rules and canonical actions;
 every scored run can carry portable evidence of exactly what happened. It is
 not a static test set or a claim that every game score measures general
-intelligence—the benchmark operator still owns the tasks, scoring meaning,
+intelligence. The benchmark operator still owns the tasks, scoring meaning,
 held-out content, and capability claims.
 
 ## The three reasons to use GAOS
@@ -70,7 +70,7 @@ and commercial policy.
 
 GAOS is **open verification infrastructure for Game-as-a-Benchmark
 evaluations**. It is the deterministic execution and evidence layer beneath a
-game, benchmark, or tournament—not a replacement for the rest of the stack.
+game, benchmark, or tournament, not a replacement for the rest of the stack.
 
 Use GAOS alongside:
 
@@ -94,8 +94,8 @@ Agent evaluation results are self-published. A leaderboard entry is a claim
 made by the party that benefits from it, and a reader has two options today:
 
 - **Trust it.** No verification at all.
-- **Reproduce it.** Re-run the evaluation at full inference cost — and still
-  not get *that* run back, because the model is stochastic and the harness has
+- **Reproduce it.** Re-run the evaluation at full inference cost. You still do
+  not get *that* run back because the model is stochastic and the harness has
   moved on. What you get is a different sample, not a check.
 
 So verification is either free and worthless, or expensive and inconclusive.
@@ -103,9 +103,9 @@ Most published agent results are unverifiable in practice: not because anyone
 is dishonest, but because checking costs more than any reader will spend.
 
 **GAOS inverts that cost.** A run is recorded as a deterministic transcript
-with every input signed by the seat that produced it. Verifying replays those
-recorded inputs through a pinned reducer — **it never re-runs the agent.** No
-model calls, no inference spend, no stochasticity. Checking a claim costs
+with every input signed by the seat that produced it. Verification replays
+those recorded inputs through a pinned reducer; **it never re-runs the
+agent.** No model calls, no inference spend, no stochasticity. Checking a claim costs
 milliseconds of local CPU, and it checks *that exact run* rather than a fresh
 sample of roughly similar behaviour.
 
@@ -125,9 +125,9 @@ by the artifact, then checks the run locally:
 ### What it does not prove
 
 Not that a key belongs to a real-world identity, that an artifact was published
-rather than withheld, or that wall-clock timing was fair. And not that the agent
-would play this way again — replay verifies **this run**, not the policy that
-produced it. Those remain product and scoring-authority policy. See
+rather than withheld, or that wall-clock timing was fair. It also does not prove
+that the agent would play this way again. Replay verifies **this run**, not the
+policy that produced it. Those remain product and scoring-authority policy. See
 [Trust and verification](docs/trust-and-verification.md) for the exact boundary.
 
 ## Start building

@@ -58,7 +58,7 @@ be a board, graph, deck, hand, bag, queue, or authored slot row.
 
 ### Hybrid containers
 
-Portals move entities across heterogeneous containers—for example, a token can
+Portals move entities across heterogeneous containers. For example, a token can
 leave a hex board, enter a hidden bag, then emerge on a graph node. Capacity,
 group movement, transformations, cycles, and arrivals resolve atomically.
 

@@ -1,5 +1,5 @@
 ---
-title: Cinder Vault — Card-Grid Roguelike
+title: "Cinder Vault: Card-Grid Roguelike"
 aside: false
 outline: false
 pageClass: demo-page

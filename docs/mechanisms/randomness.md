@@ -30,7 +30,7 @@ const hitRoll = roll(tickSeed, `attack:${attackerId}:${targetId}`);
 
 The same seed and key always return the same value, independent of calls for
 other events. Distinct logical draws need distinct stable keys. Reusing a key
-reuses the exact outcome—it does not create a second sample.
+reuses the exact outcome; it does not create a second sample.
 
 Keys are processed as JavaScript string code units. Normalize ids and avoid
 locale-formatted numbers or labels whose spelling may change between versions.

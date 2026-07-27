@@ -3,7 +3,7 @@
 ## Our mission
 
 **GAOS exists to establish Game-as-a-Benchmark as a shared, inspectable proving
-ground for human and machine intelligence—where both reach the same
+ground for human and machine intelligence, where both reach the same
 authoritative rules, face the same consequences, and can be compared through
 reproducible play rather than persuasive outputs alone.**
 
@@ -87,9 +87,9 @@ provides an interpretable reference rather than a separate benchmark. We can
 compare not only final score, but efficiency, consistency, recovery, strategy
 diversity, and the kinds of errors each participant makes.
 
-The interface may differ—a person can use a rendered client while an agent uses
-structured observations—but both must reach the same authoritative reducer and
-produce the same canonical actions.
+The interface may differ: a person can use a rendered client while an agent
+uses structured observations. Both must reach the same authoritative reducer
+and produce the same canonical actions.
 
 ### Games are repeatable without being static
 
@@ -246,7 +246,7 @@ design bias, or become saturated.
 
 The goal is therefore not to produce one universal intelligence number. The
 goal is to make interactive evaluation easier to build, reproduce, inspect,
-extend, and compare—so claims about agent capability rest on observable
+extend, and compare, so claims about agent capability rest on observable
 behavior and replayable evidence.
 
 Continue with the [architecture map](/architecture), the

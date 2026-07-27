@@ -88,7 +88,7 @@ Crash recovery always follows the durable log:
 
 - before persistence, nothing happened and the draft is aborted/discarded;
 - after persistence but before in-memory commit, restart with
-  `rehydrateKernel(options, transcript)`—the persisted transition wins; and
+  `rehydrateKernel(options, transcript)`; the persisted transition wins; and
 - after commit but before delivery, rehydrate the same log and retransmit or
   send `snapshot(seat, lastTransitionRevision)`.
 
@@ -167,7 +167,7 @@ every `patch`, `snapshot`, or `unchanged` body with `applyObservationDelta`,
 which checks `viewDigest`. The snapshot-only v1 negotiation path was removed
 before release.
 
-### Tuning observation delivery — what each option costs and buys
+### Tuning observation delivery: what each option costs and buys
 
 Every option above is product-owned; the SDK picks defaults that suit a small
 table and gets out of the way. The defaults are **not** right for every shape,
@@ -186,7 +186,7 @@ and the trade they make is always the same one: **CPU against bandwidth.**
 
 Synthetic table, one desktop, 20 Hz, 4 seats, uncompressed unless stated.
 Reproduce with `npm run observations:benchmark`. Treat these as *shape*, not as
-your numbers — run it against your own views. Per-run variance is roughly
+your numbers. Run it against your own views. Per-run variance is roughly
 ±20 %, so read ratios rather than absolute milliseconds.
 
 "Budget" is the share of one 20 Hz tick (50 ms) spent encoding for all four
@@ -211,8 +211,8 @@ Three things this table is saying:
    per-tick cost.
 3. **The expensive cells are the ones where patching is *winning*.** At 500
    entities with 1–20 changes the patch is a 200–400× bandwidth win, and it
-   costs ~2× the CPU. Backoff never fires there, because nothing is going
-   wrong — see the caveat below.
+   costs ~2× the CPU. Backoff never fires there because nothing is going
+   wrong; see the caveat below.
 
 #### Choosing
 
@@ -233,7 +233,7 @@ ECS component set moves it.
 #### Caveat: backoff is byte-aware, not CPU-aware
 
 The circuit breaker reacts to a patch **losing on bytes**. A patch that wins
-decisively on bytes never backs off, however much CPU it costs — which is why
+decisively on bytes never backs off, however much CPU it costs. This is why
 the 500-entity / few-changes cells stay at 70–77 % of budget rather than
 converging like the `all`-changed cells do.
 
@@ -246,8 +246,8 @@ default, and no amount of backoff tuning will discover that for you.
 
 #### Transport compression
 
-Not an SDK concern — it belongs to your WebSocket stack — but it interacts
-directly with the choice above, so measure it before adding a codec. In the
+This is not an SDK concern; it belongs to your WebSocket stack. However, it
+interacts directly with the choice above, so measure it before adding a codec. In the
 synthetic benchmark zlib level 1 takes a 500-entity snapshot from 38,420 to
 3,839 bytes for ~0.10 ms/seat, while level 6 reaches 3,361 bytes for ~0.57
 ms/seat: **12 % more compression for roughly 5× the CPU.** Since CPU is the

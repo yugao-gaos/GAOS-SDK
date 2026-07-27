@@ -26,7 +26,7 @@ export default defineConfig({
     ['meta', { property: 'og:image:height', content: '909' }],
     ['meta', {
       property: 'og:image:alt',
-      content: 'Gaming AGI Open SDK — Game-as-a-Benchmark infrastructure for human play, agent evaluation, and third-party proof.',
+      content: 'Gaming AGI Open SDK: Game-as-a-Benchmark infrastructure for human play, agent evaluation, and third-party proof.',
     }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
     ['meta', { name: 'twitter:title', content: 'Gaming AGI Open SDK | Game-as-a-Benchmark' }],
@@ -40,7 +40,7 @@ export default defineConfig({
     }],
     ['meta', {
       name: 'twitter:image:alt',
-      content: 'Gaming AGI Open SDK — Game-as-a-Benchmark infrastructure for human play, agent evaluation, and third-party proof.',
+      content: 'Gaming AGI Open SDK: Game-as-a-Benchmark infrastructure for human play, agent evaluation, and third-party proof.',
     }],
   ],
   themeConfig: {
@@ -73,12 +73,12 @@ export default defineConfig({
         text: 'Playable demos',
         items: [
           { text: 'Demo arcade', link: '/demos/' },
-          { text: 'Prism Match — Match-3', link: '/demos/match-3' },
-          { text: 'Midnight House — Blackjack', link: '/demos/blackjack' },
-          { text: 'Ashfall Crossing — Strategy', link: '/demos/grid-strategy' },
-          { text: 'Cinder Vault — Roguelike', link: '/demos/card-grid-roguelike' },
-          { text: 'Starline Dominion — Graph RTS', link: '/demos/starline-dominion' },
-          { text: 'Last Light — Zombie Defense', link: '/demos/last-light' },
+          { text: 'Prism Match: Match-3', link: '/demos/match-3' },
+          { text: 'Midnight House: Blackjack', link: '/demos/blackjack' },
+          { text: 'Ashfall Crossing: Strategy', link: '/demos/grid-strategy' },
+          { text: 'Cinder Vault: Roguelike', link: '/demos/card-grid-roguelike' },
+          { text: 'Starline Dominion: Graph RTS', link: '/demos/starline-dominion' },
+          { text: 'Last Light: Zombie Defense', link: '/demos/last-light' },
         ],
       },
       {

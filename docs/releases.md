@@ -9,7 +9,7 @@ Released July 26, 2026. This release completes the resolved implementation
 scope of [RFC-010](/rfcs/rfc-010-submission-signatures-and-interest), including
 the Arena and TabletopLabs migration findings. Its central result is portable,
 signed run evidence that a third party can verify offline with a pinned
-historical adapter—without trusting the host or a GAOS-operated service.
+historical adapter, without trusting the host or a GAOS-operated service.
 It provides the independently checkable evidence layer behind GAOS's
 Game-as-a-Benchmark positioning.
 
@@ -92,8 +92,8 @@ migrate without a compatibility period.
 
 ## v0.19.0
 
-Released July 25, 2026. Tagged `v0.19.0` (annotated, pointing at `5ddd404`) —
-**this is the migration baseline; pin the tag.** See RFC-009 §4 for the pin
+Released July 25, 2026. Tagged `v0.19.0` (annotated, pointing at `5ddd404`).
+**This is the migration baseline; pin the tag.** See RFC-009 §4 for the pin
 rule and the contract freeze that holds while both consumer migrations are in
 flight.
 

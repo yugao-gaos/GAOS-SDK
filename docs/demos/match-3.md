@@ -1,5 +1,5 @@
 ---
-title: Prism Match — Match-3
+title: "Prism Match: Match-3"
 aside: false
 outline: false
 pageClass: demo-page

@@ -49,7 +49,7 @@ with the [settlement kernel](/settlement).
 
 `maxReactions` must be a positive upper bound on distinct activations. Exceeding
 it throws `SettlementLimitError`; it does not return a partial success. Derive
-the bound from the product world—for example, the number of reactive entities—
+the bound from the product world, such as the number of reactive entities,
 instead of using an arbitrary large constant.
 
 ## Product responsibilities

@@ -2,9 +2,9 @@
 
 We used **OpenAI GPT-5.6 Sol** as a production collaborator across the full
 development loop: concepting, asset direction, engineering, review, publishing,
-and playtesting. The result is Gaming AGI Open SDK—now a composable
-SDK for deterministic, verifiable games—and
-[Zonoid](https://zonoid.ai), its first game and a live, sign-in-gated preview.
+and playtesting. The result is Gaming AGI Open SDK, now a composable SDK for
+deterministic, verifiable games, and [Zonoid](https://zonoid.ai), its first
+game and a live, sign-in-gated preview.
 
 This was not a one-prompt generation process. Sol worked through bounded tasks,
 inspected the current product state, produced or revised artifacts, ran checks,
@@ -40,7 +40,7 @@ That distinction matters: the concept image became a shared production
 reference, not disposable inspiration. OpenAI's
 [image-generation guidance](https://learn.chatgpt.com/docs/image-generation)
 describes how Sol can direct image creation and editing while an image model
-renders the result. We used that separation deliberately—Sol maintained the
+renders the result. We used that separation deliberately: Sol maintained the
 brief and revision history while the image tool produced the pixels.
 
 ## 2. Driving specialist production from the concept
@@ -119,8 +119,8 @@ preview](https://zonoid.ai)**. The current preview requires sign-in.
 
 ## 6. Testing by letting models play
 
-GAOS supports normal software verification—unit tests, type checking, build
-checks, deterministic replay, and protocol tests—but the game adds another
+GAOS supports normal software verification (unit tests, type checking, build
+checks, deterministic replay, and protocol tests), but the game adds another
 useful layer: a language model can play it.
 
 The agent environment exposes the concrete legal actions for each turn, accepts

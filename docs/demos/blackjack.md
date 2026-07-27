@@ -1,5 +1,5 @@
 ---
-title: Midnight House — Blackjack
+title: "Midnight House: Blackjack"
 aside: false
 outline: false
 pageClass: demo-page

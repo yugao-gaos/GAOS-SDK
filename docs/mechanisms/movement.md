@@ -23,7 +23,7 @@ Larger rectangular footprints extend right and down from the mover's top-left
 anchor.
 
 `isStaticBlocked(x, y, moverId)` reports terrain, board bounds, and other hard
-blockers. It **must not** report any mover passed in the same call—dynamic
+blockers. It **must not** report any mover passed in the same call. Dynamic
 occupancy is resolved from the shared snapshot.
 
 ## Resolution rules

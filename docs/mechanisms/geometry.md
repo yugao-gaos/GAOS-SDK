@@ -34,8 +34,8 @@ unreachable. Compare the endpoints when the distinction matters.
 `nearestReachableCellPath` searches by distance layer and returns both the
 chosen goal and its shortest path. It returns the start with an empty path when
 the start qualifies, and `undefined` when nothing qualifies. Supply
-`compareEqualDistance` whenever product policy—not cardinal discovery
-order—should choose among equally near cells.
+`compareEqualDistance` whenever product policy, rather than cardinal discovery
+order, should choose among equally near cells.
 
 ## Lines and line of sight
 

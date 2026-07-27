@@ -1,5 +1,5 @@
 ---
-title: Last Light — Real-Time Zombie Tower Defense
+title: "Last Light: Real-Time Zombie Tower Defense"
 aside: false
 outline: false
 pageClass: demo-page

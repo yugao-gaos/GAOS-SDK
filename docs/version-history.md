@@ -8,7 +8,7 @@ Portable replay now adds roster-bound Ed25519 submission chains and explicit
 `trusted` / `unverifiable` / `rejected` offline verdicts.
 :::
 
-## v0.20.0 — signed portable evidence
+## v0.20.0: signed portable evidence
 
 Released July 26, 2026 after Arena and TabletopLabs returned their v0.19
 integration findings. v0.20 makes the resulting signed artifacts fully
@@ -57,7 +57,7 @@ providing the evidence layer for Game-as-a-Benchmark products.
 [Trust and verification →](/trust-and-verification) ·
 [Portable replay →](/mechanisms/replay)
 
-## v0.19.0 — authoritative sessions and integrity
+## v0.19.0: authoritative sessions and integrity
 
 Prepared July 25, 2026.
 
@@ -93,7 +93,7 @@ Prepared July 25, 2026.
 [Sessions and integrity →](/session-and-integrity) ·
 [Portable replay →](/mechanisms/replay)
 
-## v0.18.0 — one coherent tick model
+## v0.18.0: one coherent tick model
 
 Released July 24, 2026.
 
@@ -107,7 +107,7 @@ Released July 24, 2026.
 - TypeScript and Python agent `step()` calls each advance exactly one tick.
   Products own decision cadence and action-holding policy.
 
-## v0.17.0 — portable benchmark replays
+## v0.17.0: portable benchmark replays
 
 Released July 24, 2026.
 
@@ -132,7 +132,7 @@ Released July 24, 2026.
 
 ## Composable game mechanisms
 
-### v0.16.0 — portals and multi-agent play
+### v0.16.0: portals and multi-agent play
 
 Prepared July 23, 2026.
 
@@ -150,7 +150,7 @@ Prepared July 23, 2026.
 [Multi-agent reference →](/agentic-play) ·
 [High-frequency turns →](/high-frequency)
 
-### v0.15.0 — zones and card composition
+### v0.15.0: zones and card composition
 
 Prepared July 23, 2026.
 
@@ -162,7 +162,7 @@ Prepared July 23, 2026.
 
 [Zones and card play →](/mechanisms/zones-and-card-play)
 
-### v0.14.0 — information partitions
+### v0.14.0: information partitions
 
 Prepared July 23, 2026.
 
@@ -176,7 +176,7 @@ Prepared July 23, 2026.
 [Information partitions →](/mechanisms/information-partitions) ·
 [Ticks and lockstep →](/mechanisms/ticks-and-lockstep)
 
-### v0.13.0 — neutral core and layouts
+### v0.13.0: neutral core and layouts
 
 Prepared July 23, 2026.
 

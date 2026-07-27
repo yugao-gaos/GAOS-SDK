@@ -75,8 +75,8 @@ reads replicated secrets can still submit a legal action and produce the same
 digest as every honest peer.
 
 Competitive hidden-information games therefore keep authoritative secret
-state in a server-side session resolver—for example, one Durable Object per
-match—and distribute only `viewFor(state, seat)` observations. The resolver
+state in a server-side session resolver (for example, one Durable Object per
+match) and distribute only `viewFor(state, seat)` observations. The resolver
 collects canonical intents, applies the reducer, retains the full replay
 record, and sends each client its redacted result. P2P input exchange or
 digest comparison may still be used around that authority, but no untrusted
