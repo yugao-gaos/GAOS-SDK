@@ -133,7 +133,7 @@ The renderer can remain expressive for people. The benchmark core remains a
 deterministic state machine that a server, solver, replay checker, and agent can
 all execute without reproducing the visuals.
 
-## Why simultaneous turn-based play
+## Why simultaneous WEGO play
 
 Sequential turn-taking gives the later actor information about the earlier
 actor's committed move. Real-time play often measures reaction speed, network
@@ -203,8 +203,10 @@ complete turn can be traced and replayed without reproducing wall-clock timing.
 Simultaneous turns are not universally better. Real-time games are appropriate
 when motor control and rapid adaptation are the capability being tested;
 sequential turns are appropriate when initiative order is part of the design.
-GAOS focuses on simultaneous turn-based systems because they isolate strategic
-decision quality while retaining meaningful multi-agent interaction.
+GAOS supports all three cadences: sequential turn-based play, simultaneous WEGO
+play, and fixed-tick real-time simulation. They share the same deterministic
+reducer, lockstep ordering, rollback, and replay foundations; the product
+chooses the cadence that matches what it intends to build or evaluate.
 
 ## Principles for credible evaluation
 
@@ -243,4 +245,3 @@ behavior and replayable evidence.
 
 Continue with the [architecture map](/architecture), the
 [mechanism reference](/mechanisms/), or [agentic play](/agentic-play).
-

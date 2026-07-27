@@ -2,7 +2,7 @@ import { defineConfig } from 'vitepress';
 
 export default defineConfig({
   title: 'Gaming AGI Open SDK',
-  description: 'Build once. Play as a human. Evaluate as an agent.',
+  description: 'Deterministic simulation for turn-based, WEGO, and fixed-tick real-time games.',
   base: '/GAOS-TurnBasedGrid-SDK/',
   cleanUrls: true,
   lastUpdated: true,
@@ -16,7 +16,7 @@ export default defineConfig({
     }],
     ['meta', {
       property: 'og:description',
-      content: 'An open-source SDK bridging game development and agent evaluation through one deterministic game core.',
+      content: 'An open-source deterministic simulation SDK for turn-based, WEGO, and fixed-tick real-time games.',
     }],
     ['meta', {
       property: 'og:image',
@@ -32,7 +32,7 @@ export default defineConfig({
     ['meta', { name: 'twitter:title', content: 'Gaming AGI Open SDK' }],
     ['meta', {
       name: 'twitter:description',
-      content: 'Build once. Play as a human. Evaluate as an agent.',
+      content: 'Deterministic simulation for turn-based, WEGO, and fixed-tick real-time games.',
     }],
     ['meta', {
       name: 'twitter:image',
@@ -53,6 +53,7 @@ export default defineConfig({
         items: [
           { text: 'Quickstart', link: '/quickstart' },
           { text: 'Mechanisms', link: '/mechanisms/' },
+          { text: 'Real-time games', link: '/high-frequency' },
           { text: 'Agentic play', link: '/agentic-play' },
         ],
       },
@@ -86,6 +87,7 @@ export default defineConfig({
           { text: 'Capability map', link: '/capabilities' },
           { text: 'Quickstart', link: '/quickstart' },
           { text: 'Architecture map', link: '/architecture' },
+          { text: 'Real-time games', link: '/high-frequency' },
           { text: 'Terminology', link: '/terminology' },
         ],
       },
@@ -131,7 +133,6 @@ export default defineConfig({
           { text: 'Scoring and AI action limits', link: '/mechanisms/scoring' },
           { text: 'Solver', link: '/mechanisms/solver' },
           { text: 'Portable replay and verification', link: '/mechanisms/replay' },
-          { text: 'Fixed-rate ticks', link: '/high-frequency' },
         ],
       },
       {

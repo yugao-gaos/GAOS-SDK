@@ -2,12 +2,14 @@
 
 **Build once. Play as a human. Evaluate as an agent.**
 
-GAOS is an open-source SDK for building games and interactive benchmarks that
-humans and agents can both play. It gives researchers reusable game mechanisms,
-structured agent interfaces, and replayable evidence, while helping game
-developers keep one authoritative game core ready for agents later.
+GAOS is an open-source deterministic game-simulation SDK for **turn-based,
+WEGO, and fixed-tick real-time games** that humans and agents can both play. It
+provides the authoritative reducer, ticks, lockstep input ordering,
+rollback/resimulation, replay verification, and session kernel behind one
+shared game core.
 
-The SDK owns reusable infrastructure. Each product still owns its world,
+GAOS does not replace a real-time game stack. Each product owns its scheduler,
+sockets or WebRTC transport, interpolation, rendering, latency policy, world,
 content, benchmark claims, scoring meaning, hosting, and presentation.
 
 ## Start here
@@ -15,6 +17,7 @@ content, benchmark claims, scoring meaning, hosting, and presentation.
 - [Documentation](https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/)
 - [Quickstart and language guide](docs/quickstart.md)
 - [Capabilities](docs/capabilities.md)
+- [Real-time games](docs/high-frequency.md)
 - [Architecture and ownership boundaries](docs/architecture.md)
 - [Mechanism reference](docs/mechanisms/index.md)
 - [Agentic play](docs/agentic-play.md)
