@@ -1,8 +1,9 @@
 # RFC-011 — Arena's open asks of the SDK
 
-Status: **open — Arena is fully integrated on `v0.20.0`; these are what remain**
-· Target: v0.20.x for A1/A2, v0.21 for A3/A4 · Breaking: no (every proposal is
-additive or documentation) · Depends on: RFC-006, RFC-009, RFC-010
+Status: **accepted in part for v0.21 — A1/A2 remain; A3/A4 were already
+documented in v0.20; A5 requests no SDK change** · Target: v0.21 for A1/A2 ·
+Breaking: no (error ordering and additive error structure) · Depends on:
+RFC-006, RFC-009, RFC-010
 
 > This is the Arena consumer's live return channel, reopened after the v0.20
 > integration. The previous edition (nine v0.19 findings) was consolidated into
@@ -54,11 +55,29 @@ and today's legal-command set."* Adopting `validateCommand` silently inverted
 it, turning a `409 stale_tick` into a `400`; an existing regression test caught
 it.
 
-**Proposal.** Move the `validateCommand` call after `collectIntent`. Cursor,
-session, and participant validity are cheap, state-independent, and
-unambiguous; legality should only be asked once the submission is established as
-current. The receipt short-circuit stays where it is. This also stops running a
-state-dependent check for a submission that is about to be rejected anyway.
+**Accepted v0.21 contract.** The stable wire submission must be validated
+before *all* game-owned or live-state-dependent interpretation, not only before
+`validateCommand`. After the existing exact-receipt path, `prepareIngest` must
+establish protocol, session, `tickId`, revision, participant, submission-id,
+and JSON validity before it:
+
+1. calls `commandToAction`;
+2. checks the mapped action against live commitment/reveal state; or
+3. calls `validateCommand`.
+
+Calling `validateIntentSubmission` before those steps, then calling
+`collectIntent` after legality succeeds, is one compatible implementation.
+Calling the pure `collectIntent` early and retaining its result is another.
+The important contract is the error precedence, not which helper enforces it.
+Exact committed retries retain their current idempotent receipt behavior.
+
+Regression coverage must include a stale submission for which:
+
+- `commandToAction` throws;
+- commitment/reveal validation would fail against current state; and
+- `validateCommand` rejects.
+
+All three must report `stale_tick`.
 
 Arena reorders host-side in `kernelIngestError` until this lands; that
 workaround should become deletable.
@@ -104,23 +123,24 @@ A host parsing a library's error prose to recover structure the library had and
 discarded. It breaks silently if the wording is ever reworded, and nothing in
 the type system says so.
 
-**Proposal**, either or both, both additive:
+**Accepted v0.21 contract.** Ship both additive pieces:
 
-1. Add an `illegal_command` member to `IntentErrorCode`, so a reducer rejection
-   is distinguishable by code alone.
-2. Preserve the thrown value — `cause` on `IntentCollectionError` — so products
-   keep their own taxonomy across the boundary.
+1. Add `illegal_command` to `IntentErrorCode`; every `validateCommand`
+   rejection uses it.
+2. Preserve the thrown value as `cause` on `IntentCollectionError`.
 
-(1) fixes the common case; (2) is what makes the boundary lossless.
+The code provides stable transport classification while `cause` preserves a
+product's finer distinction, such as malformed action versus currently
+unplayable action. Tests must assert the code without matching SDK prose and
+must assert object identity for an `Error` cause and value preservation for a
+non-`Error` thrown value.
 
 ---
 
-## A3 — multi-level runs still need cursor rebasing the SDK neither does nor documents
+## A3 — resolved in v0.20: multi-level cursor rebasing
 
-*Class: documentation or one option. Carried over from the v0.19 return (F8 →
-RFC-010 E6); **verified still open at `v0.20.0`** — `initialCursor` does not
-appear in `session.d.ts`, and `docs/session-and-integrity.md` has no mention of
-cursor continuity across levels.*
+*Class: documentation. Carried over from the v0.19 return (F8 → RFC-010 E6);
+**already resolved in the released `v0.20.0` tag**.*
 
 One kernel per level is right (RFC-006 §D answer 3), and `finalizeRunReplay`
 composes the episodes. But each episode's kernel counts `cursor()` from zero
@@ -134,18 +154,18 @@ repaired. It works and the wire contract is unchanged, but it is fiddly, it is
 security-adjacent (cursor validation), and every host composing runs will
 re-derive it.
 
-**Proposal**, in preference order: (a) document the translation as the expected
-pattern in the multi-level runs section; or (b) accept an `initialCursor` in
-`SessionKernelOptions` so episode N starts where episode N-1 stopped.
+`docs/session-and-integrity.md` documents this exact `revisionBase` translation
+in the multi-level run section: add the base outbound, subtract it inbound,
+validate translated `tickId`, and advance the base by the completed episode's
+cursor. That was the preferred documentation resolution. No `initialCursor`
+option is requested for v0.21.
 
 ---
 
-## A4 — durable event size: the measurement, and what is derivable
+## A4 — resolved in v0.20: durable event sizing
 
-*Class: documentation first. Carried over (F3 → RFC-010 E5); **verified
-unchanged at `v0.20.0`** — `eventId` still concatenates the session id
-(`src/session.ts:708`) and `canonicalCommand` is still stored per accepted
-intent.*
+*Class: documentation. Carried over (F3 → RFC-010 E5); **already resolved in
+the released `v0.20.0` tag**.*
 
 Measured on Arena's Durable Object, turns cadence, one seat,
 single-parameter commands:
@@ -169,12 +189,12 @@ host dies at ~159 actions — well inside real content. Arena's fix is host-side
 (one key per level episode, 64-event chunks); the SDK does not need to know
 about the cap.
 
-**Proposal.** Document that `SessionEvent` is the **durable** representation and
-state its expected size per resolution, so hosts size storage before they design
-it — that alone would have caught Arena's original design error. Optionally,
-consider a documented compact persistence form (events minus the derivable
-fields, rehydrated by recomputation); the in-memory and projection shapes need
-not change.
+`docs/session-and-integrity.md` now states that `SessionEvent` is the durable
+representation, records the measured ~815 bytes per simple turn, and tells
+hosts with per-value limits to append or chunk rather than store one unbounded
+value. It deliberately keeps recovery based on the exact self-describing event
+stream. A compact persistence form is not part of v0.21; RFC-012 §2 separately
+addresses bounded *live* state and checkpoint recovery.
 
 ---
 
@@ -203,11 +223,11 @@ No SDK action is requested here.
 
 | # | Ask | Class | Arena's current workaround |
 |---|---|---|---|
-| A1 | `validateCommand` before `collectIntent` inverts precedence | ordering bug | re-checks the cursor on reducer rejection |
-| A2 | reducer rejection loses its error type and code | ergonomics | regexes the SDK's wrapper message |
-| A3 | run cursor rebasing undocumented | docs or one option | carries `revisionBase` |
-| A4 | durable event size undocumented, ~30% derivable | docs | chunks logs across storage keys |
+| A1 | game-owned checks run before stable cursor validation | **v0.21 accepted** | re-checks the cursor on reducer rejection |
+| A2 | reducer rejection loses its error type and code | **v0.21 accepted** | regexes the SDK's wrapper message |
+| A3 | run cursor rebasing | **resolved in v0.20 docs** | follows documented `revisionBase` pattern |
+| A4 | durable event size | **resolved in v0.20 docs** | follows documented chunking guidance |
 | A5 | seat-local state — resolved, product-side | none | two loops |
 
-A1 and A2 are the same surface and would land together. A3 and A4 are both
-"every host will write this loop or hit this wall"; documentation closes either.
+A1 and A2 are one v0.21 change and land together. A3 and A4 require no v0.21
+work. A5 remains explanatory only.
