@@ -1,4 +1,4 @@
-import type { JsonValue } from './protocol.js';
+import { canonicalJson, type JsonValue } from './protocol.js';
 import type {
   ObservationDelta,
   SnapshotResult,
@@ -32,16 +32,29 @@ export type Rfc013HostConformanceScenario =
   typeof RFC013_HOST_CONFORMANCE_SCENARIOS[number];
 
 export const HOST_CONFORMANCE_VERSION = 'gaos.host-conformance.v1' as const;
+export const HOST_CONFORMANCE_FIXTURE_VERSION = 'gaos.host-conformance-fixture.v1' as const;
 export const RFC014_HOST_CONFORMANCE_SCENARIOS =
   RFC013_HOST_CONFORMANCE_SCENARIOS;
+
+export interface HostConformanceFixture {
+  schema: typeof HOST_CONFORMANCE_FIXTURE_VERSION;
+  scenario: Rfc013HostConformanceScenario;
+  steps: readonly { sequence: number; operation: string }[];
+  expected: JsonValue;
+}
+
+export const RFC014_HOST_CONFORMANCE_FIXTURES: readonly HostConformanceFixture[] =
+  RFC014_HOST_CONFORMANCE_SCENARIOS.map((scenario) => ({
+    schema: HOST_CONFORMANCE_FIXTURE_VERSION,
+    scenario,
+    steps: [{ sequence: 0, operation: scenario }],
+    expected: { scenario, executed: true },
+  }));
 
 export interface HostConformanceAdapter {
   runtime: string;
   adapterVersion: string;
-  /** Perform the requested operations. The kit, not the adapter, owns pass/fail. */
-  exercise(
-    scenario: Rfc013HostConformanceScenario,
-  ): Promise<JsonValue | undefined>;
+  execute(fixture: HostConformanceFixture): Promise<JsonValue>;
 }
 
 export interface HostConformanceReport {
@@ -59,16 +72,22 @@ export interface HostConformanceReport {
 /** Execute the transport-neutral fixture names and emit portable result facts. */
 export async function runHostConformance(
   adapter: HostConformanceAdapter,
+  fixtures: readonly HostConformanceFixture[] = RFC014_HOST_CONFORMANCE_FIXTURES,
 ): Promise<HostConformanceReport> {
   if (!adapter.runtime || !adapter.adapterVersion) {
     throw new TypeError('conformance adapter runtime and version must be non-empty');
   }
   const scenarios = [];
-  for (const scenario of RFC014_HOST_CONFORMANCE_SCENARIOS) {
+  for (const fixture of fixtures) {
+    const scenario = fixture.scenario;
     try {
-      const details = await adapter.exercise(scenario);
-      scenarios.push({ scenario, passed: true, ...(details === undefined
-        ? {} : { details: structuredClone(details) }) });
+      assertHostConformanceFixture(fixture);
+      const actual = await adapter.execute(structuredClone(fixture));
+      if (actual === undefined
+        || canonicalJson(actual) !== canonicalJson(fixture.expected)) {
+        throw new TypeError('adapter observation does not exactly match fixture expectation');
+      }
+      scenarios.push({ scenario, passed: true, details: structuredClone(actual) });
     } catch (error) {
       scenarios.push({
         scenario,
@@ -84,6 +103,22 @@ export async function runHostConformance(
     passed: scenarios.every(({ passed }) => passed),
     scenarios,
   };
+}
+
+function assertHostConformanceFixture(fixture: HostConformanceFixture): void {
+  if (canonicalJson(Object.keys(fixture).sort()) !== canonicalJson(
+    ['expected', 'scenario', 'schema', 'steps'],
+  ) || fixture.schema !== HOST_CONFORMANCE_FIXTURE_VERSION
+    || !RFC014_HOST_CONFORMANCE_SCENARIOS.includes(fixture.scenario)
+    || !Array.isArray(fixture.steps) || fixture.steps.length === 0) {
+    throw new TypeError('malformed host conformance fixture');
+  }
+  fixture.steps.forEach((step, index) => {
+    if (canonicalJson(Object.keys(step).sort()) !== canonicalJson(['operation', 'sequence'])
+      || step.sequence !== index || typeof step.operation !== 'string' || !step.operation) {
+      throw new TypeError('malformed or unordered host conformance step');
+    }
+  });
 }
 
 class ReferenceConformanceFixture {
@@ -134,7 +169,10 @@ export async function runReferenceHostConformance(): Promise<HostConformanceRepo
   return runHostConformance({
     runtime: 'gaos-reference-node',
     adapterVersion: '1.0.0',
-    exercise: async (scenario) => {
+    execute: async (fixture) => {
+      const scenario = fixture.scenario;
+      assertFixture(fixture.steps.length === 1
+        && fixture.steps[0]!.operation === scenario, 'unsupported fixture operations');
       const host = new ReferenceConformanceFixture();
       switch (scenario) {
         case 'byte-identical retry':
@@ -163,7 +201,9 @@ export async function runReferenceHostConformance(): Promise<HostConformanceRepo
           host.prepared = true;
           const base = host.revision;
           host.ingest('a', 'one');
-          try { host.commitPrepared(base); } catch { return { executed: true }; }
+          try { host.commitPrepared(base); } catch {
+            return { scenario, executed: true };
+          }
           throw new Error('stale prepared transition was committed');
         case 'timeout transition handling':
           host.ingest('timeout:1', '{"tick":10}');
@@ -211,7 +251,7 @@ export async function runReferenceHostConformance(): Promise<HostConformanceRepo
           break;
         }
       }
-      return { executed: true };
+      return { scenario, executed: true };
     },
   });
 }

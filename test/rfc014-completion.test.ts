@@ -28,8 +28,11 @@ import {
 } from '../src/engine/submission-signatures.js';
 import {
   HOST_CONFORMANCE_VERSION,
+  RFC014_HOST_CONFORMANCE_FIXTURES,
   RFC014_HOST_CONFORMANCE_SCENARIOS,
+  runHostConformance,
   runReferenceHostConformance,
+  type HostConformanceFixture,
 } from '../src/ecosystem.js';
 import { PresentationClient } from '../src/presentation-client.js';
 import { SeatControlLedger } from '../src/seat-control.js';
@@ -470,6 +473,28 @@ describe('RFC-014 release gate', () => {
     expect(report.passed).toBe(true);
     expect(report.scenarios.every(({ details }) =>
       details === undefined || (details as { executed?: boolean }).executed === true)).toBe(true);
+  });
+
+  it('rejects no-op, malformed, echoed, extra, and wrong conformance observations', async () => {
+    const [fixture] = RFC014_HOST_CONFORMANCE_FIXTURES;
+    const adapter = (execute: (value: HostConformanceFixture) => Promise<unknown>) => ({
+      runtime: 'adversarial',
+      adapterVersion: '1',
+      execute: execute as never,
+    });
+    for (const execute of [
+      async () => undefined,
+      async (value: HostConformanceFixture) => value,
+      async (value: HostConformanceFixture) => ({ ...value.expected as object, extra: true }),
+      async (value: HostConformanceFixture) => ({ scenario: value.scenario, executed: false }),
+    ]) {
+      expect((await runHostConformance(adapter(execute), [fixture!])).passed).toBe(false);
+    }
+    const malformed = { ...structuredClone(fixture!), steps: [] };
+    expect((await runHostConformance(
+      adapter(async (value) => value.expected),
+      [malformed],
+    )).passed).toBe(false);
   });
 
   it('repairs missing patch bases and never replays old presentation cues', () => {

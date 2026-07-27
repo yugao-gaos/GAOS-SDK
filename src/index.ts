@@ -46,7 +46,9 @@ export {
 export {
   RFC013_HOST_CONFORMANCE_SCENARIOS,
   RFC014_HOST_CONFORMANCE_SCENARIOS,
+  RFC014_HOST_CONFORMANCE_FIXTURES,
   HOST_CONFORMANCE_VERSION,
+  HOST_CONFORMANCE_FIXTURE_VERSION,
   presentationFrameFromObservation,
   runHostConformance,
   runReferenceHostConformance,
@@ -62,6 +64,7 @@ export {
   type SessionHostDriver,
   type HostConformanceAdapter,
   type HostConformanceReport,
+  type HostConformanceFixture,
 } from './ecosystem.js';
 export {
   SeatControlLedger,
