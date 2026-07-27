@@ -3,7 +3,8 @@
   "git_user": "yugao-gaos <yu.gao@gaos.ca>",
   "session_id": "codex-mcp-6511-387efff9b3305956ceb923b07b33077a",
   "branch": "orch/attempt/codex-rfc014-host-conformance-final",
-  "status": "claimed",
+  "status": "tested",
   "claimed_at": "2026-07-27T19:05:08.407Z",
-  "lease_until": "2026-07-27T20:05:08.407Z"
+  "lease_until": "2026-07-27T20:05:08.407Z",
+  "completed_at": "2026-07-27T19:06:59.279Z"
 }
