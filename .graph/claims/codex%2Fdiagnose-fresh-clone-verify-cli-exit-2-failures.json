@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/diagnose-fresh-clone-verify-cli-exit-2-failures",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "codex-mcp-91446-464ed2420e08431837082e8ea4925b2f",
+  "branch": "orch/attempt/codex-diagnose-fresh-clone-verify-cli-exit-2-failures",
+  "status": "claimed",
+  "claimed_at": "2026-07-28T01:39:27.020Z",
+  "lease_until": "2026-07-28T02:39:27.020Z"
+}
