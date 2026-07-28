@@ -8,6 +8,7 @@ import {
   type ReplayReducerResolver,
   type SessionView,
 } from './engine/index.js';
+import { importExternalModule } from './module-loader.js';
 
 export interface VerifyCliIo {
   cwd?: string;
@@ -68,9 +69,9 @@ export async function runVerifyCli(
   }
   try {
     const artifact = parseReplayJsonl(await readFile(resolve(cwd, artifactPath), 'utf8'));
-    const imported = await import(
+    const imported = await importExternalModule<AdapterModule>(
       pathToFileURL(resolve(cwd, adapterPath)).href
-    ) as AdapterModule;
+    );
     const resolver = imported.resolveReplayReducer ?? imported.default;
     if (typeof resolver !== 'function') {
       throw new TypeError(
