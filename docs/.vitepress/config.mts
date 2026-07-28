@@ -47,8 +47,14 @@ export default defineConfig({
     siteTitle: 'Gaming AGI Open SDK',
     nav: [
       { text: 'Home', link: '/' },
-      { text: 'Play demos', link: '/demos/' },
-      { text: 'Why Game-as-a-Benchmark', link: '/mission' },
+      {
+        text: 'Why Game-as-a-Benchmark',
+        items: [
+          { text: 'Why Game-as-a-Benchmark', link: '/mission' },
+          { text: 'What games can GAOS build?', link: '/demos/' },
+          { text: 'Games built with GAOS', link: '/built-with-gaos' },
+        ],
+      },
       {
         text: 'Build',
         items: [
@@ -62,25 +68,12 @@ export default defineConfig({
       {
         text: 'About',
         items: [
-          { text: 'Why Game-as-a-Benchmark', link: '/mission' },
           { text: 'Roadmap', link: '/roadmap' },
           { text: 'Version history', link: '/version-history' },
         ],
       },
     ],
     sidebar: [
-      {
-        text: 'Playable demos',
-        items: [
-          { text: 'Demo arcade', link: '/demos/' },
-          { text: 'Prism Match: Match-3', link: '/demos/match-3' },
-          { text: 'Midnight House: Blackjack', link: '/demos/blackjack' },
-          { text: 'Ashfall Crossing: Strategy', link: '/demos/grid-strategy' },
-          { text: 'Cinder Vault: Roguelike', link: '/demos/card-grid-roguelike' },
-          { text: 'Starline Dominion: Graph RTS', link: '/demos/starline-dominion' },
-          { text: 'Last Light: Zombie Defense', link: '/demos/last-light' },
-        ],
-      },
       {
         text: 'Start here',
         items: [
@@ -157,19 +150,6 @@ export default defineConfig({
           { text: 'Support and compatibility', link: '/support' },
           { text: 'Version history', link: '/version-history' },
           { text: 'Release process and migrations', link: '/releases' },
-        ],
-      },
-      {
-        text: 'Historical design records',
-        collapsed: true,
-        items: [
-          { text: 'RFC index', link: '/rfcs/0000-overview' },
-          { text: 'RFC-013: v0.22 foundations', link: '/rfcs/rfc-013-ecosystem-bridges-and-benchmark-tooling' },
-          { text: 'RFC-014: v0.23 interoperability', link: '/rfcs/rfc-014-interoperability-and-dynamic-control-evidence' },
-          { text: 'RFC-015: v0.24 benchmark publication', link: '/rfcs/rfc-015-verifiable-benchmark-publication' },
-          { text: 'RFC-016: v0.25 verifier kits', link: '/rfcs/rfc-016-product-owned-verifier-kits' },
-          { text: 'RFC-014/015 implementation gate', link: '/rfcs/implementation-review-rfc014-rfc015' },
-          { text: 'Batch implementation review', link: '/rfcs/implementation-review' },
         ],
       },
     ],

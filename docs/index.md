@@ -3,103 +3,126 @@ layout: home
 
 hero:
   name: Gaming AGI Open SDK
-  text: Game-as-a-Benchmark infrastructure with verifiable exact runs.
-  tagline: Build one deterministic game for people and agents. Export portable evidence so independent verifiers can check what happened without re-running the model.
+  text: Build games that become verifiable benchmarks.
+  tagline: One deterministic game contract for human play, agent evaluation, and independent verification of exact runs.
   actions:
     - theme: brand
-      text: Build a game
+      text: Start building
       link: /quickstart
     - theme: alt
-      text: Build a benchmark
-      link: /agentic-play
+      text: Explore the demos
+      link: /demos/
     - theme: alt
       text: Verify a run
       link: /trust-and-verification
 
 features:
-  - title: One product reducer
-    details: The product supplies one deterministic reducer for human play, agents, sessions, solvers, and replay.
-    link: /architecture
-    linkText: See the boundary
-  - title: Verifiable exact runs
-    details: Signed portable evidence lets an independent verifier re-simulate the recorded run without repeating model inference.
+  - title: Build
+    details: Compose deterministic game mechanisms around a product-owned reducer without giving up your world, rules, or presentation.
+    link: /mechanisms/
+    linkText: Explore mechanisms
+  - title: Evaluate
+    details: Give people and agents the same authoritative rules through rendered or structured interfaces.
+    link: /agentic-play
+    linkText: Connect an agent
+  - title: Verify
+    details: Publish signed exact-run evidence with the historical verifier needed for independent re-simulation.
     link: /trust-and-verification
     linkText: See what is proven
-  - title: Reusable game infrastructure
-    details: Compose mechanisms, agent environments, authoritative sessions, and benchmark publication without giving up product ownership.
-    link: /capabilities
-    linkText: Explore capabilities
 
 ---
 
 <div class="release-proof" aria-label="GAOS v0.25 release facts">
   <span><strong>Game-as-a-Benchmark</strong></span>
-  <span><strong>v0.25</strong> product-owned verifier kits</span>
+  <span><strong>v0.25</strong> verifier kits</span>
   <span><strong>TypeScript + Python</strong></span>
 </div>
 
-## One SDK, two audiences
+## Why Game-as-a-Benchmark
+
+As agents and world models move from answering questions to acting over time,
+evaluation needs environments where decisions change what happens next.
+Games make planning, adaptation, memory, cooperation, and failure visible
+inside a controlled world.
+
+A Game-as-a-Benchmark product is both playable and measurable. People and
+agents reach the same versioned rules; scores summarize performance; portable
+evidence preserves how each result was produced.
+
+[Read the thesis →](/mission)
+
+## One SDK, two builders
 
 <div class="audience-grid">
   <section class="audience-card audience-card--games">
     <span class="audience-kicker">For game developers</span>
     <h3>Build for people. Stay agent-ready.</h3>
-    <p>Use reusable deterministic mechanisms and one product reducer for the
-    renderer, authoritative host, agents, tournaments, and replay.</p>
-    <p><strong>You own:</strong> rules content, world, presentation, hosting,
-    modes, and commercial policy.</p>
+    <p>Use one product reducer for the renderer, authoritative host, bots,
+    tournaments, and replay. Compose reusable mechanisms without surrendering
+    your rules, content, presentation, or commercial policy.</p>
     <a class="audience-cta" href="./quickstart">Build your first game →</a>
   </section>
 
   <section class="audience-card audience-card--evaluation">
     <span class="audience-kicker">For benchmark builders</span>
     <h3>Turn play into defensible evidence.</h3>
-    <p>Give agents structured observations and legal actions, then publish the
-    score with portable evidence of the exact run.</p>
-    <p><strong>You own:</strong> tasks, scoring meaning, held-out content,
-    capability claims, and adoption policy.</p>
-    <a class="audience-cta" href="./agentic-play">Build a benchmark →</a>
+    <p>Expose structured observations and legal actions, evaluate single or
+    multiple agents, and publish the result with evidence of the exact run.
+    You retain task design, score meaning, held-out content, and claims.</p>
+    <a class="audience-cta" href="./agentic-play">Build an evaluation →</a>
   </section>
 </div>
 
 ## The verifiable arm
 
-Producing an agent result can be expensive. Checking it should not require
-re-running the model and producing a different stochastic sample.
+Reproducing an evaluation repeats its inference cost and produces a new
+stochastic sample. It does not check the published run.
 
-GAOS records canonical reducer inputs, results, signatures, and chains. An
-independent verifier can re-simulate that exact run with the matching
-historical reducer and semantic adapter.
+GAOS preserves canonical reducer inputs, results, signatures, and chains so an
+independent verifier can re-simulate the exact recorded run:
 
 ```text
-play → signed portable evidence → historical verifier → verdict
+human or agent play
+        ↓
+signed portable evidence
+        ↓
+historical reducer + semantic adapter
+        ↓
+independent verification
 ```
 
-The replay alone is not enough. The product must preserve and publish the
-matching verifier code, while an independently obtained manifest, catalog, or
-allowlist authorizes its digest.
+v0.25 makes the historical verifier portable as a product-owned,
+content-addressed kit. GAOS checks and executes the kit; the product preserves
+and publishes it; an independent manifest, catalog, or allowlist authorizes its
+digest. If required verifier material is unavailable, the result is
+`unverifiable`—not silently trusted.
 
-The verifier may receive a pinned adapter explicitly. v0.25 also supports
-product-owned, content-addressed verifier kits with SDK tooling for packing,
-inspection, resolution, caching, and restricted execution.
-
-[Read the verification boundary →](/trust-and-verification)
-
-## Game-as-a-Benchmark
-
-A Game-as-a-Benchmark product is a playable, versioned environment in which
-people and agents reach the same authoritative rules. Scores summarize
-performance; portable evidence preserves how each result was produced.
-
-GAOS supplies the shared technical layer. It does not decide what the game
-means, what capability a task measures, or whether a result should be adopted.
-
-[Read the thesis →](/mission) ·
-[Explore the mechanisms →](/mechanisms/) ·
-[Play the demos →](/demos/)
+[Understand the verification boundary →](/trust-and-verification)
 
 ## Built with GAOS
 
-[Zonoid](https://zonoid.ai) is the first production game and live reference: a
-strategy game for humans and AI agents built around prediction, planning, and
-judgment.
+<div class="ownership-card zonoid-showcase">
+  <div class="zonoid-showcase__copy">
+    <h3><a href="https://zonoid.ai">Zonoid</a></h3>
+    <p><strong>The first production game built with Gaming AGI Open SDK.</strong></p>
+    <p>A strategy game for humans and AI agents, built around prediction,
+    planning, and judgment.</p>
+    <p><strong><a href="https://zonoid.ai">Visit Zonoid →</a></strong></p>
+  </div>
+  <div class="zonoid-showcase__video">
+    <iframe
+      src="https://www.youtube-nocookie.com/embed/gOUGajF9Vug"
+      title="Zonoid Benchmark"
+      loading="lazy"
+      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+      referrerpolicy="strict-origin-when-cross-origin"
+      allowfullscreen
+    ></iframe>
+  </div>
+</div>
+
+[See all games built with GAOS →](/built-with-gaos)
+
+[Play the demos →](/demos/) ·
+[See the architecture →](/architecture) ·
+[Browse capabilities →](/capabilities)
