@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/stop-suppressing-verify-cli-test-errors",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "codex-mcp-91446-464ed2420e08431837082e8ea4925b2f",
+  "branch": "orch/attempt/codex-stop-suppressing-verify-cli-test-errors",
+  "status": "claimed",
+  "claimed_at": "2026-07-28T02:04:17.500Z",
+  "lease_until": "2026-07-28T03:04:17.500Z"
+}
