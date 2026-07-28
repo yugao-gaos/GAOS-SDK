@@ -79,7 +79,6 @@ export default () => reducer;
     ], {
       cwd: directory,
       stdout: (text) => { output += text; },
-      stderr: () => undefined,
     });
     expect(validCode).toBe(0);
     expect(JSON.parse(output)).toMatchObject({
@@ -99,7 +98,6 @@ export default () => reducer;
     ], {
       cwd: directory,
       stdout: (text) => { output += text; },
-      stderr: () => undefined,
     });
     expect(rejectedCode).toBe(1);
     expect(JSON.parse(output)).toMatchObject({
