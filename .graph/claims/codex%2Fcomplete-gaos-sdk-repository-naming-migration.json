@@ -3,7 +3,8 @@
   "git_user": "yugao-gaos <yu.gao@gaos.ca>",
   "session_id": "codex-mcp-52843-7d5e1c127a68d519891d48dfb9ac2ef4",
   "branch": "orch/attempt/codex-complete-gaos-sdk-repository-naming-migration",
-  "status": "claimed",
+  "status": "tested",
   "claimed_at": "2026-07-29T17:50:13.231Z",
-  "lease_until": "2026-07-29T18:50:13.231Z"
+  "lease_until": "2026-07-29T18:50:13.231Z",
+  "completed_at": "2026-07-29T18:00:13.231Z"
 }
