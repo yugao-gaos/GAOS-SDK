@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/rename-npm-package-to-yugao-gaos-gaos-sdk",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "codex-mcp-52843-7d5e1c127a68d519891d48dfb9ac2ef4",
+  "branch": "orch/attempt/codex-rename-npm-package-to-yugao-gaos-gaos-sdk",
+  "status": "claimed",
+  "claimed_at": "2026-07-29T18:05:23.006Z",
+  "lease_until": "2026-07-29T19:05:23.006Z"
+}
