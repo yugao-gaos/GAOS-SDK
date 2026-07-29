@@ -3,7 +3,8 @@
   "git_user": "yugao-gaos <yu.gao@gaos.ca>",
   "session_id": "codex-mcp-52843-7d5e1c127a68d519891d48dfb9ac2ef4",
   "branch": "orch/attempt/codex-identify-google-s-gaos-identifier-meaning",
-  "status": "claimed",
+  "status": "done",
   "claimed_at": "2026-07-29T17:36:24.691Z",
-  "lease_until": "2026-07-29T18:36:24.691Z"
+  "lease_until": "2026-07-29T18:36:24.691Z",
+  "completed_at": "2026-07-29T17:38:14.454Z"
 }
