@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gaos.dev/schemas/gaos.evidence-verdict-v2.schema.json",
+  "$id": "https://yugao-gaos.github.io/GAOS-SDK/schemas/gaos.evidence-verdict-v2.schema.json",
   "title": "GAOS independent evidence verdict facts",
   "type": "object",
   "required": ["schema", "valid", "commandsValid", "controlHistoryValid", "epochs", "reasons"],

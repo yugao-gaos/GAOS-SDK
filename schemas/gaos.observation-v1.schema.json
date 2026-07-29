@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gaos.dev/schemas/gaos.observation-v1.schema.json",
+  "$id": "https://yugao-gaos.github.io/GAOS-SDK/schemas/gaos.observation-v1.schema.json",
   "title": "GAOS snapshot or patch",
   "oneOf": [
     {

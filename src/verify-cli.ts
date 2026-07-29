@@ -6,8 +6,8 @@ import {
   recheckReplayArtifact,
   type ReplayArtifactRecheckOptions,
   type ReplayReducerResolver,
-  type SessionView,
-} from './engine/index.js';
+} from './engine/replay-format.js';
+import type { SessionView } from './engine/contracts.js';
 import { importExternalModule } from './module-loader.js';
 
 export interface VerifyCliIo {

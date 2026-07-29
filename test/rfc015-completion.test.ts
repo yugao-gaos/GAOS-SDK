@@ -35,8 +35,7 @@ import {
 } from '../src/engine/submission-signatures.js';
 
 const manifest: BenchmarkManifest = {
-  schema: 'gaos.benchmark-manifest',
-  schemaVersion: '1.0',
+  schema: 'gaos.benchmark-manifest.v1',
   benchmark: { id: 'reference', version: '1', adapter: 'reference-game@1' },
   tasks: [
     { id: 'a', seeds: [3, 1], episodes: 2, maxSteps: 10 },

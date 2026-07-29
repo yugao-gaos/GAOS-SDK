@@ -22,6 +22,7 @@ jobs:
       - run: npm ci
       - run: npm audit --omit=dev
       - run: npm run typecheck
+      - run: npm run architecture:check
       - name: Install Godot 4.7 stable
         shell: bash
         run: |

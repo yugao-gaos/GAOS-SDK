@@ -17,61 +17,75 @@ import {
   type SubmissionIntegrityReservation,
 } from './protocol.js';
 export { IntentCollectionError };
-export { createTickRate } from './engine/index.js';
+export { createTickRate } from './engine/ticks.js';
 export type {
   CommandSubmission,
   IntentErrorCode,
   JsonObject,
   JsonValue,
 } from './protocol.js';
+export type { Dmath } from './engine/dmath.js';
 export type {
-  Dmath,
   Reducer,
-  ReplayArtifact,
-  ReplayGameRef,
   ReplayMetrics,
-  ReplaySeedPolicy,
   SessionView,
   SubmittedAction,
-  TickRate,
   TickView,
+} from './engine/contracts.js';
+export type {
+  ReplayArtifact,
+  ReplayGameRef,
+  ReplaySeedPolicy,
+} from './engine/replay-format.js';
+export type {
+  TickRate,
+} from './engine/ticks.js';
+export type {
   TranscriptVisibility,
-} from './engine/index.js';
+} from './engine/replay.js';
 import {
   COMMITMENT_SCHEME,
-  GAOS_REPLAY_DERIVED_SEEDS,
-  GAOS_TIMEOUT_POLICY_REF,
-  SUBMISSION_SIGNATURE_SCHEME,
-  advanceTick,
   assertCommitmentEnvelope,
   createCommitmentHash,
-  createReplayArtifact,
-  fnv1a,
-  replayMetricsFor,
-  runLevelSeed,
   sha256,
-  signatureBytesFromBase64,
-  submissionRosterHashV1,
   type CommitmentEnvelope,
-  type Dmath,
+  type RevealEnvelope,
+} from './engine/commitment.js';
+import type { Dmath } from './engine/dmath.js';
+import {
+  advanceTick,
+  replayMetricsFor,
   type Reducer,
+  type ReplayMetrics,
+  type SessionView,
+  type SubmittedAction,
+  type TickView,
+} from './engine/contracts.js';
+import {
+  GAOS_REPLAY_DERIVED_SEEDS,
+  GAOS_TIMEOUT_POLICY_REF,
+  createReplayArtifact,
   type ReplayArtifact,
   type ReplayGameRef,
-  type ReplayMetrics,
   type ReplayRecord,
   type ReplayResolutionInput,
   type ReplaySeedPolicy,
   type ReplayTickTimeoutPolicy,
   type ReplayTimeoutContext,
-  type RevealEnvelope,
+} from './engine/replay-format.js';
+import { fnv1a } from './engine/random.js';
+import {
+  runLevelSeed,
+  type TranscriptVisibility,
+} from './engine/replay.js';
+import {
+  SUBMISSION_SIGNATURE_SCHEME,
+  signatureBytesFromBase64,
+  submissionRosterHashV1,
   type SubmissionSeatKey,
   type SubmissionSignaturePolicy,
-  type SubmittedAction,
-  type SessionView,
-  type TickRate,
-  type TickView,
-  type TranscriptVisibility,
-} from './engine/index.js';
+} from './engine/submission-signatures.js';
+import type { TickRate } from './engine/ticks.js';
 import {
   applyJsonPatch,
   createBoundedValidatedJsonPatch,

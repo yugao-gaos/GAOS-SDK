@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gaos.dev/schemas/gaos.presentation-frame-v1.schema.json",
+  "$id": "https://yugao-gaos.github.io/GAOS-SDK/schemas/gaos.presentation-frame-v1.schema.json",
   "title": "GAOS presentation frame v1",
   "type": "object",
   "required": ["tick", "transitionRevision", "view", "events"],

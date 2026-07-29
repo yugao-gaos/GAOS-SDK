@@ -66,8 +66,7 @@ async function loadAgent(cwd: string, path: string | undefined): Promise<Benchma
 }
 
 const TEMPLATE: BenchmarkManifest = {
-  schema: 'gaos.benchmark-manifest',
-  schemaVersion: '1.0',
+  schema: 'gaos.benchmark-manifest.v1',
   benchmark: { id: 'example', version: '1.0.0', adapter: './adapter.mjs' },
   tasks: [{ id: 'task-a', seeds: [101], episodes: 1, maxSteps: 100 }],
   scoring: { plugin: './score.mjs', aggregation: 'mean' },

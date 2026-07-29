@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
+  presentationFrameFromObservation,
+  type PresentationEvent,
+} from '../src/ecosystem.js';
+import {
   SeatControlLedger,
+} from '../src/seat-control.js';
+import {
   aggregateBenchmarkScores,
   assertBenchmarkManifest,
   planBenchmarkEpisodes,
-  presentationFrameFromObservation,
   type BenchmarkManifest,
-  type PresentationEvent,
-} from '../src/index.js';
+} from '../src/benchmark.js';
 import {
   assertGameDescriptor,
   policyEntropy,
@@ -270,8 +274,7 @@ describe('RFC-013 presentation and research contracts', () => {
 
 describe('RFC-013 neutral benchmark primitives', () => {
   const manifest: BenchmarkManifest = {
-    schema: 'gaos.benchmark-manifest',
-    schemaVersion: '1.0',
+    schema: 'gaos.benchmark-manifest.v1',
     benchmark: {
       id: 'example-strategy',
       version: '1.0.0',

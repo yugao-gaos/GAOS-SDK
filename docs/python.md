@@ -40,6 +40,20 @@ existing synchronous `ArenaClient` API remains unchanged.
 
 ## Hosted client
 
+Use `SessionClient` for any host that implements `/v1/sessions`. Its
+observations and commands remain opaque:
+
+```python
+from gaos_sdk import SessionClient
+
+client = SessionClient("https://host.example")
+created = client.create_session({"game": "creator/cards"})
+print(created["tick"])
+```
+
+Use `ArenaClient` only for Zonoid Arena's typed observations, matchmaking, and
+product endpoints:
+
 ```python
 from gaos_sdk import ArenaClient
 
@@ -52,7 +66,7 @@ session_id, tick = arena.create_session(
 print(tick.grid)
 ```
 
-The client speaks the `gaos.ticks` v1 envelope on `/v1/sessions`. Commands
+Both clients speak the `gaos.ticks` v1 envelope on `/v1/sessions`. Commands
 carry the session cursor, participant, and a deterministic submission ID:
 reuse it for an exact retry and create a new one for each logical control step.
 `play_method="human"` is intentional in this example: it shows direct hosted
