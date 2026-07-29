@@ -16,7 +16,7 @@ The Python package reads and writes the same canonical `gaos.replay` v1 JSONL
 bytes as the TypeScript engine:
 
 ```python
-from agilabs_arena import parse_replay_jsonl, serialize_replay_jsonl
+from gaos_sdk import parse_replay_jsonl, serialize_replay_jsonl
 
 with open("run.gaos-replay.jsonl", encoding="utf-8") as source:
     artifact = parse_replay_jsonl(source.read())
@@ -36,7 +36,7 @@ product-owned historical adapter declared in
 verification. Python matches the TypeScript complete-preimage fixture:
 
 ```python
-from agilabs_arena import (
+from gaos_sdk import (
     ed25519_public_key_from_seed,
     sign_submission_v1,
     submission_chain_hash_v1,
@@ -64,7 +64,7 @@ For signed evidence, the adapter's replay check also reports
 command/timeout mappings make an otherwise consistent signed artifact
 `unverifiable`; a mapping mismatch is `rejected`.
 
-The client speaks the stable `agilabs.ticks` v1 envelope on `/v1/sessions`.
+The client speaks the stable `gaos.ticks` v1 envelope on `/v1/sessions`.
 New code can use the canonical `Tick`, `parse_tick_result()`, `get_tick()`, and
 `get_tick_envelope()` names. They deliberately wrap the unchanged v1
 `tickId`/`tick` JSON fields so deployed hosts remain compatible.
@@ -79,7 +79,7 @@ observation shapes.
 Hosted live Arena play is explicit and seat-authenticated:
 
 ```python
-from agilabs_arena import ArenaClient
+from gaos_sdk import ArenaClient
 
 client = ArenaClient("https://api.zonoid.ai", api_key="ak_...", timeout=30.0)
 catalog = client.arena_catalog()  # stable map summaries + curated team ids
@@ -104,7 +104,7 @@ cursor. A fresh client rejects an explicit retry key if it would otherwise
 have to fetch and silently pair it with a newer cursor.
 
 Hosted Arena observations include a seat-local `controlRevision`. The client
-remembers it and automatically sends the `agilabs.arena` extension plus a new
+remembers it and automatically sends the `gaos.arena` extension plus a new
 deterministic submission id for each targeting or conversation substep. A free
 control step can therefore return `kind="tick"` at the same world `revision`;
 only a committed intent returns `pending` while the opponent is still choosing.
@@ -122,7 +122,7 @@ are mutable. Cancelling an awaiting task cannot stop an already-running
 standard-library HTTP thread; configure `timeout` to bound that work.
 
 ```python
-from agilabs_arena import ArenaEnv
+from gaos_sdk import ArenaEnv
 
 env = ArenaEnv(
     "od-l1",

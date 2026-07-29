@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]
-gaos-verify = "agilabs_arena.verify:main"
+gaos-verify = "gaos_sdk.verify:main"
 
 [project.urls]
 Homepage = "https://yugao-gaos.github.io/GAOS-SDK/"
@@ -27,4 +27,4 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["agilabs_arena*"]
+include = ["gaos_sdk*"]

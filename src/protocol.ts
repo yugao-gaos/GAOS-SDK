@@ -6,7 +6,7 @@
  * piles there. Values crossing the wire must be JSON-serializable.
  */
 
-export const PROTOCOL_ID = 'agilabs.ticks' as const;
+export const PROTOCOL_ID = 'gaos.ticks' as const;
 export const PROTOCOL_VERSION = '1.0' as const;
 /** Portable seat ids keep canonical ordering identical across SDK languages. */
 export const PARTICIPANT_ID_PATTERN = '^[A-Za-z0-9_.:@-]{1,128}$' as const;

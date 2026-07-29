@@ -5,7 +5,7 @@ import urllib.error
 
 import pytest
 
-from agilabs_arena import (
+from gaos_sdk import (
     ArenaAPIError,
     ArenaClient,
     ArenaEnv,
@@ -30,7 +30,7 @@ OBSERVATION = {
 
 def envelope(kind="tick", revision=0, **extra):
     return {
-        "protocol": "agilabs.ticks",
+        "protocol": "gaos.ticks",
         "protocolVersion": "1.0",
         "kind": kind,
         "sessionId": "s1",
@@ -163,7 +163,7 @@ def test_wraps_commands_and_polls_a_pending_tick_once():
     assert tick.tick_number == 1
     assert calls[1][1] == "/v1/sessions/s1/actions"
     assert calls[1][2] == {
-        "protocol": "agilabs.ticks",
+        "protocol": "gaos.ticks",
         "protocolVersion": "1.0",
         "sessionId": "s1",
         "tickId": "s1:0",
@@ -446,7 +446,7 @@ def test_arena_single_match_queue_tick_presence_and_room_outcome():
         "/v1/arena/matches/m1",
     ]
     assert calls[3][2] == {
-        "protocol": "agilabs.ticks",
+        "protocol": "gaos.ticks",
         "protocolVersion": "1.0",
         "sessionId": "m1",
         "tickId": "m1:0",
@@ -454,7 +454,7 @@ def test_arena_single_match_queue_tick_presence_and_room_outcome():
         "participantId": "north",
         "submissionId": "north-0",
         "command": {"id": "Action 1"},
-        "extensions": {"agilabs.arena": {"controlRevision": 0}},
+        "extensions": {"gaos.arena": {"controlRevision": 0}},
     }
     assert calls[0][2] == {
         "mapId": "arena-s1-1",
@@ -608,11 +608,11 @@ def test_arena_same_world_control_steps_get_distinct_retry_keys():
 
     assert calls[1][2]["submissionId"] == "north:m1:0:control:0"
     assert calls[1][2]["extensions"] == {
-        "agilabs.arena": {"controlRevision": 0}
+        "gaos.arena": {"controlRevision": 0}
     }
     assert calls[2][2]["submissionId"] == "north:m1:0:control:1"
     assert calls[2][2]["extensions"] == {
-        "agilabs.arena": {"controlRevision": 1}
+        "gaos.arena": {"controlRevision": 1}
     }
     with pytest.raises(ProtocolMismatchError):
         client.submit_arena_intent(
@@ -624,7 +624,7 @@ def test_persists_and_restores_original_binding_for_exact_retry():
     calls = []
     client = ArenaClient("https://example.test")
     binding = {
-        "protocol": "agilabs.ticks",
+        "protocol": "gaos.ticks",
         "protocolVersion": "1.0",
         "sessionId": "s1",
         "tickId": "s1:0",
@@ -661,7 +661,7 @@ def test_restored_arena_binding_overrides_observed_cursor_for_retry():
     client._call = fake_call  # type: ignore[method-assign]
     client.get_arena_tick_envelope("m1")
     client.restore_session_binding({
-        "protocol": "agilabs.ticks", "protocolVersion": "1.0",
+        "protocol": "gaos.ticks", "protocolVersion": "1.0",
         "sessionId": "m1", "tickId": "m1:0", "revision": 0,
         "participantId": "north", "controlRevision": 0,
     })
@@ -670,7 +670,7 @@ def test_restored_arena_binding_overrides_observed_cursor_for_retry():
     assert calls[1][2]["tickId"] == "m1:0"
     assert calls[1][2]["revision"] == 0
     assert calls[1][2]["extensions"] == {
-        "agilabs.arena": {"controlRevision": 0}
+        "gaos.arena": {"controlRevision": 0}
     }
 
 
@@ -694,7 +694,7 @@ def test_python_commands_and_extensions_require_plain_json():
         parse_tick_result({**envelope(), "extensions": {"bad": float("nan")}})
     client = ArenaClient("https://example.test")
     client.restore_session_binding({
-        "protocol": "agilabs.ticks", "protocolVersion": "1.0",
+        "protocol": "gaos.ticks", "protocolVersion": "1.0",
         "sessionId": "s1", "tickId": "s1:0", "revision": 0,
         "participantId": "player",
     })

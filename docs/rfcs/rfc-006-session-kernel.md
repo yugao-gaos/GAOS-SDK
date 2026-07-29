@@ -46,7 +46,7 @@ be specified before design approval; see §I.
 Two production consumers already run the same architecture at different
 cadences:
 
-- **Arena (`agilabs-arena`)**: one Durable Object per session
+- **Arena (`gaos-arena`)**: one Durable Object per session
   (`packages/worker/src/session-do.ts`) — single writer holding the
   server-generated seed, full game state, an append-only transcript, and the
   SDK intent window; it validates/orders submissions, advances the
@@ -437,7 +437,7 @@ Kernel-bound (pure) pieces, extracted with their tests:
 
 Stays Arena-side (adapter): HTTP routes, owner binding (`x-arena-owner`),
 R2 persistence, matchmaking, arena-policy timers/alarms, and the
-`agilabs.arena` controlRevision substep — the last one motivates a generic
+`gaos.arena` controlRevision substep — the last one motivates a generic
 **extension-lane hook** in the kernel (product-defined side-channel records
 that bypass gameplay ordering but land in the transcript).
 

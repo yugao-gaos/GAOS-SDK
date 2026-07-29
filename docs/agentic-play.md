@@ -101,7 +101,7 @@ score-adoption policy.
 Python provides a Gymnasium-compatible `ArenaEnv` for hosted games:
 
 ```python
-from agilabs_arena import ArenaEnv, run_agent_episode
+from gaos_sdk import ArenaEnv, run_agent_episode
 
 env = ArenaEnv("od-l1", play_method="autonomous_local")
 result = run_agent_episode(

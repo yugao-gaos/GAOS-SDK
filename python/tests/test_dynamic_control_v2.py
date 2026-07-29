@@ -2,7 +2,7 @@ import json
 import hashlib
 from pathlib import Path
 
-from agilabs_arena.signatures import (
+from gaos_sdk.signatures import (
     controller_handoff_preimage_v2,
     periodic_signature_preimage_v2,
     sign_ed25519_base64,
@@ -12,8 +12,8 @@ from agilabs_arena.signatures import (
     submission_preimage_v2,
     verify_ed25519_base64,
 )
-from agilabs_arena.dynamic_control import verify_dynamic_control_evidence_v2
-from agilabs_arena.replay import canonical_json
+from gaos_sdk.dynamic_control import verify_dynamic_control_evidence_v2
+from gaos_sdk.replay import canonical_json
 
 
 VECTORS = json.loads(

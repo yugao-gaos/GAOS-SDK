@@ -168,15 +168,15 @@ Expected output: `3`.
 
 ### Python
 
-Install the prebuilt public wheel:
+Install the renamed Python package from the repository:
 
 ```sh
 python3 -m venv .venv
-.venv/bin/python -m pip install 'https://github.com/yugao-gaos/GAOS-SDK/releases/download/v0.17.0/gaos_turn_based_grid_sdk-0.17.0-py3-none-any.whl'
-.venv/bin/python -c "import agilabs_arena; print(agilabs_arena.__name__)"
+.venv/bin/python -m pip install 'git+https://github.com/yugao-gaos/GAOS-SDK.git#subdirectory=python'
+.venv/bin/python -c "import gaos_sdk; print(gaos_sdk.__name__)"
 ```
 
-Expected output: `agilabs_arena`. On Windows, use
+Expected output: `gaos_sdk`. On Windows, use
 `.venv\Scripts\python` instead of `.venv/bin/python`.
 
 ## Supported platforms

@@ -187,7 +187,7 @@ export {
 } from './container-verifier-runner.js';
 
 /** Namespaced hosted-Arena concurrency extension. */
-export const ARENA_CONTROL_EXTENSION = 'agilabs.arena' as const;
+export const ARENA_CONTROL_EXTENSION = 'gaos.arena' as const;
 
 /** Typed Arena payload carried inside the protocol extension object. */
 export interface ArenaControlExtensions extends ProtocolExtensions {

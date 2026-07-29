@@ -60,7 +60,7 @@ describe('tick-based engine contracts', () => {
   it('uses a tick-native wire format', () => {
     expect(makeTickId('session', 4)).toBe('session:4');
     expect(tickEnvelope('session', 4, { x: 1 })).toEqual({
-      protocol: 'agilabs.ticks',
+      protocol: 'gaos.ticks',
       protocolVersion: '1.0',
       kind: 'tick',
       sessionId: 'session',

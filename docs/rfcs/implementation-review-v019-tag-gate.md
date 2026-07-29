@@ -30,7 +30,7 @@ things v0.19 freezes hardest — the **cross-language canonical form** and the
 ### B1 · HIGH · Canonical JSON key order diverges between TypeScript and Python
 
 `src/protocol.ts:441` sorts with `Object.keys().sort()` — UTF-16 code-unit
-order. `python/agilabs_arena/replay.py:802` sorts with `sorted()` — code-point
+order. `python/gaos_sdk/replay.py:802` sorts with `sorted()` — code-point
 order. They disagree whenever an object mixes a non-BMP key with a key in
 U+E000–U+FFFF:
 

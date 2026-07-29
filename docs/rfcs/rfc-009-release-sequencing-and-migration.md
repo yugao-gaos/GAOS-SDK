@@ -24,7 +24,7 @@ optional advisory session `hostTime`, and additive RFC-010 `seatKeys`,
 ## 1. Problem
 
 The two consumer migrations are **not** done by the SDK maintainer. Arena
-(`agilabs-arena`, pinned at SDK v0.12) and TabletopLabs (on v0.18, no kernel
+(`gaos-arena`, pinned at SDK v0.12) and TabletopLabs (on v0.18, no kernel
 adoption) are migrated by their own product agents, against a **published
 tag**. That inverts the usual ordering question:
 
