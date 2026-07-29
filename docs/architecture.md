@@ -81,7 +81,6 @@ contracts.
 | package root | Browser-safe GAOS protocol and product-neutral `SessionClient` |
 | `./protocol` | Product-neutral tick protocol |
 | `./client` | Product-neutral hosted-session client with opaque observations and commands |
-| `./arena` | Zonoid Arena adapter, typed grid observations, matchmaking, and product endpoints |
 | `./engine` | Mechanisms, reducers, agents, solvers, and replay |
 | `./session` | Authoritative transitions and evidence capture |
 | `./session-host` | Transport-neutral durable host lifecycle |
@@ -96,19 +95,17 @@ contracts.
 | `./agent` | Provider-neutral and keyed model drivers |
 | `./agent-cli` | MCP-capable CLI launch integration |
 | Python `SessionClient` | Product-neutral hosted sessions with opaque observations and commands |
-| Python `ArenaClient` / `ArenaEnv` | Explicit Zonoid Arena integration |
 | Python replay and verification APIs | Portable evidence exchange and verification |
 
 TypeScript contains the local mechanism engine and replay re-simulation.
 Python is the hosted and research integration surface; it does not duplicate
 the TypeScript reducer runtime.
 
-The root and `./client` entry points must remain browser- and edge-safe. Arena
-is retained in this repository because it was the original product adapter
-from which GAOS was extracted and is still the reference live integration. It
-is not part of the standard: product-specific observations, matchmaking,
-leaderboards, and convenience endpoints are reachable only through
-`./arena` or the explicit Python Arena classes.
+The root and `./client` entry points must remain browser- and edge-safe.
+Product adapters live with their products and depend on GAOS; GAOS never
+depends on a product. Zonoid owns its typed observations, matchmaking,
+leaderboards, convenience endpoints, and Python environment in the Zonoid
+repository.
 
 ## Contract identity
 
@@ -124,7 +121,7 @@ Every published JSON Schema uses
 `https://yugao-gaos.github.io/GAOS-SDK/schemas/<filename>` as its canonical
 `$id`. The documentation build publishes those exact source files at that
 location, and `npm run architecture:check` prevents identifier drift,
-dependency cycles, internal barrel imports, Arena leakage into the generic
+dependency cycles, internal barrel imports, product leakage into the generic
 root, and Node built-ins entering the browser-safe surface.
 
 [Explore capabilities →](/capabilities) ·

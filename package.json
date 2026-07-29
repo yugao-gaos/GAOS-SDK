@@ -26,10 +26,6 @@
       "types": "./dist/client.d.ts",
       "import": "./dist/client.js"
     },
-    "./arena": {
-      "types": "./dist/arena.d.ts",
-      "import": "./dist/arena.js"
-    },
     "./engine": {
       "types": "./dist/engine/index.d.ts",
       "import": "./dist/engine/index.js"

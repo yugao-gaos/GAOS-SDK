@@ -123,7 +123,7 @@ const rootDependencies = reachableFrom('index.ts', graph);
 if (rootDependencies.has('arena.ts')) {
   failures.push('the product-neutral root depends on the Arena adapter');
 }
-for (const entry of ['index.ts', 'arena.ts']) {
+for (const entry of ['index.ts']) {
   for (const file of reachableFrom(entry, graph)) {
     for (const builtin of nodeBuiltins.get(file) ?? []) {
       failures.push(`the browser-safe ${entry} reaches ${builtin} through ${file}`);

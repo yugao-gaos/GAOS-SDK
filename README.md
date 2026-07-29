@@ -42,7 +42,6 @@ npm install 'git+https://github.com/yugao-gaos/GAOS-SDK.git'
 Use the narrowest package surface:
 
 - package root or `./client` — product-neutral hosted sessions
-- `./arena` — explicit Zonoid Arena adapter and typed product observations
 - `./engine` — mechanisms, reducers, agents, solvers, and replay
 - `./session` — authoritative transitions and evidence capture
 - `./protocol` — product-neutral tick envelopes
