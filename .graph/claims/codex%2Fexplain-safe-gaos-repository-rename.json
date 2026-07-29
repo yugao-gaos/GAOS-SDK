@@ -3,7 +3,8 @@
   "git_user": "yugao-gaos <yu.gao@gaos.ca>",
   "session_id": "codex-mcp-52843-7d5e1c127a68d519891d48dfb9ac2ef4",
   "branch": "orch/attempt/codex-explain-safe-gaos-repository-rename",
-  "status": "claimed",
+  "status": "done",
   "claimed_at": "2026-07-29T15:52:13.421Z",
-  "lease_until": "2026-07-29T16:52:13.421Z"
+  "lease_until": "2026-07-29T16:52:13.421Z",
+  "completed_at": "2026-07-29T15:53:02.890Z"
 }
