@@ -3,7 +3,8 @@
   "git_user": "yugao-gaos <yu.gao@gaos.ca>",
   "session_id": "codex-mcp-52843-7d5e1c127a68d519891d48dfb9ac2ef4",
   "branch": "orch/attempt/codex-move-arena-adapter-to-zonoid-product",
-  "status": "claimed",
+  "status": "tested",
   "claimed_at": "2026-07-29T22:32:35.607Z",
-  "lease_until": "2026-07-29T23:32:35.607Z"
+  "lease_until": "2026-07-29T23:32:35.607Z",
+  "completed_at": "2026-07-29T22:38:08.443Z"
 }
