@@ -128,5 +128,5 @@ import {
   resolveMoves,
   runSettlementCascade,
   shortestGridPath,
-} from '@yugao-gaos/sdk/engine';
+} from '@yugao-gaos/gaos-sdk/engine';
 ```

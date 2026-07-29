@@ -1,5 +1,5 @@
 {
-  "name": "@yugao-gaos/sdk",
+  "name": "@yugao-gaos/gaos-sdk",
   "version": "0.25.0",
   "description": "TypeScript SDK for the Game-Agent Open Standard.",
   "license": "Apache-2.0",

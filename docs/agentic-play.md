@@ -9,7 +9,7 @@ rules and canonical actions as human players.
 `AgentEnvironment` advances one deterministic tick at a time:
 
 ```ts
-import { AgentEnvironment } from '@yugao-gaos/sdk/engine';
+import { AgentEnvironment } from '@yugao-gaos/gaos-sdk/engine';
 
 const env = new AgentEnvironment({
   reducer,

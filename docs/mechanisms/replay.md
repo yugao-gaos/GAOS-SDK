@@ -76,7 +76,7 @@ import {
   createReplayArtifact,
   parseReplayJsonl,
   serializeReplayJsonl,
-} from '@yugao-gaos/sdk/engine';
+} from '@yugao-gaos/gaos-sdk/engine';
 
 const artifact = createReplayArtifact({
   sessionId: 'run-42',

@@ -101,7 +101,7 @@ The coordinated naming migration is active:
 
 - project: **Game-Agent Open Standard (GAOS)**;
 - repository: `GAOS-SDK`;
-- TypeScript package: `@yugao-gaos/sdk`;
+- TypeScript package: `@yugao-gaos/gaos-sdk`;
 - Python distribution: `gaos-sdk`; and
 - Python compatibility import: `agilabs_arena`.
 
