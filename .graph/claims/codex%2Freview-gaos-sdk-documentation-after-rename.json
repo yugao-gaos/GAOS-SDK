@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/review-gaos-sdk-documentation-after-rename",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "codex-mcp-52843-7d5e1c127a68d519891d48dfb9ac2ef4",
+  "branch": "orch/attempt/codex-review-gaos-sdk-documentation-after-rename",
+  "status": "claimed",
+  "claimed_at": "2026-07-29T18:18:04.453Z",
+  "lease_until": "2026-07-29T19:18:04.453Z"
+}
