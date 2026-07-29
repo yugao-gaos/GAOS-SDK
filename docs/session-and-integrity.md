@@ -22,7 +22,7 @@ Every state-changing operation returns a `Prepared` transition:
 import {
   createSessionKernel,
   type Prepared,
-} from '@yugao-gaos/sdk/session';
+} from '@yugao-gaos/gaos-sdk/session';
 
 const kernel = createSessionKernel({
   sessionId,
@@ -110,7 +110,7 @@ import {
   InMemorySessionEventStore,
   SessionKernelHost,
   runEventStoreConformance,
-} from '@yugao-gaos/sdk/session-host';
+} from '@yugao-gaos/gaos-sdk/session-host';
 
 const store = new InMemorySessionEventStore();
 const host = new SessionKernelHost(kernel, store, publishDeltas);
@@ -177,7 +177,7 @@ be filled by guessing.
 ```ts
 import {
   PredictionSession,
-} from '@yugao-gaos/sdk/session';
+} from '@yugao-gaos/gaos-sdk/session';
 
 const prediction = new PredictionSession({
   initial: { view, transitionRevision, viewRevision },
@@ -488,7 +488,7 @@ Each kernel remains one level episode. Hosts compose completed episodes with
 ```ts
 import {
   finalizeRunReplay,
-} from '@yugao-gaos/sdk/session';
+} from '@yugao-gaos/gaos-sdk/session';
 
 const artifact = finalizeRunReplay(levelTranscripts, {
   seed: runSeed,
@@ -538,7 +538,7 @@ deterministic state. Implementation-approximated functions such as
 `Math.sin`, `Math.cos`, and `Math.atan2` are forbidden there.
 
 ```ts
-import { createDmath } from '@yugao-gaos/sdk/engine';
+import { createDmath } from '@yugao-gaos/gaos-sdk/engine';
 
 const dmath = createDmath();
 const heading = dmath.atan2(deltaY, deltaX);
@@ -574,7 +574,7 @@ payload bytes.
 import {
   COMMITMENT_SCHEME,
   createCommitmentHash,
-} from '@yugao-gaos/sdk/engine';
+} from '@yugao-gaos/gaos-sdk/engine';
 
 const binding = { sessionId, seat: 'red', commitmentId: 0, windowRef: 3 };
 const hash = createCommitmentHash(binding, saltHex, hiddenOrder);

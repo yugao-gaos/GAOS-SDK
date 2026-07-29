@@ -9,7 +9,7 @@ and future zones without inventing a second transport or replay vocabulary.
 `LocationRef` addresses a coordinate inside a named container:
 
 ```ts
-import { locationKey, type LocationRef } from '@yugao-gaos/sdk/engine';
+import { locationKey, type LocationRef } from '@yugao-gaos/gaos-sdk/engine';
 
 const cell: LocationRef = { container: 'surface', coord: [3, 2] };
 const territory: LocationRef = { container: 'world-map', coord: 'north-reach' };

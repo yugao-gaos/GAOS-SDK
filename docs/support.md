@@ -28,7 +28,8 @@ upgrading. Releases through v0.25.0 use the former package name:
 ## Naming compatibility
 
 The public project name is **Game-Agent Open Standard (GAOS)**. The canonical
-repository is `yugao-gaos/GAOS-SDK`, the npm package is `@yugao-gaos/sdk`, and
+repository is `yugao-gaos/GAOS-SDK`, the npm package is
+`@yugao-gaos/gaos-sdk`, and
 the Python distribution is `gaos-sdk`.
 
 Releases through v0.25.0 used the npm name

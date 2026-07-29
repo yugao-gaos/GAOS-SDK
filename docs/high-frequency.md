@@ -15,7 +15,7 @@ import {
   createTickRate,
   tickAtElapsedMilliseconds,
   type TickReducer,
-} from '@yugao-gaos/sdk/engine';
+} from '@yugao-gaos/gaos-sdk/engine';
 
 const rate = createTickRate(30);
 // rate.millisecondsPerTick === 33.333...

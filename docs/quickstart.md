@@ -29,7 +29,7 @@ release:
 ```
 
 ```sh
-npm install @yugao-gaos/sdk
+npm install @yugao-gaos/gaos-sdk
 ```
 
 Until that release is published, install the renamed repository directly:
@@ -48,7 +48,7 @@ import {
   AgentEnvironment,
   type TickReducer,
   type TickView,
-} from '@yugao-gaos/sdk/engine';
+} from '@yugao-gaos/gaos-sdk/engine';
 
 type Level = { goal: number };
 type State = { position: number; goal: number };

@@ -8,7 +8,7 @@ import {
   resolveMoves,
   runSettlementCascade,
   solveLevel,
-} from '@yugao-gaos/sdk/engine';
+} from '@yugao-gaos/gaos-sdk/engine';
 ```
 
 ## Boundary
