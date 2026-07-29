@@ -76,7 +76,7 @@ import {
   createReplayArtifact,
   parseReplayJsonl,
   serializeReplayJsonl,
-} from '@yugao-gaos/turn-based-grid-sdk/engine';
+} from '@yugao-gaos/sdk/engine';
 
 const artifact = createReplayArtifact({
   sessionId: 'run-42',
@@ -117,7 +117,7 @@ It declares MIME `application/vnd.gaos.replay+jsonl`, extension
 storage, but decompression must recover the canonical JSONL bytes.
 
 The npm archive includes the decoded-artifact
-[`gaos.replay` v1 JSON Schema](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/blob/main/schemas/gaos.replay-v1.schema.json).
+[`gaos.replay` v1 JSON Schema](https://github.com/yugao-gaos/GAOS-SDK/blob/main/schemas/gaos.replay-v1.schema.json).
 The repository also carries a canonical JSONL fixture used by both language
 test suites, so independent implementations can verify byte-for-byte output.
 

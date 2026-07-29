@@ -1,14 +1,14 @@
-# Gaming AGI Open SDK (GAOS)
+# Game-Agent Open Standard (GAOS)
 
 **Build games that become verifiable benchmarks.**
 
-GAOS is the open-source TypeScript and Python SDK for
+The GAOS SDK implements the open Game-Agent Open Standard for
 **Game-as-a-Benchmark**: one deterministic game contract for human play, agent
 evaluation, authoritative sessions, and independent verification of exact
 runs.
 
-[Documentation](https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/) ·
-[Playable demos](https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/demos/) ·
+[Documentation](https://yugao-gaos.github.io/GAOS-SDK/) ·
+[Playable demos](https://yugao-gaos.github.io/GAOS-SDK/demos/) ·
 [v0.25 release notes](docs/releases.md#v0250) ·
 [Discord](https://discord.gg/vdvUgcqPU)
 
@@ -36,7 +36,7 @@ around them.
 ## Install
 
 ```sh
-npm install 'git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.25.0'
+npm install 'git+https://github.com/yugao-gaos/GAOS-SDK.git'
 ```
 
 Use the narrowest package surface:

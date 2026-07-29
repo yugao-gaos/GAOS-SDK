@@ -1,7 +1,7 @@
 {
-  "name": "@yugao-gaos/turn-based-grid-sdk",
+  "name": "@yugao-gaos/sdk",
   "version": "0.25.0",
-  "description": "Deterministic game mechanisms and multiplayer infrastructure for agent-ready games.",
+  "description": "TypeScript SDK for the Game-Agent Open Standard.",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
@@ -121,12 +121,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git"
+    "url": "git+https://github.com/yugao-gaos/GAOS-SDK.git"
   },
   "bugs": {
-    "url": "https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/issues"
+    "url": "https://github.com/yugao-gaos/GAOS-SDK/issues"
   },
-  "homepage": "https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/",
+  "homepage": "https://yugao-gaos.github.io/GAOS-SDK/",
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
   },

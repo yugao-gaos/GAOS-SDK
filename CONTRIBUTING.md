@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve the GAOS Turn-Based Grid Toolkit.
+Thanks for helping improve the Game-Agent Open Standard SDK.
 
 ## Before opening a change
 

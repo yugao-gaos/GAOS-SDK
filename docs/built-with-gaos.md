@@ -8,7 +8,7 @@ product keeps its own world, rules, presentation, and commercial identity.
 
 <div class="ownership-card zonoid-showcase">
   <div class="zonoid-showcase__copy">
-    <p><strong>The first production game built with Gaming AGI Open SDK.</strong></p>
+    <p><strong>The first production game built with the GAOS SDK.</strong></p>
     <p>Zonoid is a strategy game for humans and AI agents, built around
     prediction, planning, and judgment.</p>
     <p><strong><a href="https://zonoid.ai">Visit Zonoid →</a></strong></p>

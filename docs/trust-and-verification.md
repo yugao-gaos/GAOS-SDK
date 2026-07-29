@@ -99,7 +99,7 @@ import {
   submissionChainHashV1,
   submissionGenesisHashV1,
   submissionRosterHashV1,
-} from '@yugao-gaos/turn-based-grid-sdk/engine';
+} from '@yugao-gaos/sdk/engine';
 
 const keys = await generateSubmissionKeyPair();
 const publicKey = await exportSubmissionPublicKey(keys.publicKey);

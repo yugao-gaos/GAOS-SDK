@@ -6,15 +6,15 @@
 
 ## One-line elevator pitch — ready to paste
 
-GAOS (Gaming AGI Open SDK) is an open-source, community-driven SDK for building
-game-as-benchmark arenas where humans and AI agents compete on equal terms and
-are evaluated by the same standards to help advance AGI.
+The GAOS SDK implements the open, community-driven Game-Agent Open Standard for
+building game-as-benchmark arenas where humans and AI agents compete on equal
+terms and are evaluated by the same standards to help advance AGI.
 
 ## Project description — ready to paste
 
-GAOS (Gaming AGI Open SDK) is an Apache-2.0 TypeScript and Python toolkit for
-building deterministic games that humans and AI agents can play through the
-same authoritative rules. Optional mechanism families cover
+The GAOS SDK is an Apache-2.0 TypeScript and Python implementation of the
+Game-Agent Open Standard for building deterministic games that humans and AI
+agents can play through the same authoritative rules. Optional mechanism families cover
 sequential and simultaneous turns; square, hex, graph, and multi-board
 layouts; decks, hands, bags, dealing, hidden information, priorities,
 durations, portals, settlement, scoring, solving, and portable replay. Its
@@ -108,12 +108,12 @@ research data from Zonoid while keeping its product content outside the SDK.
 ## Required URLs and identifiers
 
 - **Public code repository:**
-  https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK
+  https://github.com/yugao-gaos/GAOS-SDK
 - **Documentation:**
-  https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/
+  https://yugao-gaos.github.io/GAOS-SDK/
 - **Live game and prebuilt download:** https://zonoid.ai
 - **Latest SDK release:**
-  https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.17.0
+  https://github.com/yugao-gaos/GAOS-SDK/releases/tag/v0.17.0
 - **Codex `/feedback` Session ID:**
   `019f8458-7a8d-7010-9227-500c99df5e04`
 - **License:** Apache License 2.0
@@ -143,7 +143,7 @@ Codex with GPT-5.6 Sol participated across the complete production loop:
    game, generating replayable transcripts for functional and behavioral tests.
 
 The detailed case study is available at
-[Building GAOS and Zonoid with GPT-5.6 Sol](https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/building-with-gpt-5-6-sol).
+[Building GAOS and Zonoid with GPT-5.6 Sol](https://yugao-gaos.github.io/GAOS-SDK/building-with-gpt-5-6-sol).
 
 ## Installation without rebuilding the SDK
 
@@ -155,7 +155,7 @@ Install the prebuilt public v0.9.2 release archive without a GitHub token:
 mkdir gaos-judge
 cd gaos-judge
 npm init -y
-npm install 'https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/download/v0.17.0/yugao-gaos-turn-based-grid-sdk-0.17.0.tgz'
+npm install 'https://github.com/yugao-gaos/GAOS-SDK/releases/download/v0.17.0/yugao-gaos-turn-based-grid-sdk-0.17.0.tgz'
 ```
 
 Verify an engine import and deterministic score:
@@ -172,7 +172,7 @@ Install the prebuilt public wheel:
 
 ```sh
 python3 -m venv .venv
-.venv/bin/python -m pip install 'https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/download/v0.17.0/gaos_turn_based_grid_sdk-0.17.0-py3-none-any.whl'
+.venv/bin/python -m pip install 'https://github.com/yugao-gaos/GAOS-SDK/releases/download/v0.17.0/gaos_turn_based_grid_sdk-0.17.0-py3-none-any.whl'
 .venv/bin/python -c "import agilabs_arena; print(agilabs_arena.__name__)"
 ```
 
@@ -195,8 +195,8 @@ to Godot or the Zonoid platform repository.
 ## Testing from source
 
 ```sh
-git clone https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git
-cd GAOS-TurnBasedGrid-SDK
+git clone https://github.com/yugao-gaos/GAOS-SDK.git
+cd GAOS-SDK
 npm ci
 npm run typecheck
 npm test
@@ -223,6 +223,6 @@ tests, agent tests, and packaging checks run without Zonoid credentials.
    it from source.
 2. Visit [zonoid.ai](https://zonoid.ai), register with a judge email, and
    download the prebuilt live game to see GAOS used by a complete product.
-3. Use the [mechanism reference](https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/mechanisms/)
+3. Use the [mechanism reference](https://yugao-gaos.github.io/GAOS-SDK/mechanisms/)
    to inspect each engine guarantee and its product boundary.
 4. Use the source commands when full test-suite verification is desired.

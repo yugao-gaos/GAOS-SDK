@@ -74,7 +74,7 @@ reference prediction client and host adapter, explicit tick deadlines, fixed
 seat guidance, improved diagnostics, and portable evidence for sessions that
 end without a win or loss.
 
-[View the v0.21.0 release on GitHub →](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.21.0)
+[View the v0.21.0 release on GitHub →](https://github.com/yugao-gaos/GAOS-SDK/releases/tag/v0.21.0)
 
 ### Migration from v0.20
 
@@ -116,7 +116,7 @@ historical adapter, without trusting the host or a GAOS-operated service.
 It provides the independently checkable evidence layer behind GAOS's
 Game-as-a-Benchmark positioning.
 
-[View the v0.20.0 release on GitHub →](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.20.0)
+[View the v0.20.0 release on GitHub →](https://github.com/yugao-gaos/GAOS-SDK/releases/tag/v0.20.0)
 
 ### Migration from v0.19
 

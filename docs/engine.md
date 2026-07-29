@@ -8,7 +8,7 @@ import {
   resolveMoves,
   runSettlementCascade,
   solveLevel,
-} from '@yugao-gaos/turn-based-grid-sdk/engine';
+} from '@yugao-gaos/sdk/engine';
 ```
 
 ## Boundary

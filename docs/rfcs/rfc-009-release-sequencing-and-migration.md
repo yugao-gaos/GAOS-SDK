@@ -190,7 +190,7 @@ headline v0.20 item. Do not pre-build it — measure first.
 **How consumers pin.** `v0.19.0` is annotated, on `origin`, and points at
 `5ddd404` — the commit where the contract froze. Pin the **tag**. TabletopLabs
 consumes the SDK as an npm `github:` dependency
-(`github:yugao-gaos/GAOS-TurnBasedGrid-SDK#v0.19.0`); Arena pins the same tag.
+(`github:yugao-gaos/GAOS-SDK#v0.19.0`); Arena pins the same tag.
 Neither consumes it as a git submodule.
 
 > **npm gotcha, reported by the TabletopLabs migration.** Editing the version

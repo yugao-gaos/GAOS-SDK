@@ -41,7 +41,7 @@ Keys are read only from ANTHROPIC_API_KEY, OPENAI_API_KEY, XAI_API_KEY, or
 OPENROUTER_API_KEY. They are never accepted as command arguments.
 
 Custom CLI recipes can be supplied through GAOS_AGENT_CLIS as documented by
-customCliAgentsFromJson in @yugao-gaos/turn-based-grid-sdk/agent-cli.
+customCliAgentsFromJson in @yugao-gaos/sdk/agent-cli.
 OLLAMA_MODEL selects the model used by the built-in Ollama recipe (default: qwen3.5).
 `;
 
