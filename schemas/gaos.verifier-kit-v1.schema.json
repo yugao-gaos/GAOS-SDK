@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/v0.25.0/schemas/gaos.verifier-kit-v1.schema.json",
+  "$id": "https://yugao-gaos.github.io/GAOS-SDK/schemas/gaos.verifier-kit-v1.schema.json",
   "title": "GAOS verifier kit manifest v1",
   "type": "object",
   "additionalProperties": false,

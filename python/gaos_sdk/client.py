@@ -394,11 +394,21 @@ class ArenaClient:
             body["seasonId"] = season_id
         if participants is not None:
             body["participants"] = participants
-        result = parse_tick_result(self._call("POST", "/v1/sessions", body))
+        result = self.create_session_envelope(body)
+        return result["sessionId"], Tick.from_json(result["tick"])
+
+    def create_session_envelope(
+        self,
+        request: dict[str, Any],
+        participant_id: str = "player",
+    ) -> dict[str, Any]:
+        """Create a session without interpreting the game-owned observation."""
+        _validate_json(request, "session request")
+        result = parse_tick_result(self._call("POST", "/v1/sessions", request))
         if result["kind"] != "tick":
             raise ProtocolMismatchError("new session must start resolved")
-        self._remember(result)
-        return result["sessionId"], Tick.from_json(result["tick"])
+        self._remember(result, participant_id)
+        return result
 
     def get_tick_envelope(self, session_id: str) -> dict[str, Any]:
         result = parse_tick_result(self._call("GET", f"/v1/sessions/{_quote(session_id)}/tick"))
@@ -731,6 +741,61 @@ def _is_arena_outcome(value: Any, participant_ids: set[Any]) -> bool:
     )
 
 
+class SessionClient:
+    """Product-neutral facade over the GAOS `/v1/sessions` contract.
+
+    It deliberately exposes only opaque session envelopes and commands. Use
+    ``ArenaClient`` when integrating Zonoid matchmaking and typed grid
+    observations.
+    """
+
+    def __init__(
+        self,
+        base_url: str = "http://localhost:8899",
+        api_key: str | None = None,
+        timeout: float | None = 30.0,
+        max_response_bytes: int = 1024 * 1024,
+    ):
+        self._transport = ArenaClient(
+            base_url,
+            api_key,
+            timeout,
+            max_response_bytes,
+        )
+
+    def create_session(
+        self,
+        request: dict[str, Any],
+        participant_id: str = "player",
+    ) -> dict[str, Any]:
+        return self._transport.create_session_envelope(request, participant_id)
+
+    def get_tick_envelope(self, session_id: str) -> dict[str, Any]:
+        return self._transport.get_tick_envelope(session_id)
+
+    def submit_intent(
+        self,
+        session_id: str,
+        command: Any,
+        participant_id: str | None = None,
+        submission_id: str | None = None,
+        cursor: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self._transport.submit_intent(
+            session_id,
+            command,
+            participant_id=participant_id,
+            submission_id=submission_id,
+            cursor=cursor,
+        )
+
+    def get_session_binding(self, session_id: str) -> dict[str, Any] | None:
+        return self._transport.get_session_binding(session_id)
+
+    def restore_session_binding(self, value: Any) -> dict[str, Any]:
+        return self._transport.restore_session_binding(value)
+
+
 class AsyncArenaClient:
     """Async facade over the dependency-free synchronous client.
 
@@ -769,6 +834,9 @@ class AsyncArenaClient:
 
     async def create_session(self, *args: Any, **kwargs: Any) -> tuple[str, Tick]:
         return await self._run("create_session", *args, **kwargs)
+
+    async def create_session_envelope(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return await self._run("create_session_envelope", *args, **kwargs)
 
     async def get_tick_envelope(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return await self._run("get_tick_envelope", *args, **kwargs)

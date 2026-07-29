@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gaos.dev/schemas/gaos.seat-control-v2.schema.json",
+  "$id": "https://yugao-gaos.github.io/GAOS-SDK/schemas/gaos.seat-control-v2.schema.json",
   "title": "GAOS dynamic seat-control history",
   "type": "object",
   "required": ["format", "formatVersion", "sessionId", "transitionRevision", "seats", "epochs"],

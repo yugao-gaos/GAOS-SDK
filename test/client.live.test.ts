@@ -5,7 +5,7 @@
  * The suite is skipped when that server is unreachable.
  */
 import { describe, expect, it } from 'vitest';
-import { ArenaClient, IllegalActionRejected } from '../src/index.js';
+import { ArenaClient, IllegalActionRejected } from '../src/arena.js';
 
 const BASE_URL =
   (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env[

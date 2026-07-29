@@ -12,6 +12,7 @@ build/
 
 .graph/daemon.port
 docs/.vitepress/cache/
+docs/public/schemas/
 
 .DS_Store
 .env

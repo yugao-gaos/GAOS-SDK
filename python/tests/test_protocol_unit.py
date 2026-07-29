@@ -11,6 +11,7 @@ from gaos_sdk import (
     ArenaEnv,
     AsyncArenaClient,
     ProtocolMismatchError,
+    SessionClient,
     Tick,
     parse_tick_result,
 )
@@ -43,6 +44,21 @@ def envelope(kind="tick", revision=0, **extra):
 
 def test_tick_native_transport():
     assert parse_tick_result(envelope())["kind"] == "tick"
+
+
+def test_generic_session_client_preserves_opaque_non_grid_observations():
+    client = SessionClient("https://example.test")
+    opaque = envelope()
+    opaque["tick"] = {
+        "hand": ["ace", "queen"],
+        "legalCommands": [{"id": "play", "card": "ace"}],
+    }
+    client._transport._call = lambda method, path, body=None: opaque
+
+    result = client.create_session({"game": "cards"}, participant_id="north")
+
+    assert result["tick"]["hand"] == ["ace", "queen"]
+    assert client.get_session_binding("s1")["participantId"] == "north"
 
 
 def test_rejects_unversioned_tick_shape():

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gaos.dev/schemas/gaos.benchmark-bundle-v1.schema.json",
+  "$id": "https://yugao-gaos.github.io/GAOS-SDK/schemas/gaos.benchmark-bundle-v1.schema.json",
   "title": "GAOS benchmark bundle",
   "type": "object",
   "required": ["schema", "contentDigest", "manifest", "manifestDigest", "submission", "episodes", "scores"],

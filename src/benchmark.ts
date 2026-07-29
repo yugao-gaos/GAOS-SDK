@@ -50,8 +50,7 @@ export interface BenchmarkAuthorityRequirement {
 }
 
 export interface BenchmarkManifest {
-  schema: 'gaos.benchmark-manifest';
-  schemaVersion: '1.0';
+  schema: 'gaos.benchmark-manifest.v1';
   benchmark: BenchmarkIdentity;
   tasks: readonly BenchmarkTask[];
   scoring: BenchmarkScoring;
@@ -250,7 +249,7 @@ function assertNonEmpty(value: unknown, field: string): asserts value is string 
 export function assertBenchmarkManifest(
   manifest: BenchmarkManifest,
 ): asserts manifest is BenchmarkManifest {
-  if (manifest.schema !== 'gaos.benchmark-manifest' || manifest.schemaVersion !== '1.0') {
+  if (manifest.schema !== 'gaos.benchmark-manifest.v1') {
     throw new TypeError('unsupported benchmark manifest schema');
   }
   assertNonEmpty(manifest.benchmark.id, 'benchmark.id');

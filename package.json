@@ -22,6 +22,14 @@
       "types": "./dist/protocol.d.ts",
       "import": "./dist/protocol.js"
     },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    },
+    "./arena": {
+      "types": "./dist/arena.d.ts",
+      "import": "./dist/arena.js"
+    },
     "./engine": {
       "types": "./dist/engine/index.d.ts",
       "import": "./dist/engine/index.js"
@@ -106,8 +114,9 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "docs:dev": "vitepress dev docs",
-    "docs:build": "vitepress build docs",
+    "architecture:check": "node scripts/check-architecture.mjs",
+    "docs:dev": "node scripts/sync-public-schemas.mjs && vitepress dev docs",
+    "docs:build": "node scripts/sync-public-schemas.mjs && vitepress build docs",
     "docs:preview": "vitepress preview docs",
     "dmath:evidence": "npm run build && node scripts/generate-dmath-evidence.mjs",
     "dmath:browsers": "npm run build && node scripts/check-dmath-browsers.mjs",

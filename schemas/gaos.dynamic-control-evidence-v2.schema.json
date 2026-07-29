@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gaos.dev/schemas/gaos.dynamic-control-evidence-v2.schema.json",
+  "$id": "https://yugao-gaos.github.io/GAOS-SDK/schemas/gaos.dynamic-control-evidence-v2.schema.json",
   "title": "GAOS dynamic-controller evidence v2",
   "type": "object",
   "required": ["format", "sessionId", "checkpoint", "commands"],

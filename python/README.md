@@ -1,9 +1,9 @@
 # GAOS deterministic game SDK for Python
 
-Hosted client, Gymnasium-compatible environment API, evaluation helpers, and
-portable replay tools for protocol-compatible Arena sessions. The package has
-zero runtime dependencies and is duck-type-compatible with Gymnasium and
-`verifiers`-style harnesses without importing either.
+Product-neutral hosted sessions, an explicit Zonoid Arena adapter,
+Gymnasium-compatible evaluation helpers, and portable replay tools. The
+package has zero runtime dependencies and is duck-type-compatible with
+Gymnasium and `verifiers`-style harnesses without importing either.
 
 This Python distribution does not contain the TypeScript mechanism engine,
 local `TickReducer` runtime, replay re-simulation, model-provider drivers, or
@@ -64,7 +64,19 @@ For signed evidence, the adapter's replay check also reports
 command/timeout mappings make an otherwise consistent signed artifact
 `unverifiable`; a mapping mismatch is `rejected`.
 
-The client speaks the stable `gaos.ticks` v1 envelope on `/v1/sessions`.
+`SessionClient` speaks the stable `gaos.ticks` v1 envelope on `/v1/sessions`
+without interpreting the game-owned observation:
+
+```python
+from gaos_sdk import SessionClient
+
+client = SessionClient("https://host.example")
+created = client.create_session({"game": "creator/cards"})
+print(created["tick"])
+```
+
+The explicit `ArenaClient` adapter adds Zonoid's typed observation and product
+endpoints.
 New code can use the canonical `Tick`, `parse_tick_result()`, `get_tick()`, and
 `get_tick_envelope()` names. They deliberately wrap the unchanged v1
 `tickId`/`tick` JSON fields so deployed hosts remain compatible.

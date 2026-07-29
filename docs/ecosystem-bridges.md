@@ -82,7 +82,7 @@ The engine exports `GameDescriptor`, `GameObserver`, `Policy`, explicit
 entropy, and Wilson win-rate intervals. Descriptors are machine-readable
 claims; conformance remains the evidence for those claims.
 
-The root package exports the `gaos.benchmark-manifest` v1 contract, structural
+The `./benchmark` entry point exports the `gaos.benchmark-manifest.v1` contract, structural
 validation, deterministic task/seed/episode planning, and complete deterministic
 aggregation. The SDK owns these mechanics. A benchmark owns tasks, scores,
 weights, held-out content, eligibility, resource policy, and publication.

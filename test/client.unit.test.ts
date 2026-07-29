@@ -5,7 +5,7 @@ import {
   ProtocolMismatchError,
   parseTickResult,
   type GameObservation,
-} from '../src/index.js';
+} from '../src/arena.js';
 
 const OBSERVATION: GameObservation = {
   tickNumber: 0,

@@ -1,12 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gaos.dev/schemas/gaos.benchmark-manifest-v1.schema.json",
+  "$id": "https://yugao-gaos.github.io/GAOS-SDK/schemas/gaos.benchmark-manifest-v1.schema.json",
   "title": "GAOS benchmark manifest v1",
   "type": "object",
-  "required": ["schema", "schemaVersion", "benchmark", "tasks", "scoring", "submission"],
+  "required": ["schema", "benchmark", "tasks", "scoring", "submission"],
   "properties": {
-    "schema": { "const": "gaos.benchmark-manifest" },
-    "schemaVersion": { "const": "1.0" },
+    "schema": { "const": "gaos.benchmark-manifest.v1" },
     "benchmark": {
       "type": "object",
       "required": ["id", "version", "adapter"],
