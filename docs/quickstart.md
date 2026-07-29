@@ -20,7 +20,8 @@ duplicate the TypeScript mechanism engine.
 
 ## Install TypeScript
 
-The package is currently published through GitHub Packages:
+The renamed package will be published through GitHub Packages with the next
+release:
 
 ```ini
 @yugao-gaos:registry=https://npm.pkg.github.com
@@ -28,13 +29,13 @@ The package is currently published through GitHub Packages:
 ```
 
 ```sh
-npm install @yugao-gaos/turn-based-grid-sdk
+npm install @yugao-gaos/sdk
 ```
 
-Or pin the released repository:
+Until that release is published, install the renamed repository directly:
 
 ```sh
-npm install 'git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.25.0'
+npm install 'git+https://github.com/yugao-gaos/GAOS-SDK.git'
 ```
 
 ## Build a reducer
@@ -47,7 +48,7 @@ import {
   AgentEnvironment,
   type TickReducer,
   type TickView,
-} from '@yugao-gaos/turn-based-grid-sdk/engine';
+} from '@yugao-gaos/sdk/engine';
 
 type Level = { goal: number };
 type State = { position: number; goal: number };

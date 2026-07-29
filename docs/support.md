@@ -15,36 +15,33 @@ Version 0.18 establishes `agilabs.ticks` v1 as the canonical transport with
 break deployed hosts and clients.
 
 Pin an exact release for production and review the GitHub release notes before
-upgrading:
+upgrading. Releases through v0.25.0 use the former package name:
 
 ```json
 {
   "dependencies": {
-    "@yugao-gaos/turn-based-grid-sdk": "git+https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK.git#v0.25.0"
+    "@yugao-gaos/turn-based-grid-sdk": "git+https://github.com/yugao-gaos/GAOS-SDK.git#v0.25.0"
   }
 }
 ```
 
 ## Naming compatibility
 
-The public project name is **Gaming AGI Open SDK (GAOS)**. The current
-repository, npm package (`@yugao-gaos/turn-based-grid-sdk`), and Python
-distribution (`gaos-turn-based-grid-sdk`) retain their original grid-oriented
-identifiers throughout the v0.x line so existing installations, import maps,
-release URLs, and automation do not break.
+The public project name is **Game-Agent Open Standard (GAOS)**. The canonical
+repository is `yugao-gaos/GAOS-SDK`, the npm package is `@yugao-gaos/sdk`, and
+the Python distribution is `gaos-sdk`.
 
-Those identifiers do not describe the current feature boundary. The `./engine`
-entry point is a genre-neutral game-mechanism suite for deterministic card,
-tactics, simulation, and hybrid games; spatial grids are one optional
-mechanism. Neutral names such as `TickReducer`, `solveLevel`, and
-`recheckTranscript` are canonical. The remaining deprecated grid-prefixed
-action aliases are scheduled for the separate v1.0 boundary, where package
-naming will also be reconsidered.
+Releases through v0.25.0 used the npm name
+`@yugao-gaos/turn-based-grid-sdk` and Python distribution
+`gaos-turn-based-grid-sdk`. Those archives and Git tags remain valid. Existing
+applications can migrate by changing the package dependency; exported
+TypeScript entry points, the Python import name `agilabs_arena`, CLI commands,
+and versioned protocol identifiers are unchanged.
 
-The project plans to migrate the repository and distributions to coordinated,
-neutral names rather than rename one surface at a time. Current identifiers
-remain authoritative until that compatibility plan is published. See the
-[roadmap](/roadmap) for the intended migration scope.
+The `./engine` entry point remains a genre-neutral game-mechanism suite for
+deterministic card, tactics, simulation, and hybrid games; spatial grids are
+one optional mechanism. Neutral names such as `TickReducer`, `solveLevel`, and
+`recheckTranscript` remain canonical.
 
 ## Runtime support
 
@@ -55,7 +52,7 @@ remain authoritative until that compatibility plan is published. See the
 
 ## Getting help
 
-Use [GitHub Issues](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/issues)
+Use [GitHub Issues](https://github.com/yugao-gaos/GAOS-SDK/issues)
 for reproducible bugs and focused feature requests. Include the SDK version,
 runtime version, minimal input or reducer, expected result, and actual result.
 
@@ -64,7 +61,7 @@ Discord community](https://discord.gg/vdvUgcqPU).
 
 Do not report suspected vulnerabilities in a public issue. Follow the private
 instructions in the repository's
-[security policy](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/security/policy).
+[security policy](https://github.com/yugao-gaos/GAOS-SDK/security/policy).
 
 ## Scope of support
 

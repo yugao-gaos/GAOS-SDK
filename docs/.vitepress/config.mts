@@ -1,18 +1,18 @@
 import { defineConfig } from 'vitepress';
 
 export default defineConfig({
-  title: 'Gaming AGI Open SDK',
-  description: 'The open-source Game-as-a-Benchmark SDK for deterministic games, agent evaluation, and independently verifiable exact-run evidence.',
-  base: '/GAOS-TurnBasedGrid-SDK/',
+  title: 'Game-Agent Open Standard',
+  description: 'The open-source SDK for the Game-Agent Open Standard: deterministic games, agent evaluation, and independently verifiable exact-run evidence.',
+  base: '/GAOS-SDK/',
   cleanUrls: true,
   lastUpdated: true,
   head: [
     ['meta', { name: 'theme-color', content: '#6657d9' }],
     ['meta', { property: 'og:type', content: 'website' }],
-    ['meta', { property: 'og:title', content: 'Gaming AGI Open SDK | Game-as-a-Benchmark' }],
+    ['meta', { property: 'og:title', content: 'Game-Agent Open Standard | Game-as-a-Benchmark' }],
     ['meta', {
       property: 'og:url',
-      content: 'https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/',
+      content: 'https://yugao-gaos.github.io/GAOS-SDK/',
     }],
     ['meta', {
       property: 'og:description',
@@ -20,31 +20,31 @@ export default defineConfig({
     }],
     ['meta', {
       property: 'og:image',
-      content: 'https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/og.png',
+      content: 'https://yugao-gaos.github.io/GAOS-SDK/og.png',
     }],
     ['meta', { property: 'og:image:width', content: '1731' }],
     ['meta', { property: 'og:image:height', content: '909' }],
     ['meta', {
       property: 'og:image:alt',
-      content: 'Gaming AGI Open SDK: Game-as-a-Benchmark infrastructure for human play, agent evaluation, and verifiable exact runs.',
+      content: 'Game-Agent Open Standard: Game-as-a-Benchmark infrastructure for human play, agent evaluation, and verifiable exact runs.',
     }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
-    ['meta', { name: 'twitter:title', content: 'Gaming AGI Open SDK | Game-as-a-Benchmark' }],
+    ['meta', { name: 'twitter:title', content: 'Game-Agent Open Standard | Game-as-a-Benchmark' }],
     ['meta', {
       name: 'twitter:description',
       content: 'Game-as-a-Benchmark evaluation with deterministic execution and independently verifiable exact-run evidence.',
     }],
     ['meta', {
       name: 'twitter:image',
-      content: 'https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/og.png',
+      content: 'https://yugao-gaos.github.io/GAOS-SDK/og.png',
     }],
     ['meta', {
       name: 'twitter:image:alt',
-      content: 'Gaming AGI Open SDK: Game-as-a-Benchmark infrastructure for human play, agent evaluation, and verifiable exact runs.',
+      content: 'Game-Agent Open Standard: Game-as-a-Benchmark infrastructure for human play, agent evaluation, and verifiable exact runs.',
     }],
   ],
   themeConfig: {
-    siteTitle: 'Gaming AGI Open SDK',
+    siteTitle: 'Game-Agent Open Standard',
     nav: [
       { text: 'Home', link: '/' },
       {
@@ -154,18 +154,18 @@ export default defineConfig({
       },
     ],
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK' },
+      { icon: 'github', link: 'https://github.com/yugao-gaos/GAOS-SDK' },
       { icon: 'discord', link: 'https://discord.gg/vdvUgcqPU' },
     ],
     search: { provider: 'local' },
     editLink: {
-      pattern: 'https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/edit/main/docs/:path',
+      pattern: 'https://github.com/yugao-gaos/GAOS-SDK/edit/main/docs/:path',
       text: 'Edit this page on GitHub',
     },
     outline: { level: [2, 3], label: 'On this page' },
     footer: {
       message: 'Game-as-a-Benchmark: one product reducer for human play, agent evaluation, and verifiable exact runs.',
-      copyright: 'Gaming AGI Open SDK',
+      copyright: 'Game-Agent Open Standard',
     },
   },
 });

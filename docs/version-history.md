@@ -291,22 +291,22 @@ Prepared July 23, 2026.
 
 | Version | Date | Main addition |
 |---|---|---|
-| [v0.12.0](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.12.0) | 2026-07-22 | Runtime validation, integrity, retry lifecycle, and deterministic edge-case hardening |
-| [v0.11.0](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.11.0) | 2026-07-22 | Atomic, product-defined resource transactions |
-| [v0.10.0](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.10.0) | 2026-07-22 | Resumable agent interruption |
-| [v0.9.2](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.9.2) | 2026-07-21 | Complete mechanism documentation, benchmark mission, and Build Week release packet |
-| [v0.9.1](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.9.1) | 2026-07-21 | Nearest reachable qualified paths and the public VitePress site |
-| [v0.9.0](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.9.0) | 2026-07-21 | Gates, latched triggers, policy-driven rays, and generic behavior trees |
-| [v0.8.0](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.8.0) | 2026-07-21 | Chain reactions, projectiles, push chains, arrivals, claims, transport, and interlocks |
-| [v0.7.0](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.7.0) | 2026-07-21 | Deterministic multi-wave settlement |
-| [v0.6.0](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.6.0) | 2026-07-21 | Local Ollama-backed CLI agent support |
-| [v0.5.1](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.5.1) | 2026-07-21 | Product and action-prompt composition |
-| [v0.5.0](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.5.0) | 2026-07-21 | Extensible keyed-model drivers and the `gaos-agent` CLI |
-| [v0.4.0](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.4.0) | 2026-07-21 | Deterministic agent environment, portable tools, and Python evaluation |
-| [v0.3.0](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.3.0) | 2026-07-21 | Reusable geometry and pathfinding |
-| [v0.2.0](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.2.0) | 2026-07-21 | Reusable engine core, generic solver, and replay verification |
-| [v0.1.1](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.1.1) | 2026-07-21 | Build output for Git-based package installation |
-| [v0.1.0](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/tag/v0.1.0) | 2026-07-21 | TypeScript and Python turn SDKs, protocol documentation, and release automation |
+| [v0.12.0](https://github.com/yugao-gaos/GAOS-SDK/releases/tag/v0.12.0) | 2026-07-22 | Runtime validation, integrity, retry lifecycle, and deterministic edge-case hardening |
+| [v0.11.0](https://github.com/yugao-gaos/GAOS-SDK/releases/tag/v0.11.0) | 2026-07-22 | Atomic, product-defined resource transactions |
+| [v0.10.0](https://github.com/yugao-gaos/GAOS-SDK/releases/tag/v0.10.0) | 2026-07-22 | Resumable agent interruption |
+| [v0.9.2](https://github.com/yugao-gaos/GAOS-SDK/releases/tag/v0.9.2) | 2026-07-21 | Complete mechanism documentation, benchmark mission, and Build Week release packet |
+| [v0.9.1](https://github.com/yugao-gaos/GAOS-SDK/releases/tag/v0.9.1) | 2026-07-21 | Nearest reachable qualified paths and the public VitePress site |
+| [v0.9.0](https://github.com/yugao-gaos/GAOS-SDK/releases/tag/v0.9.0) | 2026-07-21 | Gates, latched triggers, policy-driven rays, and generic behavior trees |
+| [v0.8.0](https://github.com/yugao-gaos/GAOS-SDK/releases/tag/v0.8.0) | 2026-07-21 | Chain reactions, projectiles, push chains, arrivals, claims, transport, and interlocks |
+| [v0.7.0](https://github.com/yugao-gaos/GAOS-SDK/releases/tag/v0.7.0) | 2026-07-21 | Deterministic multi-wave settlement |
+| [v0.6.0](https://github.com/yugao-gaos/GAOS-SDK/releases/tag/v0.6.0) | 2026-07-21 | Local Ollama-backed CLI agent support |
+| [v0.5.1](https://github.com/yugao-gaos/GAOS-SDK/releases/tag/v0.5.1) | 2026-07-21 | Product and action-prompt composition |
+| [v0.5.0](https://github.com/yugao-gaos/GAOS-SDK/releases/tag/v0.5.0) | 2026-07-21 | Extensible keyed-model drivers and the `gaos-agent` CLI |
+| [v0.4.0](https://github.com/yugao-gaos/GAOS-SDK/releases/tag/v0.4.0) | 2026-07-21 | Deterministic agent environment, portable tools, and Python evaluation |
+| [v0.3.0](https://github.com/yugao-gaos/GAOS-SDK/releases/tag/v0.3.0) | 2026-07-21 | Reusable geometry and pathfinding |
+| [v0.2.0](https://github.com/yugao-gaos/GAOS-SDK/releases/tag/v0.2.0) | 2026-07-21 | Reusable engine core, generic solver, and replay verification |
+| [v0.1.1](https://github.com/yugao-gaos/GAOS-SDK/releases/tag/v0.1.1) | 2026-07-21 | Build output for Git-based package installation |
+| [v0.1.0](https://github.com/yugao-gaos/GAOS-SDK/releases/tag/v0.1.0) | 2026-07-21 | TypeScript and Python turn SDKs, protocol documentation, and release automation |
 
 ## Compatibility policy
 

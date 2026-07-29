@@ -1174,7 +1174,7 @@ fixed** in that document:
    same code, but the reasoning would have sent the next migrating agent to the
    wrong ref for a wrong reason.
 2. **TabletopLabs consumes the SDK as an npm `github:` dependency, not a git
-   submodule** — `github:yugao-gaos/GAOS-TurnBasedGrid-SDK#v0.19.0`. RFC-009
+   submodule** — `github:yugao-gaos/GAOS-SDK#v0.19.0`. RFC-009
    asserted a submodule.
 
 The consumer's operational note is worth keeping: editing the version in

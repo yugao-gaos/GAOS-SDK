@@ -97,32 +97,19 @@ depending on Zonoid-specific product behavior.
 
 ## Naming migration
 
-The SDK has grown beyond the grid-oriented scope reflected by its original
-identifiers:
+The coordinated naming migration is active:
 
-- repository: `GAOS-TurnBasedGrid-SDK`;
-- TypeScript package: `@yugao-gaos/turn-based-grid-sdk`;
-- Python distribution: `gaos-turn-based-grid-sdk`; and
+- project: **Game-Agent Open Standard (GAOS)**;
+- repository: `GAOS-SDK`;
+- TypeScript package: `@yugao-gaos/sdk`;
+- Python distribution: `gaos-sdk`; and
 - Python compatibility import: `agilabs_arena`.
 
-These identifiers remain current and supported for now. Renaming only one
-surface would fragment installation, documentation, imports, release URLs, and
-protocol integrations, so the project will not perform a partial rename.
-
-A future coordinated migration will select neutral names that reflect GAOS as a
-bridge for both game developers and interactive-benchmark creators. The
-migration plan will cover:
-
-- repository and documentation URLs;
-- TypeScript and Python distribution names;
-- Python import compatibility;
-- CLI names and examples;
-- deprecation or forwarding packages where practical; and
-- explicit treatment of already-versioned protocol identifiers.
-
-No proposed replacement name is active until it appears in a published
-migration guide. Existing users should continue to install and import the
-current packages.
+The repository rename retains GitHub redirects from the former
+`GAOS-TurnBasedGrid-SDK` location. Releases through v0.25.0 retain their
+original package archive names. The TypeScript entry points, Python import,
+CLI names, schemas, wire protocols, and replay identifiers remain unchanged so
+the migration does not alter runtime or protocol behavior.
 
 ## Independent adoption
 

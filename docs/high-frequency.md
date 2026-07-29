@@ -15,7 +15,7 @@ import {
   createTickRate,
   tickAtElapsedMilliseconds,
   type TickReducer,
-} from '@yugao-gaos/turn-based-grid-sdk/engine';
+} from '@yugao-gaos/sdk/engine';
 
 const rate = createTickRate(30);
 // rate.millisecondsPerTick === 33.333...

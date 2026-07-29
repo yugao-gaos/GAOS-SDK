@@ -1,7 +1,7 @@
 [project]
-name = "gaos-turn-based-grid-sdk"
+name = "gaos-sdk"
 version = "0.25.0"
-description = "Python client and Gymnasium-style environment for the GAOS game SDK"
+description = "Python client and Gymnasium-style environment for the Game-Agent Open Standard"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
@@ -14,10 +14,10 @@ dependencies = []
 gaos-verify = "agilabs_arena.verify:main"
 
 [project.urls]
-Homepage = "https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/"
-Documentation = "https://yugao-gaos.github.io/GAOS-TurnBasedGrid-SDK/python"
-Repository = "https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK"
-Issues = "https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/issues"
+Homepage = "https://yugao-gaos.github.io/GAOS-SDK/"
+Documentation = "https://yugao-gaos.github.io/GAOS-SDK/python"
+Repository = "https://github.com/yugao-gaos/GAOS-SDK"
+Issues = "https://github.com/yugao-gaos/GAOS-SDK/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "jsonschema>=4.0"]

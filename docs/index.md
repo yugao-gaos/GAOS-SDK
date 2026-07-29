@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: Gaming AGI Open SDK
+  name: Game-Agent Open Standard
   text: Build games that become verifiable benchmarks.
   tagline: One deterministic game contract for human play, agent evaluation, and independent verification of exact runs.
   actions:
@@ -104,7 +104,7 @@ digest. If required verifier material is unavailable, the result is
 <div class="ownership-card zonoid-showcase">
   <div class="zonoid-showcase__copy">
     <h3><a href="https://zonoid.ai">Zonoid</a></h3>
-    <p><strong>The first production game built with Gaming AGI Open SDK.</strong></p>
+    <p><strong>The first production game built with the GAOS SDK.</strong></p>
     <p>A strategy game for humans and AI agents, built around prediction,
     planning, and judgment.</p>
     <p><strong><a href="https://zonoid.ai">Visit Zonoid →</a></strong></p>

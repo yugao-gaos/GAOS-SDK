@@ -128,5 +128,5 @@ import {
   resolveMoves,
   runSettlementCascade,
   shortestGridPath,
-} from '@yugao-gaos/turn-based-grid-sdk/engine';
+} from '@yugao-gaos/sdk/engine';
 ```

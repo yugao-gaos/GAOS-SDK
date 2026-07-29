@@ -28,13 +28,12 @@ Python wheels and source distributions are attached to each GitHub release.
 Install the current wheel directly:
 
 ```sh
-python -m pip install "https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/releases/download/v0.25.0/gaos_turn_based_grid_sdk-0.25.0-py3-none-any.whl"
+python -m pip install "https://github.com/yugao-gaos/GAOS-SDK/releases/download/v0.25.0/gaos_turn_based_grid_sdk-0.25.0-py3-none-any.whl"
 ```
 
-For a different release, replace both `0.25.0` occurrences with the same
-version. The distribution is named `gaos-turn-based-grid-sdk`; the stable
-import name remains `agilabs_arena` for compatibility. The
-[naming roadmap](/roadmap) describes the future coordinated rename.
+The v0.25.0 wheel predates the package rename. New releases use the
+distribution name `gaos-sdk`; the stable import name remains `agilabs_arena`
+for compatibility.
 
 Async applications can use `AsyncArenaClient`, which runs the same validated,
 bounded requests in worker threads without blocking the event loop. The
@@ -127,4 +126,4 @@ command/timeout binding facts for signed evidence. See
 [portable replay and verification](/mechanisms/replay).
 
 For matchmaking, control revision, and lower-level envelope operations, see
-the complete [Python README on GitHub](https://github.com/yugao-gaos/GAOS-TurnBasedGrid-SDK/blob/main/python/README.md).
+the complete [Python README on GitHub](https://github.com/yugao-gaos/GAOS-SDK/blob/main/python/README.md).
