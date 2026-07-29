@@ -1,5 +1,4 @@
-from gaos_sdk import ArenaEnv, evaluate_agent_episodes, run_agent_episode
-from gaos_sdk.client import Tick
+from gaos_sdk import evaluate_agent_episodes, run_agent_episode
 
 
 class CountingEnv:
@@ -40,32 +39,3 @@ def test_aggregates_deterministic_batches_and_tick_limits():
     capped = run_agent_episode(CountingEnv(target=9), lambda _observation, _info: 1, max_ticks=1)
     assert capped.truncated is True
     assert capped.info["termination_reason"] == "tick_limit"
-
-
-def test_arena_observation_exposes_action_schemas_and_concrete_actions():
-    tick = Tick.from_json({
-        "tickNumber": 0,
-        "narrative": None,
-        "grid": "@.",
-        "visualEvents": [],
-        "actions": [
-            {"id": "wait", "params": "none"},
-            {"id": "use", "params": "index"},
-            {"id": "move", "params": "xy"},
-        ],
-        "status": "playing",
-        "hud": {
-            "actionsUsed": 0,
-            "maxActions": 4,
-            "carrying": None,
-            "items": [{"index": 2, "kind": "tool"}],
-            "actionTargeting": {"move": {"targetableCells": [[1, 0]]}},
-        },
-    })
-    observation = ArenaEnv._observation(tick)
-    assert observation["action_definitions"] == tick.actions
-    assert observation["concrete_actions"] == [
-        {"id": "wait"},
-        {"id": "use", "index": 2},
-        {"id": "move", "x": 1, "y": 0},
-    ]

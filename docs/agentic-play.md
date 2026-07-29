@@ -98,20 +98,9 @@ score-adoption policy.
 
 ## Python
 
-Python provides a Gymnasium-compatible `ArenaEnv` for hosted games:
-
-```python
-from gaos_sdk import ArenaEnv, run_agent_episode
-
-env = ArenaEnv("od-l1", play_method="autonomous_local")
-result = run_agent_episode(
-    env,
-    lambda observation, info: observation["concrete_actions"][0],
-)
-```
-
-Python does not include the local TypeScript reducer engine, model drivers, or
-CLI launchers.
+Python provides a product-neutral `SessionClient` plus agent-evaluation
+helpers that accept any duck-typed Gymnasium-style environment. Typed
+observations and environment adapters live with each product.
 
 [Build a reducer →](/quickstart) ·
 [Read the Python boundary →](/python) ·

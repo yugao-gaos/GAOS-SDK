@@ -2,16 +2,14 @@
 
 The Python distribution is GAOS's Game-as-a-Benchmark integration surface for
 research harnesses. It provides a zero-runtime-dependency hosted client, a
-Gymnasium-compatible environment API, provider-neutral evaluation helpers, and
-portable replay utilities. It targets Python 3.10 or newer and does not require
-Gymnasium at runtime.
+provider-neutral evaluation helpers, and portable replay utilities. It targets
+Python 3.10 or newer.
 
 ## Capability boundary
 
 Python is the research and hosted-integration surface. It can:
 
 - create and control sessions on a protocol-compatible host;
-- expose a hosted session through Gymnasium-compatible `reset()` and `step()`;
 - run duck-typed policies for one episode or a batch;
 - parse, validate, and serialize canonical `gaos.replay` JSONL; and
 - use synchronous or asynchronous hosted clients.
@@ -34,9 +32,8 @@ python -m pip install "git+https://github.com/yugao-gaos/GAOS-SDK.git#subdirecto
 New releases use the distribution name `gaos-sdk` and the import name
 `gaos_sdk`.
 
-Async applications can use `AsyncArenaClient`, which runs the same validated,
-bounded requests in worker threads without blocking the event loop. The
-existing synchronous `ArenaClient` API remains unchanged.
+Async applications can use `AsyncSessionClient`, which runs the same validated,
+bounded requests in worker threads without blocking the event loop.
 
 ## Hosted client
 
@@ -51,65 +48,15 @@ created = client.create_session({"game": "creator/cards"})
 print(created["tick"])
 ```
 
-Use `ArenaClient` only for Zonoid Arena's typed observations, matchmaking, and
-product endpoints:
-
-```python
-from gaos_sdk import ArenaClient
-
-arena = ArenaClient("https://api.zonoid.ai", api_key="ak_...", timeout=30.0)
-session_id, tick = arena.create_session(
-    game_mode="challenge",
-    play_method="human",
-    level_id="od-l1",
-)
-print(tick.grid)
-```
-
-Both clients speak the `gaos.ticks` v1 envelope on `/v1/sessions`. Commands
+The client speaks the `gaos.ticks` v1 envelope on `/v1/sessions`. Commands
 carry the session cursor, participant, and a deterministic submission ID:
 reuse it for an exact retry and create a new one for each logical control step.
-`play_method="human"` is intentional in this example: it shows direct hosted
-control for a person or application. Use `autonomous_local` for an agent
-evaluation.
-
-## Gymnasium-compatible environment API
-
-```python
-from gaos_sdk import ArenaEnv
-
-env = ArenaEnv(
-    "od-l1",
-    base_url="http://localhost:8899",
-    play_method="autonomous_local",
-)
-observation, info = env.reset()
-print(observation["grid"])
-print(observation["concrete_actions"])
-
-observation, reward, terminated, truncated, info = env.step(
-    observation["concrete_actions"][0]
-)
-```
-
-The observation includes both action definitions and fully parameterized
-`concrete_actions`. Rewards are terminal stars, or zero before completion.
-
-## Evaluate an agent
-
-```python
-from gaos_sdk import ArenaEnv, run_agent_episode
-
-env = ArenaEnv("od-l1", play_method="autonomous_local")
-result = run_agent_episode(
-    env,
-    lambda observation, info: observation["concrete_actions"][0],
-)
-```
 
 `run_agent_episode` and `evaluate_agent_episodes` accept any duck-typed
 environment with Gymnasium-compatible `reset()` and `step()` methods. They do
-not choose a model provider or define what a benchmark score means.
+not provide a product environment, choose a model provider, or define what a
+benchmark score means. Product repositories own their typed clients and
+environment adapters.
 
 ## Exchange portable replay evidence
 
@@ -138,5 +85,5 @@ TypeScript `gaos verify` adapter contract or provide a Python
 command/timeout binding facts for signed evidence. See
 [portable replay and verification](/mechanisms/replay).
 
-For matchmaking, control revision, and lower-level envelope operations, see
-the complete [Python README on GitHub](https://github.com/yugao-gaos/GAOS-SDK/blob/main/python/README.md).
+For lower-level envelope operations, see the complete
+[Python README on GitHub](https://github.com/yugao-gaos/GAOS-SDK/blob/main/python/README.md).
