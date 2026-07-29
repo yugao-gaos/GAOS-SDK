@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/plan-gaos-post-rename-migration-and-brand",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "codex-mcp-52843-7d5e1c127a68d519891d48dfb9ac2ef4",
+  "branch": "orch/attempt/codex-plan-gaos-post-rename-migration-and-brand",
+  "status": "claimed",
+  "claimed_at": "2026-07-29T17:29:23.402Z",
+  "lease_until": "2026-07-29T18:29:23.402Z"
+}
