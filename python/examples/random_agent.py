@@ -10,7 +10,7 @@ is excluded so the walk actually explores.
 import random
 import sys
 
-from agilabs_arena import ArenaEnv
+from gaos_sdk import ArenaEnv
 
 
 def main() -> None:

@@ -3,7 +3,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
-from agilabs_arena import (
+from gaos_sdk import (
     GAOS_REPLAY_FORMAT_VERSION,
     GAOS_REPLAY_SIGNED_FORMAT_VERSION,
     SUBMISSION_SIGNATURE_ALGORITHM,
@@ -22,7 +22,7 @@ from agilabs_arena import (
     verify_ed25519,
     verify_ed25519_base64,
 )
-from agilabs_arena.verify import verify_replay
+from gaos_sdk.verify import verify_replay
 
 
 def test_rfc_8032_vectors() -> None:

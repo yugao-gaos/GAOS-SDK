@@ -1206,7 +1206,7 @@ not an edge case.
 **The gate is the only part of the stack that disagrees, and I confirmed each
 half of that claim separately.** The format admits failed non-final levels:
 `status` is an unconstrained `won | failed` enum with no positional rule
-(`src/engine/replay-format.ts:657`, `python/agilabs_arena/replay.py:513`,
+(`src/engine/replay-format.ts:657`, `python/gaos_sdk/replay.py:513`,
 `schemas/gaos.replay-v1.schema.json:103`). The verifier admits them too —
 `recheckReplayArtifact` re-simulates each segment independently and aggregates
 at `replay-format.ts:1717–1718`:

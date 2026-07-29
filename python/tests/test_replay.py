@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator
 
-from agilabs_arena import (
+from gaos_sdk import (
     GAOS_REPLAY_DERIVED_SEEDS,
     GAOS_REPLAY_FORMAT_ID,
     GAOS_REPLAY_LEGACY_FORMAT_VERSION,

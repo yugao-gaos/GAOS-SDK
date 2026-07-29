@@ -200,8 +200,8 @@ Released July 24, 2026.
 - Existing settlement resolution steps execute within that tick.
 - Turn order and turn-scoped durations are product concerns and no longer
   ship as SDK mechanics.
-- The wire protocol is tick-native: `agilabs.ticks`, `tickId`, `kind: "tick"`,
-  and a `tick` observation.
+- The wire protocol became tick-native, with a protocol identifier, `tickId`,
+  `kind: "tick"`, and a `tick` observation.
 - TypeScript and Python agent `step()` calls each advance exactly one tick.
   Products own decision cadence and action-holding policy.
 

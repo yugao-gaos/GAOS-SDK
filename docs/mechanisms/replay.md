@@ -124,7 +124,7 @@ test suites, so independent implementations can verify byte-for-byte output.
 Python uses the same transport contract without adding runtime dependencies:
 
 ```python
-from agilabs_arena import parse_replay_jsonl, serialize_replay_jsonl
+from gaos_sdk import parse_replay_jsonl, serialize_replay_jsonl
 
 artifact = parse_replay_jsonl(stored)
 assert serialize_replay_jsonl(artifact) == stored

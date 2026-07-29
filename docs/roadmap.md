@@ -84,7 +84,7 @@ Continue hardening the smallest contracts shared by both audiences:
 - reducers, observations, and concrete legal actions;
 - deterministic seeds and settlement;
 - single-agent and multi-agent environments;
-- the `agilabs.ticks` v1 protocol boundary; and
+- the `gaos.ticks` v1 protocol boundary; and
 - the `gaos.replay` v1.3 evidence format and verifier interface; and
 - product-owned historical verifier export and content-addressed kit identity.
 
@@ -103,13 +103,14 @@ The coordinated naming migration is active:
 - repository: `GAOS-SDK`;
 - TypeScript package: `@yugao-gaos/gaos-sdk`;
 - Python distribution: `gaos-sdk`; and
-- Python compatibility import: `agilabs_arena`.
+- Python import: `gaos_sdk`.
 
 The repository rename retains GitHub redirects from the former
 `GAOS-TurnBasedGrid-SDK` location. Releases through v0.25.0 retain their
-original package archive names. The TypeScript entry points, Python import,
-CLI names, schemas, wire protocols, and replay identifiers remain unchanged so
-the migration does not alter runtime or protocol behavior.
+original package archive names. The next release intentionally adopts the
+`gaos_sdk` Python import and `gaos.ticks` wire identifier as breaking changes;
+TypeScript entry points, CLI names, schemas, and replay identifiers remain
+unchanged.
 
 ## Independent adoption
 

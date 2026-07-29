@@ -6,13 +6,12 @@ TypeScript and Python distributions share one semantic version. While the SDK
 is below `1.0.0`, minor releases may include breaking API changes. Patch
 releases are reserved for compatible fixes.
 
-The generic `agilabs.ticks` v1 wire contract has its own compatibility promise:
+The generic `gaos.ticks` v1 wire contract has its own compatibility promise:
 breaking its envelope, cursor, retry, or simultaneous-intent behavior requires
 a new protocol version. See [Tick protocol v1](/protocol-v1).
 
-Version 0.18 establishes `agilabs.ticks` v1 as the canonical transport with
-`kind: "tick"`, `tickId`, and `tick`. Changing those fields in place would
-break deployed hosts and clients.
+The current SDK establishes `gaos.ticks` v1 as the canonical transport with
+`kind: "tick"`, `tickId`, and `tick`.
 
 Pin an exact release for production and review the GitHub release notes before
 upgrading. Releases through v0.25.0 use the former package name:
@@ -34,10 +33,11 @@ the Python distribution is `gaos-sdk`.
 
 Releases through v0.25.0 used the npm name
 `@yugao-gaos/turn-based-grid-sdk` and Python distribution
-`gaos-turn-based-grid-sdk`. Those archives and Git tags remain valid. Existing
-applications can migrate by changing the package dependency; exported
-TypeScript entry points, the Python import name `agilabs_arena`, CLI commands,
-and versioned protocol identifiers are unchanged.
+`gaos-turn-based-grid-sdk`. Those archives and Git tags remain valid. The
+coordinated GAOS rename is intentionally breaking: current consumers must
+update the package dependency, use the Python import `gaos_sdk`, and send the
+`gaos.ticks` protocol identifier. TypeScript entry points and CLI commands
+remain unchanged.
 
 The `./engine` entry point remains a genre-neutral game-mechanism suite for
 deterministic card, tactics, simulation, and hybrid games; spatial grids are

@@ -2,7 +2,7 @@ import copy
 
 import pytest
 
-from agilabs_arena.verifier_kit import (
+from gaos_sdk.verifier_kit import (
     VERIFIER_KIT_MEDIA_TYPE,
     parse_verifier_kit_manifest,
     parse_verifier_reference,

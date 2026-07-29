@@ -1,5 +1,5 @@
 """Live-server integration tests: start a local Worker with unscored sessions:
-`npm run dev -w @agilabs/worker -- --var DEV_ALLOW_ANY:true --var REQUIRE_AUTH:false`.
+`npm run dev -w @yugao-gaos/worker -- --var DEV_ALLOW_ANY:true --var REQUIRE_AUTH:false`.
 Point ARENA_BASE_URL at it; the suite is skipped when unreachable.
 """
 
@@ -9,7 +9,7 @@ import urllib.request
 
 import pytest
 
-from agilabs_arena import ArenaEnv, ArenaClient, IllegalActionRejected
+from gaos_sdk import ArenaEnv, ArenaClient, IllegalActionRejected
 
 BASE_URL = os.environ.get("ARENA_BASE_URL", "http://localhost:8899")
 

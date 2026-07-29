@@ -22,18 +22,17 @@ CLI launchers. Build the game and its authoritative reducer with the
 [TypeScript SDK](/quickstart#install-the-typescript-sdk), then use Python when a
 research harness needs to control the hosted game or inspect portable evidence.
 
-## Install from a release
+## Install
 
-Python wheels and source distributions are attached to each GitHub release.
-Install the current wheel directly:
+The renamed Python package will ship with the next release. Until then, install
+it from the repository:
 
 ```sh
-python -m pip install "https://github.com/yugao-gaos/GAOS-SDK/releases/download/v0.25.0/gaos_turn_based_grid_sdk-0.25.0-py3-none-any.whl"
+python -m pip install "git+https://github.com/yugao-gaos/GAOS-SDK.git#subdirectory=python"
 ```
 
-The v0.25.0 wheel predates the package rename. New releases use the
-distribution name `gaos-sdk`; the stable import name remains `agilabs_arena`
-for compatibility.
+New releases use the distribution name `gaos-sdk` and the import name
+`gaos_sdk`.
 
 Async applications can use `AsyncArenaClient`, which runs the same validated,
 bounded requests in worker threads without blocking the event loop. The
@@ -42,7 +41,7 @@ existing synchronous `ArenaClient` API remains unchanged.
 ## Hosted client
 
 ```python
-from agilabs_arena import ArenaClient
+from gaos_sdk import ArenaClient
 
 arena = ArenaClient("https://api.zonoid.ai", api_key="ak_...", timeout=30.0)
 session_id, tick = arena.create_session(
@@ -53,7 +52,7 @@ session_id, tick = arena.create_session(
 print(tick.grid)
 ```
 
-The client speaks the `agilabs.ticks` v1 envelope on `/v1/sessions`. Commands
+The client speaks the `gaos.ticks` v1 envelope on `/v1/sessions`. Commands
 carry the session cursor, participant, and a deterministic submission ID:
 reuse it for an exact retry and create a new one for each logical control step.
 `play_method="human"` is intentional in this example: it shows direct hosted
@@ -63,7 +62,7 @@ evaluation.
 ## Gymnasium-compatible environment API
 
 ```python
-from agilabs_arena import ArenaEnv
+from gaos_sdk import ArenaEnv
 
 env = ArenaEnv(
     "od-l1",
@@ -85,7 +84,7 @@ The observation includes both action definitions and fully parameterized
 ## Evaluate an agent
 
 ```python
-from agilabs_arena import ArenaEnv, run_agent_episode
+from gaos_sdk import ArenaEnv, run_agent_episode
 
 env = ArenaEnv("od-l1", play_method="autonomous_local")
 result = run_agent_episode(
@@ -101,7 +100,7 @@ not choose a model provider or define what a benchmark score means.
 ## Exchange portable replay evidence
 
 ```python
-from agilabs_arena import (
+from gaos_sdk import (
     parse_replay_jsonl,
     serialize_replay_jsonl,
     validate_replay_artifact,

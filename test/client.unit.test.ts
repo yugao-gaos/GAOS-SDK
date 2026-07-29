@@ -134,7 +134,7 @@ describe('ArenaClient v1 protocol adapter', () => {
     const init = submitCall?.[1];
     if (!init) throw new Error('missing submit request');
     expect(JSON.parse(String(init.body))).toEqual({
-      protocol: 'agilabs.ticks',
+      protocol: 'gaos.ticks',
       protocolVersion: '1.0',
       sessionId: 's1',
       tickId: 's1:0',
@@ -370,7 +370,7 @@ describe('ArenaClient v1 protocol adapter', () => {
     expect(JSON.parse(String(calls[3]![1]!.body))).toMatchObject({
       sessionId: 'm1', participantId: 'north', tickId: 'm1:0', revision: 0,
       submissionId: 'north-0', command: { id: 'Action 1' },
-      extensions: { 'agilabs.arena': { controlRevision: 0 } },
+      extensions: { 'gaos.arena': { controlRevision: 0 } },
     });
     expect(JSON.parse(String(calls[0]![1]!.body))).toEqual({
       mapId: 'arena-s1-1', teamId: 'playerbot-mica', requestId: 'request_1',
@@ -478,12 +478,12 @@ describe('ArenaClient v1 protocol adapter', () => {
     expect(JSON.parse(String(calls[1]![1]!.body))).toMatchObject({
       tickId: 'm1:0', revision: 0,
       submissionId: 'north:m1:0:control:0',
-      extensions: { 'agilabs.arena': { controlRevision: 0 } },
+      extensions: { 'gaos.arena': { controlRevision: 0 } },
     });
     expect(JSON.parse(String(calls[2]![1]!.body))).toMatchObject({
       tickId: 'm1:0', revision: 0,
       submissionId: 'north:m1:0:control:1',
-      extensions: { 'agilabs.arena': { controlRevision: 1 } },
+      extensions: { 'gaos.arena': { controlRevision: 1 } },
     });
   });
 
@@ -495,7 +495,7 @@ describe('ArenaClient v1 protocol adapter', () => {
     });
     const client = new ArenaClient('https://example.test', undefined, { fetch: request });
     const restored = client.restoreSessionBinding({
-      protocol: 'agilabs.ticks', protocolVersion: '1.0',
+      protocol: 'gaos.ticks', protocolVersion: '1.0',
       sessionId: 's1', tickId: 's1:0', revision: 0, participantId: 'player',
     });
     expect(client.getSessionBinding('s1')).toEqual(restored);
@@ -520,7 +520,7 @@ describe('ArenaClient v1 protocol adapter', () => {
     });
     await client.getArenaTickEnvelope('m1');
     client.restoreSessionBinding({
-      protocol: 'agilabs.ticks', protocolVersion: '1.0',
+      protocol: 'gaos.ticks', protocolVersion: '1.0',
       sessionId: 'm1', tickId: 'm1:0', revision: 0,
       participantId: 'north', controlRevision: 0,
     });
@@ -528,7 +528,7 @@ describe('ArenaClient v1 protocol adapter', () => {
 
     expect(JSON.parse(String(calls[1]!.body))).toMatchObject({
       tickId: 'm1:0', revision: 0, submissionId: 'retry-0',
-      extensions: { 'agilabs.arena': { controlRevision: 0 } },
+      extensions: { 'gaos.arena': { controlRevision: 0 } },
     });
   });
 
@@ -538,7 +538,7 @@ describe('ArenaClient v1 protocol adapter', () => {
     )));
     const client = new ArenaClient('https://example.test', undefined, { fetch: request });
     client.restoreSessionBinding({
-      protocol: 'agilabs.ticks', protocolVersion: '1.0',
+      protocol: 'gaos.ticks', protocolVersion: '1.0',
       sessionId: 'm1', tickId: 'm1:5', revision: 5,
       participantId: 'north', controlRevision: 5,
     });
@@ -554,7 +554,7 @@ describe('ArenaClient v1 protocol adapter', () => {
     });
     expect(JSON.parse(String(request.mock.calls[0]![1]!.body))).toMatchObject({
       tickId: 'm1:0', revision: 0,
-      extensions: { 'agilabs.arena': { controlRevision: 0 } },
+      extensions: { 'gaos.arena': { controlRevision: 0 } },
     });
   });
 

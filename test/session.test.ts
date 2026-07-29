@@ -206,7 +206,7 @@ describe('./session kernel', () => {
     expect(() => kernel.prepareIngest({
       ...submission('red', 'red-1', 1),
       protocol: 'foreign' as typeof PROTOCOL_ID,
-    })).toThrow(/expected agilabs\.ticks/);
+    })).toThrow(/expected gaos\.ticks/);
     expect(() => kernel.prepareIngest({
       ...submission('red', 'red-1', 1),
       sessionId: 'another-session',

@@ -1,4 +1,4 @@
-"""Thin HTTP client over the AgiLabs Arena session API (spec/openapi.yaml).
+"""Thin HTTP client over the GAOS Arena session API (spec/openapi.yaml).
 
 No logic lives here — the server is authoritative. This is deliberately a
 plain request/response mapping so any harness (or curl) stays equivalent.
@@ -19,9 +19,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-PROTOCOL_ID = "agilabs.ticks"
+PROTOCOL_ID = "gaos.ticks"
 PROTOCOL_VERSION = "1.0"
-ARENA_CONTROL_EXTENSION = "agilabs.arena"
+ARENA_CONTROL_EXTENSION = "gaos.arena"
 PARTICIPANT_ID_PATTERN = r"^[A-Za-z0-9_.:@-]{1,128}$"
 _PARTICIPANT_ID_RE = re.compile(PARTICIPANT_ID_PATTERN)
 _MAX_SAFE_INTEGER = 9_007_199_254_740_991
@@ -50,7 +50,7 @@ class IllegalActionRejected(ArenaAPIError):
 
 
 class ProtocolMismatchError(Exception):
-    """Response is not a valid AgiLabs Turns v1 envelope."""
+    """Response is not a valid GAOS Ticks v1 envelope."""
 
 
 def _validate_json(value: Any, label: str = "value", active: set[int] | None = None) -> None:

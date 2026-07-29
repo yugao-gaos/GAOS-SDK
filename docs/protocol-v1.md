@@ -8,7 +8,7 @@ serializable.
 
 A resolved envelope contains:
 
-- `protocol: "agilabs.ticks"`
+- `protocol: "gaos.ticks"`
 - `protocolVersion: "1.0"`
 - `kind: "tick"`
 - `sessionId`, `tickId`, and monotonic `revision`

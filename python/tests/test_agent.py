@@ -1,5 +1,5 @@
-from agilabs_arena import ArenaEnv, evaluate_agent_episodes, run_agent_episode
-from agilabs_arena.client import Tick
+from gaos_sdk import ArenaEnv, evaluate_agent_episodes, run_agent_episode
+from gaos_sdk.client import Tick
 
 
 class CountingEnv:

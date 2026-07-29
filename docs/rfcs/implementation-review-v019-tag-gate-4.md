@@ -109,7 +109,7 @@ same artifact, participantId key deleted from the timeout record:
   Python : []            ← ACCEPTS
 ```
 
-`python/agilabs_arena/replay.py:951-957` uses `record.get("participantId")`,
+`python/gaos_sdk/replay.py:951-957` uses `record.get("participantId")`,
 which collapses *absent* and explicit `null` into `None`. TS
 (`replay-format.ts:1198`) rejects `undefined`; the schema lists the field as
 required.
