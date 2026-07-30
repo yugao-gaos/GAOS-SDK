@@ -1,7 +1,7 @@
 # Python SDK surface
 
 The Python distribution is GAOS's Game-as-a-Benchmark integration surface for
-research harnesses. It provides a zero-runtime-dependency hosted client, a
+research harnesses. It provides a zero-runtime-dependency hosted client,
 provider-neutral evaluation helpers, and portable replay utilities. It targets
 Python 3.10 or newer.
 
@@ -22,15 +22,13 @@ research harness needs to control the hosted game or inspect portable evidence.
 
 ## Install
 
-The renamed Python package will ship with the next release. Until then, install
-it from the repository:
+Install the v0.26 Python package directly from the tagged repository:
 
 ```sh
-python -m pip install "git+https://github.com/yugao-gaos/GAOS-SDK.git#subdirectory=python"
+python -m pip install "git+https://github.com/yugao-gaos/GAOS-SDK.git@v0.26.0#subdirectory=python"
 ```
 
-New releases use the distribution name `gaos-sdk` and the import name
-`gaos_sdk`.
+The distribution name is `gaos-sdk` and the import name is `gaos_sdk`.
 
 Async applications can use `AsyncSessionClient`, which runs the same validated,
 bounded requests in worker threads without blocking the event loop.

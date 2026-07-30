@@ -27,7 +27,7 @@ function fixture(adapter = 'export default () => ({})') {
   return packVerifierKit({
     game: { id: 'creator/demo', version: '1.0.0' },
     adapter: { id: 'creator/demo', version: '1.0.0' },
-    runtime: { kind: 'node-esm', gaosVersion: '0.25.0', nodeRange: '>=20.3' },
+    runtime: { kind: 'node-esm', gaosVersion: '0.26.0', nodeRange: '>=20.3' },
     replayFormats: ['gaos.replay@1.3'],
     files: {
       'README.md': 'Product-owned verifier fixture\n',

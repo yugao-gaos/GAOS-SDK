@@ -3,6 +3,60 @@
 For the public chronological changelog, see the
 [complete version history](/version-history).
 
+## v0.26.0
+
+Released July 29, 2026. This is the coordinated breaking rename and
+product-boundary release for the Game-Agent Open Standard. It does not change
+the interpretation of `gaos.replay` v1.0–v1.3.
+
+- The TypeScript package is now `@yugao-gaos/gaos-sdk`.
+- The Python distribution is now `gaos-sdk`, imported as `gaos_sdk`.
+- The hosted transport identifier is `gaos.ticks` v1. Its envelope, cursor,
+  retry, and simultaneous-intent behavior are unchanged.
+- Standalone contract identities use the `gaos.*` namespace and published JSON
+  Schemas use the canonical
+  `https://yugao-gaos.github.io/GAOS-SDK/schemas/` domain.
+- The package root and `./client` export a browser-safe, product-neutral
+  `SessionClient`. Python supplies matching synchronous and asynchronous
+  generic clients.
+- Arena/Zonoid typed clients, matchmaking, convenience endpoints, and
+  Gymnasium-style environments have moved to the Zonoid product repository.
+- Public entry points are documented explicitly and automated architecture
+  checks reject internal barrel imports, cycles, product leakage, and Node
+  built-ins in browser-safe surfaces.
+
+### Migration from v0.25
+
+Update the TypeScript dependency:
+
+```diff
+- "@yugao-gaos/turn-based-grid-sdk": "git+https://github.com/yugao-gaos/GAOS-SDK.git#v0.25.0"
++ "@yugao-gaos/gaos-sdk": "git+https://github.com/yugao-gaos/GAOS-SDK.git#v0.26.0"
+```
+
+Update Python packaging and imports:
+
+```diff
+- from agilabs_arena import ArenaClient
++ from gaos_sdk import SessionClient
+```
+
+`SessionClient` deliberately treats observations and commands as opaque.
+Zonoid integrations that need the removed `ArenaClient`, `AsyncArenaClient`,
+or `ArenaEnv` should depend on Zonoid's `@agilabs/arena-adapter` or
+`zonoid-gaos-adapter` package instead; the Python import is `zonoid_gaos`.
+
+Hosts and clients must replace `agilabs.ticks` with `gaos.ticks`. Producers and
+consumers of standalone schemas must likewise replace `agilabs.*` schema
+identities with their `gaos.*` equivalents. Do not rewrite historical replay
+artifacts: the supported `gaos.replay` formats and their cryptographic
+interpretation are unchanged.
+
+The repository URL is now
+`https://github.com/yugao-gaos/GAOS-SDK`. GitHub redirects the former repository
+URL, but release manifests and new dependency pins should use the canonical
+location.
+
 ## v0.25.0
 
 RFC-016 adds product-owned historical verifier kits without changing

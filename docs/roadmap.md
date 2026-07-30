@@ -77,6 +77,16 @@ Each roadmap release has one authoritative RFC. A later release may depend on
 earlier contracts, but it must not silently absorb unfinished scope from
 another RFC.
 
+### v0.26 — canonical GAOS identity and product boundary (implemented)
+
+v0.26 completes the coordinated pre-1.0 rename and architecture cleanup. It
+adopts the canonical TypeScript and Python package names, `gaos_sdk` Python
+imports, `gaos.ticks` v1 transport identity, and canonical GAOS schema domain.
+The root and `./client` surfaces are product-neutral and browser-safe; typed
+Arena/Zonoid clients and environments now live in the Zonoid product
+repository. Automated architecture checks enforce those dependency
+boundaries.
+
 ### Stable bridge contracts
 
 Continue hardening the smallest contracts shared by both audiences:
@@ -107,9 +117,9 @@ The coordinated naming migration is active:
 
 The repository rename retains GitHub redirects from the former
 `GAOS-TurnBasedGrid-SDK` location. Releases through v0.25.0 retain their
-original package archive names. The next release intentionally adopts the
-`gaos_sdk` Python import and `gaos.ticks` wire identifier as breaking changes;
-TypeScript entry points, CLI names, schemas, and replay identifiers remain
+original package archive names. v0.26 intentionally adopts the `gaos_sdk`
+Python import and `gaos.ticks` wire identifier as breaking changes. Replay
+identifiers and the supported `gaos.replay` v1.0–v1.3 formats remain
 unchanged.
 
 ## Independent adoption

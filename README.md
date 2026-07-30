@@ -9,7 +9,7 @@ runs.
 
 [Documentation](https://yugao-gaos.github.io/GAOS-SDK/) ·
 [Playable demos](https://yugao-gaos.github.io/GAOS-SDK/demos/) ·
-[v0.25 release notes](docs/releases.md#v0250) ·
+[v0.26 release notes](docs/releases.md#v0260) ·
 [Discord](https://discord.gg/vdvUgcqPU)
 
 | For game developers | For benchmark builders |
@@ -36,7 +36,7 @@ around them.
 ## Install
 
 ```sh
-npm install 'git+https://github.com/yugao-gaos/GAOS-SDK.git'
+npm install 'git+https://github.com/yugao-gaos/GAOS-SDK.git#v0.26.0'
 ```
 
 Use the narrowest package surface:
@@ -50,13 +50,27 @@ Use the narrowest package surface:
 
 [Build your first reducer →](docs/quickstart.md)
 
-## The v0.25 verifiable arm
+## The v0.26 standard boundary
+
+v0.26 completes the coordinated GAOS rename and makes the SDK boundary
+product-neutral. TypeScript and Python now expose generic hosted-session
+clients over `gaos.ticks` v1. Product-specific observations, matchmaking,
+convenience endpoints, and environment adapters live with the product that
+defines them.
+
+The canonical packages are `@yugao-gaos/gaos-sdk` and `gaos-sdk`; Python code
+imports `gaos_sdk`. Zonoid's Arena adapter now lives in the Zonoid repository
+instead of this SDK.
+
+[Read the v0.26 migration guide →](docs/releases.md#v0260)
+
+## The verifiable arm
 
 A replay is independently checkable only while its historical reducer and
 semantic adapter remain available and their identity is trusted outside the
 replay.
 
-v0.25 lets products package that code as a content-addressed verifier kit:
+Products can package that code as a content-addressed verifier kit:
 
 ```sh
 gaos verifier pack ./adapter.bundle.mjs \
