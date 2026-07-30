@@ -3,7 +3,8 @@
   "git_user": "yugao-gaos <yu.gao@gaos.ca>",
   "session_id": "root",
   "branch": "orch/attempt/codex-prepare-gaos-sdk-v0.26.0-release",
-  "status": "claimed",
+  "status": "tested",
   "claimed_at": "2026-07-30T01:45:44.985Z",
-  "lease_until": "2026-07-30T02:45:44.985Z"
+  "lease_until": "2026-07-30T02:45:44.985Z",
+  "completed_at": "2026-07-30T01:51:43.609Z"
 }
