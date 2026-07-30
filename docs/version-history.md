@@ -3,10 +3,31 @@
 GAOS uses the v0.x line to refine its contracts before v1.0. Products should
 review the migration notes when updating across minor versions.
 
-::: tip Current release: v0.25.0
-RFC-016 adds product-owned historical verifier-kit preservation and restricted
-execution to the portable evidence path.
+::: tip Current release: v0.26.0
+The coordinated GAOS identity migration and product-neutral SDK boundary are
+complete. Replay v1.0–v1.3 compatibility is unchanged.
 :::
+
+## v0.26.0: canonical GAOS identity and product boundary
+
+Released July 29, 2026 as the coordinated pre-1.0 breaking rename.
+
+- TypeScript now ships as `@yugao-gaos/gaos-sdk`; Python ships as `gaos-sdk`
+  and imports as `gaos_sdk`.
+- `gaos.ticks` v1 and `gaos.*` standalone schema identities replace the former
+  `agilabs.*` namespace. Published schema `$id` values use the canonical GAOS
+  Pages domain.
+- Generic TypeScript, synchronous Python, and asynchronous Python
+  `SessionClient` APIs keep hosted-session contracts product-neutral.
+- Arena/Zonoid clients and environments moved to the Zonoid product
+  repository, removing the SDK's dependency on reference-product behavior.
+- The package entry-point table now covers all public surfaces, and automated
+  architecture checks enforce browser safety, acyclic dependencies, direct
+  internal imports, canonical schema identity, and product isolation.
+- `gaos.replay` v1.0–v1.3, verifier-kit v1, CLI names, and evidence semantics
+  retain their existing interpretation.
+
+[Migration guide →](/releases#v0260)
 
 ## v0.25.0: product-owned historical verifier kits
 

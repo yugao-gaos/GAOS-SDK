@@ -104,7 +104,7 @@ export async function runVerifierKitCli(
         adapter,
         runtime: {
           kind: 'node-esm',
-          gaosVersion: '0.25.0',
+          gaosVersion: '0.26.0',
           nodeRange: '>=20.3',
         },
         replayFormats: ['gaos.replay@1.0', 'gaos.replay@1.1', 'gaos.replay@1.2', 'gaos.replay@1.3'],

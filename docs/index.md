@@ -32,9 +32,9 @@ features:
 
 ---
 
-<div class="release-proof" aria-label="GAOS v0.25 release facts">
+<div class="release-proof" aria-label="GAOS v0.26 release facts">
   <span><strong>Game-as-a-Benchmark</strong></span>
-  <span><strong>v0.25</strong> verifier kits</span>
+  <span><strong>v0.26</strong> product-neutral SDK</span>
   <span><strong>TypeScript + Python</strong></span>
 </div>
 
@@ -91,11 +91,12 @@ historical reducer + semantic adapter
 independent verification
 ```
 
-v0.25 makes the historical verifier portable as a product-owned,
+GAOS makes the historical verifier portable as a product-owned,
 content-addressed kit. GAOS checks and executes the kit; the product preserves
 and publishes it; an independent manifest, catalog, or allowlist authorizes its
 digest. If required verifier material is unavailable, the result is
-`unverifiable`—not silently trusted.
+`unverifiable`—not silently trusted. v0.26 keeps that evidence contract stable
+while moving product-specific hosted adapters out of the standard SDK.
 
 [Understand the verification boundary →](/trust-and-verification)
 

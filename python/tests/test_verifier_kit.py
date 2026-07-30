@@ -21,7 +21,7 @@ def manifest():
         },
         "runtime": {
             "kind": "node-esm",
-            "gaosVersion": "0.25.0",
+            "gaosVersion": "0.26.0",
             "nodeRange": ">=20.3",
         },
         "replayFormats": ["gaos.replay@1.3"],

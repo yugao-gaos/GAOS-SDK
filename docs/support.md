@@ -14,12 +14,12 @@ The current SDK establishes `gaos.ticks` v1 as the canonical transport with
 `kind: "tick"`, `tickId`, and `tick`.
 
 Pin an exact release for production and review the GitHub release notes before
-upgrading. Releases through v0.25.0 use the former package name:
+upgrading. v0.26.0 uses the canonical package name:
 
 ```json
 {
   "dependencies": {
-    "@yugao-gaos/turn-based-grid-sdk": "git+https://github.com/yugao-gaos/GAOS-SDK.git#v0.25.0"
+    "@yugao-gaos/gaos-sdk": "git+https://github.com/yugao-gaos/GAOS-SDK.git#v0.26.0"
   }
 }
 ```
@@ -38,6 +38,14 @@ coordinated GAOS rename is intentionally breaking: current consumers must
 update the package dependency, use the Python import `gaos_sdk`, and send the
 `gaos.ticks` protocol identifier. TypeScript entry points and CLI commands
 remain unchanged.
+
+Product-specific clients are no longer exported by the SDK. Replace
+TypeScript `ArenaClient` imports with the product-owned
+`@agilabs/arena-adapter`, and replace Python `agilabs_arena`, `ArenaClient`,
+`AsyncArenaClient`, and `ArenaEnv` imports with the Zonoid-owned
+`zonoid-gaos-adapter` package and import it as `zonoid_gaos` when integrating
+Zonoid. Other products should build their typed adapter on the generic
+TypeScript or Python `SessionClient`.
 
 The `./engine` entry point remains a genre-neutral game-mechanism suite for
 deterministic card, tactics, simulation, and hybrid games; spatial grids are

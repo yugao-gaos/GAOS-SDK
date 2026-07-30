@@ -32,10 +32,10 @@ release:
 npm install @yugao-gaos/gaos-sdk
 ```
 
-Until that release is published, install the renamed repository directly:
+Or install the exact Git tag directly:
 
 ```sh
-npm install 'git+https://github.com/yugao-gaos/GAOS-SDK.git'
+npm install 'git+https://github.com/yugao-gaos/GAOS-SDK.git#v0.26.0'
 ```
 
 ## Build a reducer
