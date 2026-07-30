@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/publish-gaos-sdk-v0.26.0-release",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "root",
+  "branch": "orch/attempt/codex-publish-gaos-sdk-v0.26.0-release",
+  "status": "claimed",
+  "claimed_at": "2026-07-30T02:09:02.998Z",
+  "lease_until": "2026-07-30T03:09:02.998Z"
+}
