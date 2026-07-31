@@ -2,9 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   commitPortalTransits,
   deriveSeatView,
+  locationKey,
   planPortalTransits,
   recheckTranscript,
+  shortestPath,
+  withPortalNeighbors,
+  type BoardLayout,
   type Cell,
+  type LocationRef,
   type PortalEdge,
   type PortalPolicy,
   type ActionReducer,
@@ -66,6 +71,26 @@ function stateFor(...entities: Entity[]): PortalState {
       { entity, container: 'hex', coord: [0, 0] as Cell },
     ])),
     transformCalls: [],
+  };
+}
+
+function worldLayout(
+  entries: readonly (readonly [LocationRef, readonly LocationRef[]])[],
+): BoardLayout<LocationRef> {
+  const locations = new Map<string, LocationRef>();
+  const adjacency = new Map<string, readonly LocationRef[]>();
+  for (const [location, neighbors] of entries) {
+    const key = locationKey(location);
+    locations.set(key, location);
+    adjacency.set(key, neighbors);
+    for (const location of neighbors) locations.set(locationKey(location), location);
+  }
+  return {
+    contains: (location) => locations.has(locationKey(location)),
+    key: locationKey,
+    neighbors: (location) => adjacency.get(locationKey(location)) ?? [],
+    distance: (from, to) => locationKey(from) === locationKey(to) ? 0 : 1,
+    line: (_from, to) => [to],
   };
 }
 
@@ -363,5 +388,188 @@ describe('portal transit', () => {
       wireId: 'Action 1',
       canonicalId: 'Action 1',
     }])).toMatchObject({ ok: true });
+  });
+});
+
+describe('portal-aware pathfinding', () => {
+  const hero: Entity = { id: 'hero', form: 'unit' };
+  const state = stateFor(hero);
+  const a0: LocationRef = { container: 'a', coord: 0 };
+  const a1: LocationRef = { container: 'a', coord: 1 };
+  const a2: LocationRef = { container: 'a', coord: 2 };
+  const b0: LocationRef = { container: 'b', coord: 0 };
+  const b1: LocationRef = { container: 'b', coord: 1 };
+  const c0: LocationRef = { container: 'c', coord: 'entry' };
+  const base = worldLayout([
+    [a0, [a1]],
+    [a1, [a2]],
+    [a2, []],
+    [b0, [b1]],
+    [b1, [b0]],
+    [c0, []],
+  ]);
+  const zonePolicy: PortalPolicy<PortalState, Entity> = {
+    ...policy(new Set(), Number.POSITIVE_INFINITY),
+    destinationKind: () => 'zone',
+  };
+
+  it('searches directed and bidirectional portals with container-aware identity', () => {
+    const directed: PortalEdge = { id: 'stairs', from: a1, to: b0 };
+    const boardPolicy: PortalPolicy<PortalState, Entity> = {
+      ...zonePolicy,
+      destinationKind: () => 'board',
+    };
+    const forward = withPortalNeighbors(base, {
+      state,
+      entity: hero,
+      edges: [directed],
+      policy: boardPolicy,
+    });
+    expect(shortestPath(forward, {
+      start: a0,
+      goal: b1,
+      isBlocked: () => false,
+    })).toEqual([a1, b0, b1]);
+    expect(shortestPath(forward, {
+      start: b1,
+      goal: a0,
+      isBlocked: () => false,
+    })).toEqual([]);
+
+    const bothWays = withPortalNeighbors(base, {
+      state,
+      entity: hero,
+      edges: [{ ...directed, bidirectional: true }],
+      policy: boardPolicy,
+    });
+    expect(shortestPath(bothWays, {
+      start: b1,
+      goal: a1,
+      isBlocked: () => false,
+    })).toEqual([b0, a1]);
+    expect(locationKey(a0)).not.toBe(locationKey(b0));
+  });
+
+  it('omits inactive, denied, blocked, and invalid destinations', () => {
+    const edges: PortalEdge[] = [
+      { id: 'inactive', from: a0, to: b0, priority: 0 },
+      { id: 'denied', from: a0, to: b0, priority: 1 },
+      { id: 'blocked', from: a0, to: b0, priority: 2 },
+      { id: 'invalid', from: a0, to: b0, priority: 3 },
+    ];
+    const filtered = withPortalNeighbors(base, {
+      state,
+      entity: hero,
+      edges,
+      policy: {
+        ...zonePolicy,
+        destinationKind: () => 'board',
+        isActive: (_state, edge) => edge.id !== 'inactive',
+        canTransit: (_state, _entity, edge) => edge.id !== 'denied',
+        placeOnto: (_state, _entity, edge) => edge.id === 'invalid' ? null : edge.to.coord,
+        canEnter: (_state, _entity, edge) => edge.id !== 'blocked',
+      },
+    });
+    expect(filtered.neighbors(a0)).toEqual([a1]);
+
+    expect(() => withPortalNeighbors(base, {
+      state,
+      entity: hero,
+      edges: [{ id: 'malformed', from: a0, to: { container: '', coord: 0 } }],
+      policy: zonePolicy,
+    })).toThrow('portal malformed to is invalid');
+  });
+
+  it('preserves ordinary and portal ordering while deduplicating destinations', () => {
+    const equalRoutes = worldLayout([
+      [a0, [a1]],
+      [a1, [b1]],
+      [a2, [b1]],
+      [b0, []],
+      [b1, []],
+      [c0, []],
+    ]);
+    const searchable = withPortalNeighbors(equalRoutes, {
+      state,
+      entity: hero,
+      edges: [
+        { id: 'late', from: a0, to: a2, priority: 2 },
+        { id: 'first', from: a0, to: b0, priority: 0 },
+        { id: 'duplicate', from: a0, to: b0, priority: 1 },
+        { id: 'normal-duplicate', from: a0, to: a1, priority: -1 },
+      ],
+      policy: zonePolicy,
+    });
+    expect(searchable.neighbors(a0)).toEqual([a1, b0, a2]);
+    expect(shortestPath(searchable, {
+      start: a0,
+      goal: b1,
+      isBlocked: () => false,
+    })).toEqual([a1, b1]);
+  });
+
+  it('adapts heterogeneous destinations and terminates through portal cycles', () => {
+    const searchable = withPortalNeighbors(base, {
+      state,
+      entity: hero,
+      edges: [
+        { id: 'to-graph', from: a0, to: c0 },
+        { id: 'cycle-back', from: c0, to: a0 },
+      ],
+      policy: zonePolicy,
+    });
+    expect(searchable.neighbors(a0)).toEqual([a1, c0]);
+    expect(shortestPath(searchable, {
+      start: a0,
+      goal: c0,
+      isBlocked: () => false,
+    })).toEqual([c0]);
+    expect(shortestPath(searchable, {
+      start: c0,
+      goal: b1,
+      isBlocked: () => false,
+    })).toEqual([]);
+  });
+
+  it('keeps search advisory and leaves execution-time planning authoritative', () => {
+    let transforms = 0;
+    let commits = 0;
+    const portalPolicy: PortalPolicy<PortalState, Entity> = {
+      ...zonePolicy,
+      transform: (entity) => {
+        transforms++;
+        return { ...entity, form: 'transformed' };
+      },
+    };
+    const searchable = withPortalNeighbors(base, {
+      state,
+      entity: hero,
+      edges: [{ id: 'door', from: a0, to: b0 }],
+      policy: portalPolicy,
+    });
+    expect(shortestPath(searchable, {
+      start: a0,
+      goal: b0,
+      isBlocked: () => false,
+    })).toEqual([b0]);
+    expect(state).toEqual(stateFor(hero));
+    expect(transforms).toBe(0);
+    expect(commits).toBe(0);
+
+    const plan = planPortalTransits(state, [{ entity: hero, at: a0 }], [{
+      id: 'door',
+      from: a0,
+      to: b0,
+    }], portalPolicy, { maxPasses: 1 });
+    if (!plan.ok) throw new Error(plan.message);
+    const committed = commitPortalTransits(state, plan, portalPolicy, {
+      commit: (current) => {
+        commits++;
+        return current;
+      },
+    });
+    expect(committed.ok).toBe(true);
+    expect(transforms).toBe(1);
+    expect(commits).toBe(1);
   });
 });

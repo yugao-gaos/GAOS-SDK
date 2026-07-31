@@ -1,12 +1,12 @@
 # GAOS SDK — RFC sequence and release roadmap
 
-Status: implemented through v0.25 ·
+Status: implemented through RFC-017 for v0.27 ·
 Target: v0.13 → v1.0 arc · Baseline: v0.12.0 export surface
 
 ::: info Design record and roadmap
 RFC-001 through RFC-013 record the design path that led to the current SDK.
-RFC-014 and RFC-015 are shipped in v0.24. RFC-016 ships in v0.25. For
-supported APIs and current terminology, use the
+RFC-014 and RFC-015 are shipped in v0.24. RFC-016 ships in v0.25. RFC-017 is
+implemented for v0.27. For supported APIs and current terminology, use the
 [architecture map](/architecture), [capability map](/capabilities), and
 [mechanism reference](/mechanisms/).
 :::
@@ -50,6 +50,7 @@ Two standing design rules govern every RFC in this batch:
 | [014](rfc-014-interoperability-and-dynamic-control-evidence.md) | Interoperability and dynamic-control evidence | v0.24 (historical v0.23 target) | 006, 010, 012, 013 |
 | [015](rfc-015-verifiable-benchmark-publication.md) | Verifiable benchmark execution and publication | v0.24 | 013, 014 |
 | [016](rfc-016-product-owned-verifier-kits.md) | Product-owned historical verifier kits | v0.25 | 014, 015 |
+| [017](rfc-017-portal-aware-pathfinding.md) | Portal-aware pathfinding through layout neighbors | v0.27 | 002, 005 |
 
 Sequencing rationale: RFC-001/002 are contract-level and mostly mechanical —
 they unblock naming and addressing for everything else. RFC-003 is the one
@@ -66,6 +67,9 @@ starter. Both RFC-014 and RFC-015 ship in the official v0.24 release.
 RFC-016 preserves the ownership boundary while standardizing how products
 explicitly export, content-address, distribute, authorize, cache, and
 restrict execution of historical reducers and semantic adapters.
+RFC-017 treats eligible portal destinations as additional
+`BoardLayout.neighbors` so existing breadth-first pathfinding can cross
+containers without introducing a second pathfinding algorithm.
 
 The [batch implementation review](implementation-review.md) maps every
 normative requirement and test-plan fixture to its shipped API and evidence.

@@ -60,6 +60,38 @@ Transit order is:
 Bidirectional edges retain their authored order. Multi-hop passes advance the
 wave and preserve a golden causal trace.
 
+## Portal-aware pathfinding
+
+`withPortalNeighbors` creates an advisory search view by appending eligible
+portal destinations to a container-aware `BoardLayout<LocationRef>`:
+
+```ts
+const searchable = withPortalNeighbors(worldLayout, {
+  state,
+  entity: hero,
+  edges,
+  policy,
+});
+
+const path = shortestPath(searchable, {
+  start: hero.at,
+  goal: throneRoom,
+  isBlocked,
+});
+```
+
+Ordinary layout neighbors stay first. Portal destinations follow the same
+priority, authored-edge, and orientation order as portal planning, and
+duplicate locations are removed by `locationKey`. The helper shares the
+planner's activation, permission, destination adaptation, footprint, and
+`canEnter` semantics.
+
+Search captures the supplied state and entity without mutating either one. It
+does not reserve capacity, transform an entity, or execute a move. Every portal
+step still goes through `planPortalTransits` and `commitPortalTransits`; if
+state changes after search, recompute the path or let execution reject the
+stale route.
+
 ## Atomic commit
 
 `commitPortalTransits` accepts only the exact state identity used for the

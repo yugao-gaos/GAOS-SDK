@@ -1,5 +1,6 @@
 import type { LocationCoord, LocationRef } from './locations.js';
 import { locationKey } from './locations.js';
+import type { BoardLayout } from './layouts.js';
 
 export interface PortalEdge {
   id: string;
@@ -45,6 +46,13 @@ export interface PortalPolicy<TState, TEntity> {
   capacityAt?(state: TState, destination: LocationRef): number;
   /** Runs exactly once per committed edge traversal. */
   transform?(entity: TEntity, edge: PortalEdge): TEntity;
+}
+
+export interface PortalNeighborLayoutOptions<TState, TEntity> {
+  state: TState;
+  entity: TEntity;
+  edges: readonly PortalEdge[];
+  policy: PortalPolicy<TState, TEntity>;
 }
 
 export interface PortalEntrant<TEntity> {
@@ -311,6 +319,89 @@ function edgeCandidates<TState, TEntity>(
   ));
 }
 
+function assertPortalPolicy<TState, TEntity>(
+  policy: PortalPolicy<TState, TEntity>,
+): void {
+  if (!policy || typeof policy.entityId !== 'function'
+    || typeof policy.isActive !== 'function'
+    || typeof policy.canTransit !== 'function') {
+    throw new TypeError('portal policy requires entityId, isActive, and canTransit');
+  }
+}
+
+/**
+ * Add currently eligible portal destinations to a container-aware layout.
+ *
+ * The returned search view captures one state/entity snapshot. It remains
+ * advisory: executing a discovered portal step still requires portal planning
+ * and commit.
+ */
+export function withPortalNeighbors<TState, TEntity>(
+  layout: BoardLayout<LocationRef>,
+  options: PortalNeighborLayoutOptions<TState, TEntity>,
+): BoardLayout<LocationRef> {
+  if (!layout || typeof layout.neighbors !== 'function'
+    || typeof layout.distance !== 'function'
+    || typeof layout.line !== 'function'
+    || typeof layout.contains !== 'function'
+    || typeof layout.key !== 'function') {
+    throw new TypeError('portal neighbors require a LocationRef board layout');
+  }
+  if (!options || typeof options !== 'object') {
+    throw new TypeError('portal neighbor options are required');
+  }
+  assertPortalPolicy(options.policy);
+  const oriented = orientEdges(options.edges);
+
+  return {
+    contains: (cell) => layout.contains(cell),
+    key: (cell) => layout.key(cell),
+    distance: (from, to) => layout.distance(from, to),
+    line: (from, to) => layout.line(from, to),
+    neighbors(at) {
+      assertLocation(at, 'portal neighbor location');
+      const neighbors: LocationRef[] = [];
+      const seen = new Set<string>();
+      const append = (location: LocationRef): void => {
+        const key = locationKey(location);
+        if (seen.has(key)) return;
+        seen.add(key);
+        neighbors.push(location);
+      };
+      for (const neighbor of layout.neighbors(at)) append(neighbor);
+      if (!layout.contains(at)) return neighbors;
+
+      const candidates = edgeCandidates(
+        options.state,
+        options.entity,
+        at,
+        undefined,
+        oriented,
+        options.policy,
+      );
+      for (const { edge } of candidates) {
+        if (!options.policy.canTransit(options.state, options.entity, edge)) continue;
+        const destination = destinationFor(
+          options.state,
+          options.entity,
+          edge,
+          options.policy,
+        );
+        if (!destination || !layout.contains(destination.to)) continue;
+        if (options.policy.canEnter && !options.policy.canEnter(
+          options.state,
+          options.entity,
+          edge,
+          destination.to,
+          destination.claims,
+        )) continue;
+        append(destination.to);
+      }
+      return neighbors;
+    },
+  };
+}
+
 function rejectGroup<TState, TEntity>(
   paths: readonly PlannedPath<TState, TEntity>[],
   group: string,
@@ -363,11 +454,7 @@ export function planPortalTransits<TState, TEntity>(
   policy: PortalPolicy<TState, TEntity>,
   options: PortalPlanningOptions,
 ): PortalTransitPlan<TState, TEntity> | PortalTransitFailure<TState, TEntity> {
-  if (!policy || typeof policy.entityId !== 'function'
-    || typeof policy.isActive !== 'function'
-    || typeof policy.canTransit !== 'function') {
-    throw new TypeError('portal policy requires entityId, isActive, and canTransit');
-  }
+  assertPortalPolicy(policy);
   if (!options || !Number.isSafeInteger(options.maxPasses) || options.maxPasses < 1) {
     throw new RangeError('portal maxPasses must be a positive safe integer');
   }
