@@ -1,6 +1,6 @@
 # GAOS SDK — RFC sequence and release roadmap
 
-Status: implemented through RFC-017 for v0.27 ·
+Status: implemented through RFC-017 for v0.27; RFC-018 proposed for v0.28 ·
 Target: v0.13 → v1.0 arc · Baseline: v0.12.0 export surface
 
 ::: info Design record and roadmap
@@ -51,6 +51,7 @@ Two standing design rules govern every RFC in this batch:
 | [015](rfc-015-verifiable-benchmark-publication.md) | Verifiable benchmark execution and publication | v0.24 | 013, 014 |
 | [016](rfc-016-product-owned-verifier-kits.md) | Product-owned historical verifier kits | v0.25 | 014, 015 |
 | [017](rfc-017-portal-aware-pathfinding.md) | Portal-aware pathfinding through layout neighbors | v0.27 | 002, 005 |
+| [018](rfc-018-unified-session-lifecycle.md) | Unified session lifecycle and runner | proposed v0.28 | 006, 013, 015 |
 
 Sequencing rationale: RFC-001/002 are contract-level and mostly mechanical —
 they unblock naming and addressing for everything else. RFC-003 is the one
@@ -70,6 +71,11 @@ restrict execution of historical reducers and semantic adapters.
 RFC-017 treats eligible portal destinations as additional
 `BoardLayout.neighbors` so existing breadth-first pathfinding can cross
 containers without introducing a second pathfinding algorithm.
+RFC-018 closes the live-execution gap by making normal, guided, autonomous,
+benchmark, and arena play share one create/attach/observe/act/finalize/close
+session lifecycle and one paced-or-unpaced runner. Benchmark APIs remain the
+batch planning, scoring, packaging, and verification layer rather than a
+second live-session stack.
 
 The [batch implementation review](implementation-review.md) maps every
 normative requirement and test-plan fixture to its shipped API and evidence.
