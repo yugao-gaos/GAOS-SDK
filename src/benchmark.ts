@@ -1,5 +1,13 @@
 import { bytesToHex, sha256 } from './engine/commitment.js';
 import { canonicalJson, type JsonValue } from './protocol.js';
+import type { AgentDriver } from './agent/driver.js';
+import {
+  runSession,
+  type SessionObservationAdapter,
+  type SessionRunPolicy,
+  type SessionRunResult,
+} from './agent/session-runner.js';
+import type { SessionHandle } from './client.js';
 import type {
   ExternalAttestation,
   ExternalTrustResolver,
@@ -163,18 +171,46 @@ export interface BenchmarkAgentAdapter {
   runEpisode(plan: BenchmarkEpisodePlan): Promise<BenchmarkEpisodeResult>;
 }
 
+export interface BenchmarkInProgressCheckpoint {
+  plan: BenchmarkEpisodePlan;
+  /** Host-owned continuation data; never interpreted as replay evidence. */
+  attachment: JsonValue;
+  attachReceiptDigest?: string;
+}
+
 export interface BenchmarkRunCheckpoint {
   schema: 'gaos.benchmark-run-checkpoint.v1';
   manifestDigest: string;
   agent: { kind: BenchmarkAgentKind; id: string };
   plan: readonly BenchmarkEpisodePlan[];
   completed: readonly BenchmarkEpisodeResult[];
+  inProgress?: readonly BenchmarkInProgressCheckpoint[];
 }
 
 export interface BenchmarkRun {
   status: 'complete' | 'interrupted';
   checkpoint: BenchmarkRunCheckpoint;
   aggregate?: BenchmarkAggregate;
+}
+
+export interface BenchmarkSessionFactory<TCommand, TObservation, TOutcome> {
+  createEpisode(
+    plan: BenchmarkEpisodePlan,
+  ): Promise<SessionHandle<TCommand, TObservation, TOutcome>>;
+  attachEpisode?(
+    checkpoint: BenchmarkInProgressCheckpoint,
+  ): Promise<SessionHandle<TCommand, TObservation, TOutcome>>;
+}
+
+export interface BenchmarkSessionExecution<TCommand, TObservation, TOutcome> {
+  factory: BenchmarkSessionFactory<TCommand, TObservation, TOutcome>;
+  createDriver(plan: BenchmarkEpisodePlan): AgentDriver<TObservation>;
+  policy?: SessionRunPolicy;
+  observationAdapter?: SessionObservationAdapter<TObservation>;
+  toEpisodeResult(
+    plan: BenchmarkEpisodePlan,
+    run: SessionRunResult<TOutcome>,
+  ): BenchmarkEpisodeResult | Promise<BenchmarkEpisodeResult>;
 }
 
 export interface BenchmarkBundleEpisode {
@@ -372,13 +408,18 @@ function aggregateEpisodeResults(
  * are always canonical plan order, so parallelism and resume cannot affect
  * episode identities or scores.
  */
-export async function runBenchmark(
+export async function runBenchmark<
+  TCommand = unknown,
+  TObservation = unknown,
+  TOutcome = JsonValue,
+>(
   manifest: BenchmarkManifest,
   adapter: BenchmarkAgentAdapter,
   options: {
     parallelism?: number;
     resume?: BenchmarkRunCheckpoint;
     maxNewEpisodes?: number;
+    sessions?: BenchmarkSessionExecution<TCommand, TObservation, TOutcome>;
   } = {},
 ): Promise<BenchmarkRun> {
   const plan = planBenchmarkEpisodes(manifest);
@@ -393,6 +434,7 @@ export async function runBenchmark(
     throw new RangeError('maxNewEpisodes must be a non-negative safe integer');
   }
   const completed = new Map<number, BenchmarkEpisodeResult>();
+  const inProgress = new Map<number, BenchmarkInProgressCheckpoint>();
   if (options.resume !== undefined) {
     if (options.resume.schema !== 'gaos.benchmark-run-checkpoint.v1'
       || options.resume.manifestDigest !== manifestDigest
@@ -410,6 +452,25 @@ export async function runBenchmark(
       assertEpisodeResult(expected, result);
       completed.set(result.plan.index, structuredClone(result));
     }
+    for (const checkpoint of options.resume.inProgress ?? []) {
+      const expected = plan[checkpoint.plan.index];
+      if (
+        expected === undefined
+        || completed.has(checkpoint.plan.index)
+        || inProgress.has(checkpoint.plan.index)
+        || canonicalJson(checkpoint.plan as unknown as JsonValue)
+          !== canonicalJson(expected as unknown as JsonValue)
+      ) {
+        throw new TypeError('checkpoint contains duplicate or unknown in-progress episodes');
+      }
+      if (checkpoint.attachReceiptDigest !== undefined) {
+        assertNonEmpty(checkpoint.attachReceiptDigest, 'attachReceiptDigest');
+      }
+      inProgress.set(checkpoint.plan.index, structuredClone(checkpoint));
+    }
+  }
+  if (inProgress.size > 0 && options.sessions === undefined) {
+    throw new TypeError('in-progress checkpoints require session-backed execution');
   }
   const pending = plan.filter((entry) => !completed.has(entry.index));
   const limit = options.maxNewEpisodes === undefined
@@ -421,7 +482,38 @@ export async function runBenchmark(
     async () => {
       while (cursor < limit) {
         const entry = pending[cursor++]!;
-        const result = await adapter.runEpisode(structuredClone(entry));
+        let result: BenchmarkEpisodeResult;
+        if (options.sessions) {
+          const continuation = inProgress.get(entry.index);
+          if (continuation && !options.sessions.factory.attachEpisode) {
+            throw new TypeError('session factory cannot attach an in-progress episode');
+          }
+          const session = continuation
+            ? await options.sessions.factory.attachEpisode!(structuredClone(continuation))
+            : await options.sessions.factory.createEpisode(structuredClone(entry));
+          try {
+            const run = await runSession(
+              session,
+              options.sessions.createDriver(structuredClone(entry)),
+              {
+                policy: options.sessions.policy ?? {
+                  pacing: 'unpaced',
+                  conversation: 'continuous',
+                  finalize: 'automatic',
+                },
+                ...(options.sessions.observationAdapter
+                  ? { observationAdapter: options.sessions.observationAdapter }
+                  : {}),
+              },
+            );
+            result = await options.sessions.toEpisodeResult(structuredClone(entry), run);
+          } finally {
+            await session.close();
+          }
+          inProgress.delete(entry.index);
+        } else {
+          result = await adapter.runEpisode(structuredClone(entry));
+        }
         assertEpisodeResult(entry, result);
         completed.set(entry.index, structuredClone(result));
       }
@@ -437,6 +529,13 @@ export async function runBenchmark(
     agent: { kind: adapter.kind, id: adapter.id },
     plan: structuredClone(plan),
     completed: ordered,
+    ...(inProgress.size > 0
+      ? {
+          inProgress: [...inProgress.values()]
+            .sort((left, right) => left.plan.index - right.plan.index)
+            .map((checkpoint) => structuredClone(checkpoint)),
+        }
+      : {}),
   };
   if (ordered.length !== plan.length) return { status: 'interrupted', checkpoint };
   return {

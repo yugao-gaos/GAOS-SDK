@@ -3,10 +3,29 @@
 GAOS uses the v0.x line to refine its contracts before v1.0. Products should
 review the migration notes when updating across minor versions.
 
-::: tip Current release: v0.26.0
-The coordinated GAOS identity migration and product-neutral SDK boundary are
-complete. Replay v1.0–v1.3 compatibility is unchanged.
+::: tip Next release: v0.27.0
+RFC-017 portal-aware paths and RFC-018's unified live-session lifecycle are
+implemented. Replay v1.0–v1.3 compatibility is unchanged.
 :::
+
+## v0.27.0: portal-aware paths and unified sessions
+
+Prepared July 31, 2026 as an additive release.
+
+- Portal-aware layout neighbors reuse ordinary breadth-first pathfinding while
+  preserving the separate authoritative transit plan/commit boundary.
+- Create and attach produce the same live-session handle at the durable head;
+  close remains local-only.
+- Generic attachment receipts are canonically digested and independently
+  chain-verifiable.
+- Normal and evaluated play share one immutable finalization operation.
+- `runSession` makes pacing presentation-only and supports fresh agent context
+  at authoritative episode transitions without changing session identity.
+- Session-backed benchmark execution uses `runSession` while retaining
+  existing adapters and deterministic batch behavior.
+
+[Unified session lifecycle →](/rfcs/rfc-018-unified-session-lifecycle) ·
+[Portal-aware pathfinding →](/rfcs/rfc-017-portal-aware-pathfinding)
 
 ## v0.26.0: canonical GAOS identity and product boundary
 

@@ -28,3 +28,13 @@ export {
   runAgentDriverEpisode,
   type AgentDriverEpisodeResult,
 } from './run.js';
+export {
+  runSession,
+  type SessionEpisodeIdentity,
+  type SessionObservationAdapter,
+  type SessionPacing,
+  type SessionPresentation,
+  type SessionRunEvents,
+  type SessionRunPolicy,
+  type SessionRunResult,
+} from './session-runner.js';

@@ -10,12 +10,16 @@ import {
   PROTOCOL_VERSION,
   assertJsonObject,
   assertJsonValue,
+  canonicalJson,
   isParticipantId,
   type CommandSubmission,
+  type JsonObject,
   type JsonValue,
+  type ProtocolExtensions,
   type TickCursor,
   type TickResult,
 } from './protocol.js';
+import { bytesToHex, sha256 } from './engine/commitment.js';
 
 export interface SessionBinding extends TickCursor {
   protocol: typeof PROTOCOL_ID;
@@ -28,6 +32,120 @@ export interface SessionStart<TObservation = unknown> {
   sessionId: string;
   tick: TObservation;
   binding: SessionBinding;
+}
+
+export interface SessionControllerIdentity {
+  kind: 'human' | 'provider' | 'cli' | 'local-agent' | 'mixed';
+  id: string;
+  provider?: string;
+  model?: string;
+  version?: string;
+}
+
+export interface SessionPolicy {
+  evaluation:
+    | { kind: 'none' }
+    | { kind: 'practice'; evaluator?: string }
+    | {
+        kind: 'official';
+        benchmarkId: string;
+        benchmarkVersion: string;
+        manifestDigest: string;
+      };
+  durability: {
+    attachable: boolean;
+    retention?: { kind: 'host-policy'; policyId: string };
+  };
+  evidence:
+    | { kind: 'none' }
+    | { kind: 'replay' }
+    | {
+        kind: 'verification';
+        attachReceipts?: boolean;
+        verifierReference?: JsonObject;
+      };
+  publication:
+    | { kind: 'none' }
+    | { kind: 'eligible'; policyId: string; policyVersion: string };
+  controller?: SessionControllerIdentity;
+  extensions?: ProtocolExtensions;
+}
+
+export interface SessionAttachRequest {
+  participantId?: string;
+  requestId: string;
+  controller?: SessionControllerIdentity;
+  extensions?: ProtocolExtensions;
+}
+
+export interface SessionAttachReceipt {
+  schema: 'gaos.session-attach-receipt.v1';
+  sessionId: string;
+  requestId: string;
+  sequence: number;
+  revision: number;
+  transcriptDigest: string;
+  stateDigest: string;
+  attachedAt?: number;
+  previousReceiptDigest?: string;
+  receiptDigest: string;
+  controller?: SessionControllerIdentity;
+  extensions?: ProtocolExtensions;
+}
+
+export interface SessionAttach<TObservation = unknown> {
+  sessionId: string;
+  tick: TObservation;
+  binding: SessionBinding;
+  receipt?: SessionAttachReceipt;
+  extensions?: ProtocolExtensions;
+}
+
+export interface SessionFinalizeRequest {
+  requestId: string;
+  metadata?: JsonObject;
+  extensions?: ProtocolExtensions;
+}
+
+export interface SessionArtifactReference {
+  kind: string;
+  digest?: string;
+  uri?: string;
+  mediaType?: string;
+  extensions?: ProtocolExtensions;
+}
+
+export interface SessionResult<TOutcome = JsonValue> {
+  sessionId: string;
+  status: 'finalized';
+  outcome: TOutcome;
+  replay?: JsonValue | string;
+  evaluation?: JsonObject;
+  artifacts?: readonly SessionArtifactReference[];
+  extensions?: ProtocolExtensions;
+}
+
+export interface SubmitIntentOptions {
+  participantId?: string;
+  submissionId?: string;
+  cursor?: TickCursor;
+  signal?: AbortSignal;
+}
+
+export interface SessionHandle<
+  TCommand = unknown,
+  TObservation = unknown,
+  TOutcome = JsonValue,
+> {
+  readonly sessionId: string;
+  readonly participantId: string;
+  readonly policy: SessionPolicy;
+  readonly status: 'active' | 'terminal' | 'finalized' | 'closed';
+  readonly attachReceipt?: SessionAttachReceipt;
+  observe(options?: SessionCallOptions): Promise<TickResult<TObservation>>;
+  act(command: TCommand, options?: SubmitIntentOptions): Promise<TickResult<TObservation>>;
+  finalize(request?: Partial<SessionFinalizeRequest>): Promise<SessionResult<TOutcome>>;
+  close(): void | Promise<void>;
 }
 
 export class ProtocolMismatchError extends Error {
@@ -108,6 +226,110 @@ export function parseSessionBinding(value: unknown): SessionBinding {
   };
 }
 
+function assertNonEmptyString(value: unknown, field: string): asserts value is string {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new ProtocolMismatchError(`${field} must be a non-empty string`);
+  }
+}
+
+function receiptContent(receipt: Omit<SessionAttachReceipt, 'receiptDigest'>): JsonObject {
+  return receipt as unknown as JsonObject;
+}
+
+/** Construct the portable digest over every receipt field except `receiptDigest`. */
+export function sessionAttachReceiptDigest(
+  receipt: Omit<SessionAttachReceipt, 'receiptDigest'>,
+): string {
+  assertJsonObject(receipt, 'session attach receipt');
+  return bytesToHex(sha256(new TextEncoder().encode(
+    canonicalJson(receiptContent(receipt)),
+  )));
+}
+
+export function createSessionAttachReceipt(
+  receipt: Omit<SessionAttachReceipt, 'schema' | 'receiptDigest'>,
+): SessionAttachReceipt {
+  const unsigned = {
+    schema: 'gaos.session-attach-receipt.v1' as const,
+    ...structuredClone(receipt),
+  };
+  return { ...unsigned, receiptDigest: sessionAttachReceiptDigest(unsigned) };
+}
+
+/** Independently verify receipt contents, monotonic order, and digest linkage. */
+export function verifySessionAttachReceiptChain(
+  receipts: readonly SessionAttachReceipt[],
+): { valid: boolean; problems: string[] } {
+  const problems: string[] = [];
+  let previous: SessionAttachReceipt | undefined;
+  for (const [index, receipt] of receipts.entries()) {
+    if (receipt.schema !== 'gaos.session-attach-receipt.v1') {
+      problems.push(`receipt ${index} has an unsupported schema`);
+      continue;
+    }
+    const { receiptDigest, ...unsigned } = receipt;
+    let computedDigest: string | undefined;
+    try {
+      computedDigest = sessionAttachReceiptDigest(unsigned);
+    } catch {
+      problems.push(`receipt ${index} is not canonical JSON`);
+    }
+    if (computedDigest !== undefined && computedDigest !== receiptDigest) {
+      problems.push(`receipt ${index} digest does not match its contents`);
+    }
+    if (previous) {
+      if (receipt.sessionId !== previous.sessionId) {
+        problems.push(`receipt ${index} changes session identity`);
+      }
+      if (receipt.sequence !== previous.sequence + 1) {
+        problems.push(`receipt ${index} sequence is not contiguous`);
+      }
+      if (receipt.revision < previous.revision) {
+        problems.push(`receipt ${index} rolls revision backward`);
+      }
+      if (receipt.previousReceiptDigest !== previous.receiptDigest) {
+        problems.push(`receipt ${index} does not link to the previous receipt`);
+      }
+    } else if (receipt.previousReceiptDigest !== undefined) {
+      problems.push('first receipt unexpectedly links to an omitted predecessor');
+    }
+    previous = receipt;
+  }
+  return { valid: problems.length === 0, problems };
+}
+
+function parseSessionAttachReceipt(value: unknown): SessionAttachReceipt {
+  try {
+    assertJsonObject(value, 'attach receipt');
+  } catch (error) {
+    throw new ProtocolMismatchError(error instanceof Error ? error.message : 'attach receipt invalid');
+  }
+  const receipt = value as unknown as SessionAttachReceipt;
+  if (
+    receipt.schema !== 'gaos.session-attach-receipt.v1'
+    || !Number.isSafeInteger(receipt.sequence)
+    || receipt.sequence < 0
+    || !Number.isSafeInteger(receipt.revision)
+    || receipt.revision < 0
+  ) {
+    throw new ProtocolMismatchError('attach receipt schema or sequence is invalid');
+  }
+  for (const [field, item] of [
+    ['sessionId', receipt.sessionId],
+    ['requestId', receipt.requestId],
+    ['transcriptDigest', receipt.transcriptDigest],
+    ['stateDigest', receipt.stateDigest],
+    ['receiptDigest', receipt.receiptDigest],
+  ] as const) {
+    assertNonEmptyString(item, `attach receipt ${field}`);
+  }
+  const { receiptDigest, ...unsigned } = receipt;
+  if (sessionAttachReceiptDigest(unsigned) !== receiptDigest) {
+    throw new ProtocolMismatchError('attach receipt digest does not match its contents');
+  }
+  return structuredClone(receipt);
+}
+
 function isParticipantList(value: unknown): value is string[] {
   return Array.isArray(value) && value.every(isParticipantId);
 }
@@ -178,6 +400,89 @@ export function parseTickResult<TObservation = unknown>(data: unknown): TickResu
     }
   }
   return value as unknown as TickResult<TObservation>;
+}
+
+export function parseSessionAttach<TObservation = unknown>(
+  data: unknown,
+  requestedSessionId?: string,
+): SessionAttach<TObservation> {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new ProtocolMismatchError('session attachment must be an object');
+  }
+  const value = data as Record<string, unknown>;
+  assertNonEmptyString(value['sessionId'], 'attachment sessionId');
+  if (requestedSessionId !== undefined && value['sessionId'] !== requestedSessionId) {
+    throw new ProtocolMismatchError('attachment session does not match request');
+  }
+  if (!Object.hasOwn(value, 'tick')) {
+    throw new ProtocolMismatchError('attachment tick missing');
+  }
+  const binding = parseSessionBinding(value['binding']);
+  if (binding.sessionId !== value['sessionId']) {
+    throw new ProtocolMismatchError('attachment binding does not match session');
+  }
+  let extensions: ProtocolExtensions | undefined;
+  if (Object.hasOwn(value, 'extensions')) {
+    try {
+      assertJsonObject(value['extensions'], 'attachment extensions');
+      extensions = structuredClone(value['extensions']);
+    } catch (error) {
+      throw new ProtocolMismatchError(
+        error instanceof Error ? error.message : 'attachment extensions invalid',
+      );
+    }
+  }
+  return {
+    sessionId: value['sessionId'],
+    tick: value['tick'] as TObservation,
+    binding,
+    ...(Object.hasOwn(value, 'receipt')
+      ? { receipt: parseSessionAttachReceipt(value['receipt']) }
+      : {}),
+    ...(extensions ? { extensions } : {}),
+  };
+}
+
+export function parseSessionResult<TOutcome = JsonValue>(
+  data: unknown,
+  requestedSessionId?: string,
+): SessionResult<TOutcome> {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new ProtocolMismatchError('session result must be an object');
+  }
+  const value = data as Record<string, unknown>;
+  assertNonEmptyString(value['sessionId'], 'result sessionId');
+  if (requestedSessionId !== undefined && value['sessionId'] !== requestedSessionId) {
+    throw new ProtocolMismatchError('result session does not match request');
+  }
+  if (value['status'] !== 'finalized' || !Object.hasOwn(value, 'outcome')) {
+    throw new ProtocolMismatchError('session result must be finalized with an outcome');
+  }
+  try {
+    assertJsonValue(value['outcome'], 'session result outcome');
+    if (Object.hasOwn(value, 'replay')) assertJsonValue(value['replay'], 'session result replay');
+    if (Object.hasOwn(value, 'evaluation')) {
+      assertJsonObject(value['evaluation'], 'session result evaluation');
+    }
+    if (Object.hasOwn(value, 'extensions')) {
+      assertJsonObject(value['extensions'], 'session result extensions');
+    }
+    if (Object.hasOwn(value, 'artifacts')) {
+      if (!Array.isArray(value['artifacts'])) {
+        throw new TypeError('session result artifacts must be an array');
+      }
+      for (const artifact of value['artifacts']) {
+        assertJsonObject(artifact, 'session result artifact');
+        assertNonEmptyString(artifact['kind'], 'session result artifact kind');
+      }
+    }
+  } catch (error) {
+    if (error instanceof ProtocolMismatchError) throw error;
+    throw new ProtocolMismatchError(
+      error instanceof Error ? error.message : 'session result invalid',
+    );
+  }
+  return structuredClone(value) as unknown as SessionResult<TOutcome>;
 }
 
 function awaitWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
@@ -346,6 +651,126 @@ export class SessionClient {
     return { sessionId: result.sessionId, tick: result.tick, binding };
   }
 
+  async attachSession<TObservation = unknown>(
+    sessionId: string,
+    request: SessionAttachRequest,
+    callOptions: SessionCallOptions = {},
+  ): Promise<SessionAttach<TObservation>> {
+    assertNonEmptyString(sessionId, 'sessionId');
+    assertNonEmptyString(request.requestId, 'attach requestId');
+    assertJsonValue(request, 'attach request');
+    const attachment = parseSessionAttach<TObservation>(
+      await this.call(
+        'POST',
+        `/v1/sessions/${encodeURIComponent(sessionId)}/attach`,
+        request as unknown as JsonValue,
+        callOptions,
+      ),
+      sessionId,
+    );
+    const participantId = request.participantId ?? attachment.binding.participantId;
+    if (participantId !== attachment.binding.participantId) {
+      throw new ProtocolMismatchError('attachment participant does not match request');
+    }
+    if (attachment.receipt && attachment.receipt.requestId !== request.requestId) {
+      throw new ProtocolMismatchError('attachment receipt does not match request');
+    }
+    if (
+      request.controller
+      && attachment.receipt?.controller
+      && canonicalJson(request.controller as unknown as JsonValue)
+        !== canonicalJson(attachment.receipt.controller as unknown as JsonValue)
+    ) {
+      throw new ProtocolMismatchError('attachment receipt changes controller identity');
+    }
+    this.bindings.set(sessionId, attachment.binding);
+    return attachment;
+  }
+
+  async finalizeSession<TOutcome = JsonValue>(
+    sessionId: string,
+    request: SessionFinalizeRequest,
+    callOptions: SessionCallOptions = {},
+  ): Promise<SessionResult<TOutcome>> {
+    assertNonEmptyString(sessionId, 'sessionId');
+    assertNonEmptyString(request.requestId, 'finalization requestId');
+    assertJsonValue(request, 'finalization request');
+    return parseSessionResult<TOutcome>(
+      await this.call(
+        'POST',
+        `/v1/sessions/${encodeURIComponent(sessionId)}/finalize`,
+        request as unknown as JsonValue,
+        callOptions,
+      ),
+      sessionId,
+    );
+  }
+
+  async createSessionHandle<
+    TRequest = unknown,
+    TCommand = unknown,
+    TObservation = unknown,
+    TOutcome = JsonValue,
+  >(
+    request: TRequest,
+    policy: SessionPolicy,
+    participantId = 'player',
+    callOptions: SessionCallOptions = {},
+  ): Promise<SessionHandle<TCommand, TObservation, TOutcome>> {
+    assertJsonValue(policy, 'session policy');
+    if (!request || typeof request !== 'object' || Array.isArray(request)) {
+      throw new TypeError('session handle request must be a JSON object');
+    }
+    const policyRequest = {
+      ...(request as Record<string, unknown>),
+      policy,
+    };
+    const start = await this.createSession<typeof policyRequest, TObservation>(
+      policyRequest,
+      participantId,
+      callOptions,
+    );
+    return new ClientSessionHandle<TCommand, TObservation, TOutcome>(
+      this,
+      start.sessionId,
+      start.binding.participantId,
+      policy,
+    );
+  }
+
+  async attachSessionHandle<
+    TCommand = unknown,
+    TObservation = unknown,
+    TOutcome = JsonValue,
+  >(
+    sessionId: string,
+    request: SessionAttachRequest,
+    policy: SessionPolicy,
+    callOptions: SessionCallOptions = {},
+  ): Promise<SessionHandle<TCommand, TObservation, TOutcome>> {
+    assertJsonValue(policy, 'session policy');
+    if (
+      request.controller
+      && policy.controller
+      && canonicalJson(request.controller as unknown as JsonValue)
+        !== canonicalJson(policy.controller as unknown as JsonValue)
+    ) {
+      throw new ProtocolMismatchError('attachment cannot replace the pinned controller');
+    }
+    const attachment = await this.attachSession<TObservation>(
+      sessionId,
+      request,
+      callOptions,
+    );
+    return new ClientSessionHandle<TCommand, TObservation, TOutcome>(
+      this,
+      sessionId,
+      attachment.binding.participantId,
+      policy,
+      attachment.receipt,
+    );
+  }
+
   async getTickEnvelope<TObservation = unknown>(
     sessionId: string,
     callOptions: SessionCallOptions = {},
@@ -368,12 +793,7 @@ export class SessionClient {
   async submitIntent<TCommand = unknown, TObservation = unknown>(
     sessionId: string,
     command: TCommand,
-    options: {
-      participantId?: string;
-      submissionId?: string;
-      cursor?: TickCursor;
-      signal?: AbortSignal;
-    } = {},
+    options: SubmitIntentOptions = {},
   ): Promise<TickResult<TObservation>> {
     assertJsonValue(command, 'command');
     let binding = this.bindings.get(sessionId);
@@ -412,5 +832,97 @@ export class SessionClient {
     }
     this.remember(result, participantId);
     return result;
+  }
+}
+
+class ClientSessionHandle<TCommand, TObservation, TOutcome>
+implements SessionHandle<TCommand, TObservation, TOutcome> {
+  private lifecycleStatus: SessionHandle<TCommand, TObservation, TOutcome>['status'] = 'active';
+  private finalization?: {
+    request: SessionFinalizeRequest;
+    result: SessionResult<TOutcome>;
+  };
+
+  constructor(
+    private readonly client: SessionClient,
+    readonly sessionId: string,
+    readonly participantId: string,
+    readonly policy: SessionPolicy,
+    readonly attachReceipt?: SessionAttachReceipt,
+  ) {}
+
+  get status(): SessionHandle<TCommand, TObservation, TOutcome>['status'] {
+    return this.lifecycleStatus;
+  }
+
+  private requireOpen(): void {
+    if (this.lifecycleStatus === 'closed') throw new Error('session handle is closed');
+  }
+
+  private rememberStatus(result: TickResult<TObservation>): TickResult<TObservation> {
+    const finalization = result.extensions?.['gaos.session.finalization'];
+    if (
+      finalization
+      && typeof finalization === 'object'
+      && !Array.isArray(finalization)
+      && finalization['status'] === 'terminal'
+    ) {
+      this.lifecycleStatus = 'terminal';
+    }
+    return result;
+  }
+
+  async observe(options: SessionCallOptions = {}): Promise<TickResult<TObservation>> {
+    this.requireOpen();
+    if (this.lifecycleStatus === 'finalized') {
+      throw new Error('session is already finalized');
+    }
+    return this.rememberStatus(
+      await this.client.getTickEnvelope<TObservation>(this.sessionId, options),
+    );
+  }
+
+  async act(
+    command: TCommand,
+    options: SubmitIntentOptions = {},
+  ): Promise<TickResult<TObservation>> {
+    this.requireOpen();
+    if (this.lifecycleStatus !== 'active') {
+      throw new Error(`cannot act while session handle is ${this.lifecycleStatus}`);
+    }
+    return this.rememberStatus(
+      await this.client.submitIntent<TCommand, TObservation>(this.sessionId, command, {
+        ...options,
+        participantId: options.participantId ?? this.participantId,
+      }),
+    );
+  }
+
+  async finalize(
+    request: Partial<SessionFinalizeRequest> = {},
+  ): Promise<SessionResult<TOutcome>> {
+    this.requireOpen();
+    const completeRequest: SessionFinalizeRequest = {
+      ...structuredClone(request),
+      requestId: request.requestId ?? `finalize:${this.sessionId}`,
+    };
+    if (this.finalization) {
+      if (canonicalJson(completeRequest as unknown as JsonValue)
+        !== canonicalJson(this.finalization.request as unknown as JsonValue)) {
+        throw new Error('session was finalized with a different request');
+      }
+      return structuredClone(this.finalization.result);
+    }
+    const result = await this.client.finalizeSession<TOutcome>(this.sessionId, completeRequest);
+    this.finalization = {
+      request: structuredClone(completeRequest),
+      result: structuredClone(result),
+    };
+    this.lifecycleStatus = 'finalized';
+    return result;
+  }
+
+  close(): void {
+    this.lifecycleStatus = 'closed';
   }
 }

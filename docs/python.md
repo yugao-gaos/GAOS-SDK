@@ -49,6 +49,11 @@ print(created["tick"])
 The client speaks the `gaos.ticks` v1 envelope on `/v1/sessions`. Commands
 carry the session cursor, participant, and a deterministic submission ID:
 reuse it for an exact retry and create a new one for each logical control step.
+`attach_session()` resumes an attachable session at its durable head, and
+`finalize_session()` requests the same immutable finalization used by ordinary
+and evaluated play. Python also constructs and independently verifies the
+portable RFC-018 attachment-receipt chain. `AsyncSessionClient` exposes the
+same operations.
 
 `run_agent_episode` and `evaluate_agent_episodes` accept any duck-typed
 environment with Gymnasium-compatible `reset()` and `step()` methods. They do
