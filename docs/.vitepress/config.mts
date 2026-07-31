@@ -148,6 +148,7 @@ export default defineConfig({
           { text: 'Built with GPT-5.6 Sol', link: '/building-with-gpt-5-6-sol' },
           { text: 'Roadmap', link: '/roadmap' },
           { text: 'Support and compatibility', link: '/support' },
+          { text: 'Quality and release gates', link: '/quality' },
           { text: 'Version history', link: '/version-history' },
           { text: 'Release process and migrations', link: '/releases' },
         ],

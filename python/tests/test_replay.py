@@ -21,26 +21,31 @@ from gaos_sdk import (
     validate_replay_artifact,
 )
 
+REPOSITORY_ROOT = next(
+    parent
+    for parent in Path(__file__).resolve().parents
+    if (parent / "fixtures").is_dir() and (parent / "schemas").is_dir()
+)
 
 FIXTURE = (
-    Path(__file__).parents[2]
+    REPOSITORY_ROOT
     / "fixtures"
     / "replay"
     / "gaos-replay-v1.golden.jsonl"
 )
 ENDED_FIXTURE = (
-    Path(__file__).parents[2]
+    REPOSITORY_ROOT
     / "fixtures"
     / "replay"
     / "gaos-replay-v1.3-ended.golden.jsonl"
 )
 SCHEMA = (
-    Path(__file__).parents[2]
+    REPOSITORY_ROOT
     / "schemas"
     / "gaos.replay-v1.schema.json"
 )
 COMMITMENT_FIXTURE = (
-    Path(__file__).parents[2]
+    REPOSITORY_ROOT
     / "fixtures"
     / "commitment"
     / "gaos.commit.sha256.v1.vectors.json"

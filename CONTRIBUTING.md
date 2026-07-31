@@ -17,6 +17,7 @@ Thanks for helping improve the Game-Agent Open Standard SDK.
 npm install
 npm run typecheck
 npm test
+npm run test:coverage
 npm run build
 npm run docs:build
 ```
@@ -24,8 +25,8 @@ npm run docs:build
 Python changes also require:
 
 ```sh
-python3 -m pip install build pytest
-PYTHONPATH=python python3 -m pytest python/tests
+python3 -m pip install build -e "python[dev]"
+python3 -m pytest python/tests --cov=gaos_sdk --cov-branch --cov-fail-under=65
 python3 -m build python
 ```
 
@@ -41,3 +42,8 @@ integration workflow changes.
 Prefer small, intentional commits. Do not include generated `dist` output or
 credentials. A pull request should pass the TypeScript build, test, typecheck,
 documentation build, and any affected Python checks.
+
+Changes to deterministic randomness, commitment, settlement, signatures, or
+verification should also run `npm run test:mutation`. See the
+[quality and release gates](docs/quality.md) for the release-candidate
+checklist and mutation policy.
