@@ -112,6 +112,17 @@ orchestration still owns canonical planning, bounded parallelism,
 checkpoints, scoring, packing, and verification; existing `runEpisode`
 adapters remain compatible.
 
+### v0.29 — unified actor control sources (implemented)
+
+[RFC-019](/rfcs/rfc-019-unified-actor-control-sources) is implemented for its
+v0.29 target. Behavior-tree, human-input, and agent-input adapters converge on
+the same validated `SubmittedAction` path while actor identity, logical seats,
+controller authority, and transport connections remain distinct.
+
+Control-source switching is host-side and additive. The reducer and replay
+continue to receive canonical actions rather than rerunning external control
+sources, and security-relevant seat handoffs retain controller-epoch checks.
+
 ### Stable bridge contracts
 
 Continue hardening the smallest contracts shared by both audiences:

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   aiActionLimitExceeded,
   budgetFailure,
+  fnv1a,
+  mulberry32,
   resolveMoves,
   roll,
   scoreStars,
@@ -132,6 +134,32 @@ describe('deterministic randomness', () => {
     expect(roll(42, 'hit:1')).toBe(roll(42, 'hit:1'));
     expect(seededPermutation(8, 42)).toEqual(seededPermutation(8, 42));
     expect(seededPermutation(8, 42)).not.toEqual(seededPermutation(8, 43));
+  });
+
+  it('matches the frozen Mulberry32, FNV-1a, roll, and shuffle vectors', () => {
+    const zero = mulberry32(0);
+    expect([zero(), zero(), zero(), zero(), zero()]).toEqual([
+      0.26642920868471265,
+      0.0003297457005828619,
+      0.2232720274478197,
+      0.1462021479383111,
+      0.46732782293111086,
+    ]);
+    const unsigned = mulberry32(0xffff_ffff);
+    expect([unsigned(), unsigned(), unsigned()]).toEqual([
+      0.8964226141106337,
+      0.189478256739676,
+      0.7156526781618595,
+    ]);
+    expect([fnv1a(''), fnv1a('gaos'), fnv1a('🎲')]).toEqual([
+      2166136261,
+      944653431,
+      1060007403,
+    ]);
+    expect(roll(42, 'event')).toBe(0.6267779632471502);
+    expect(seededPermutation(10, 42)).toEqual([0, 7, 3, 5, 2, 1, 8, 9, 4, 6]);
+    expect(seededPermutation(0, 42)).toEqual([]);
+    expect(seededPermutation(1, 42)).toEqual([0]);
   });
 });
 

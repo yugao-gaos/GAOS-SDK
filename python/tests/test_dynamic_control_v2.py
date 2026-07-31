@@ -15,10 +15,15 @@ from gaos_sdk.signatures import (
 from gaos_sdk.dynamic_control import verify_dynamic_control_evidence_v2
 from gaos_sdk.replay import canonical_json
 
+REPOSITORY_ROOT = next(
+    parent
+    for parent in Path(__file__).resolve().parents
+    if (parent / "fixtures").is_dir()
+)
 
 VECTORS = json.loads(
     (
-        Path(__file__).parents[2]
+        REPOSITORY_ROOT
         / "fixtures/signatures/gaos.submission.ed25519.v2.vectors.json"
     ).read_text()
 )

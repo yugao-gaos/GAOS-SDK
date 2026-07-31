@@ -5,8 +5,19 @@ review the migration notes when updating across minor versions.
 
 ::: tip Next release: v0.27.0
 RFC-017 portal-aware paths and RFC-018's unified live-session lifecycle are
-implemented. Replay v1.0–v1.3 compatibility is unchanged.
+implemented. RFC-019 unified actor control sources are also implemented on
+`main` for the planned v0.29 target; they are not part of v0.27. Replay
+v1.0–v1.3 compatibility is unchanged.
 :::
+
+## Planned v0.29: unified actor control sources
+
+RFC-019 is implemented on `main` for its planned v0.29 release. Behavior-tree,
+human-input, and agent-input decisions share one validated submitted-action
+path without conflating product actors with logical seats or controller
+authority.
+
+[Unified actor control sources →](/rfcs/rfc-019-unified-actor-control-sources)
 
 ## v0.27.0: portal-aware paths and unified sessions
 

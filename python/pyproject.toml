@@ -18,7 +18,12 @@ Repository = "https://github.com/yugao-gaos/GAOS-SDK"
 Issues = "https://github.com/yugao-gaos/GAOS-SDK/issues"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "jsonschema>=4.0"]
+dev = [
+    "jsonschema>=4.0",
+    "mutmut==3.7.0",
+    "pytest>=8.0",
+    "pytest-cov>=6.0",
+]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -26,3 +31,25 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["gaos_sdk*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["gaos_sdk"]
+
+[tool.coverage.report]
+fail_under = 65
+show_missing = true
+skip_covered = true
+
+[tool.mutmut]
+source_paths = ["gaos_sdk"]
+only_mutate = [
+    "gaos_sdk/signatures.py",
+    "gaos_sdk/verifier_kit.py",
+]
+pytest_add_cli_args = ["-q"]
+pytest_add_cli_args_test_selection = ["tests"]
+mutate_only_covered_lines = true
