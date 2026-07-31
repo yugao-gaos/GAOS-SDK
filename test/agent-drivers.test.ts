@@ -140,6 +140,7 @@ describe('keyed providers', () => {
     expect(requestBody.messages[0]?.content).toContain(
       'Choose exactly one entry from legalActions or systemActions.',
     );
+    expect(requestBody).toMatchObject({ max_tokens: 800 });
 
     await driver.act({
       observation: reducer.view(reducer.init({ goal: 2 }, 1)),
@@ -159,6 +160,25 @@ describe('keyed providers', () => {
       legalActions: [{ id: 'advance' }],
       step: 0,
     })).rejects.toThrow('illegal action');
+  });
+
+  it('defers OpenAI-compatible output limits to the provider when requested', async () => {
+    const request = vi.fn<AgentFetch>().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: '{"action":{"id":"advance"}}' } }],
+    })));
+    const driver = createKeyedAgentDriver<View>('openai', {
+      apiKey: 'secret-key',
+      model: 'test-model',
+      maxTokens: 'provider',
+      fetch: request,
+    });
+    await driver.act({
+      observation: reducer.view(reducer.init({ goal: 2 }, 1)),
+      legalActions: [{ id: 'advance' }],
+      step: 0,
+    });
+    const body = JSON.parse(request.mock.calls[0]![1]!.body as string) as Record<string, unknown>;
+    expect(body).not.toHaveProperty('max_tokens');
   });
 
   it('interrupts an in-flight keyed request while retaining completed context', async () => {
@@ -337,6 +357,38 @@ describe('keyed providers', () => {
     expect(request).toHaveBeenCalledWith('https://api.anthropic.com/v1/messages', expect.objectContaining({
       headers: expect.objectContaining({ 'x-api-key': 'secret-key' }),
     }));
+    const body = JSON.parse(request.mock.calls[0]![1]!.body as string) as Record<string, unknown>;
+    expect(body.max_tokens).toBe(800);
+  });
+
+  it('resolves Anthropic provider output limits before gameplay', async () => {
+    const request = vi.fn<AgentFetch>().mockResolvedValue(new Response(JSON.stringify({
+      content: [{ type: 'text', text: '{"action":{"id":"advance"}}' }],
+    })));
+    const resolveModelCapabilities = vi.fn(() => ({ maxOutputTokens: 64_000 }));
+    const driver = createKeyedAgentDriver<View>('anthropic', {
+      apiKey: 'secret-key',
+      model: 'claude-test',
+      maxTokens: 'provider',
+      resolveModelCapabilities,
+      fetch: request,
+    });
+    expect(resolveModelCapabilities).toHaveBeenCalledWith('anthropic', 'claude-test');
+    await driver.act({
+      observation: reducer.view(reducer.init({ goal: 2 }, 1)),
+      legalActions: [{ id: 'advance' }],
+      step: 0,
+    });
+    const body = JSON.parse(request.mock.calls[0]![1]!.body as string) as Record<string, unknown>;
+    expect(body.max_tokens).toBe(64_000);
+  });
+
+  it('fails Anthropic provider-limit preflight without authoritative model capabilities', () => {
+    expect(() => createKeyedAgentDriver<View>('anthropic', {
+      apiKey: 'secret-key',
+      model: 'unknown-model',
+      maxTokens: 'provider',
+    })).toThrow('requires capabilities for keyed provider anthropic model unknown-model');
   });
 
   it('checks keys with injected fetch and never echoes a rejected secret', async () => {

@@ -21,6 +21,7 @@ export {
   type AgentFetch,
   type KeyCheck,
   type KeyedAgentDriverOptions,
+  type KeyedModelCapabilities,
   type KeyedProvider,
 } from './keyed.js';
 export {

@@ -24,7 +24,18 @@ export interface KeyedAgentDriverOptions {
   model?: string;
   baseUrl?: string;
   fetch?: AgentFetch;
-  maxTokens?: number;
+  /**
+   * Maximum output tokens per provider response. Defaults to 800.
+   * Use `provider` to defer to an OpenAI-compatible provider's native limit.
+   * Providers that require a concrete value resolve it through
+   * `resolveModelCapabilities`.
+   */
+  maxTokens?: number | 'provider';
+  /** Resolves authoritative capabilities for the selected provider model. */
+  resolveModelCapabilities?: (
+    providerId: string,
+    model: string,
+  ) => KeyedModelCapabilities | undefined;
   headers?: Readonly<Record<string, string>>;
   systemPrompt?: string;
   /** Number of completed user/assistant exchanges retained. Defaults to 8. */
@@ -45,6 +56,11 @@ export interface KeyedAgentDriverOptions {
   sleep?: (delayMs: number, signal: AbortSignal) => Promise<void>;
   /** Complete provider-call deadline. Defaults to 30,000; zero disables it. */
   timeoutMs?: number;
+}
+
+export interface KeyedModelCapabilities {
+  /** Provider-advertised maximum output tokens for one response. */
+  maxOutputTokens: number;
 }
 
 export interface KeyedProvider {
@@ -385,7 +401,7 @@ export class OpenAICompatibleAgentDriver<TObservation = unknown> implements Agen
   private readonly request: AgentFetch;
   private readonly model: string;
   private readonly baseUrl: string;
-  private readonly maxTokens: number;
+  private readonly maxTokens: number | 'provider';
   private readonly maxHistoryTurns: number;
   private readonly maxContextBytes: number;
   private readonly maxResponseBytes: number;
@@ -423,6 +439,10 @@ export class OpenAICompatibleAgentDriver<TObservation = unknown> implements Agen
     }
     if (!Number.isSafeInteger(this.maxResponseBytes) || this.maxResponseBytes < 1) {
       throw new RangeError('maxResponseBytes must be a positive safe integer');
+    }
+    if (this.maxTokens !== 'provider'
+      && (!Number.isSafeInteger(this.maxTokens) || this.maxTokens < 1)) {
+      throw new RangeError('maxTokens must be a positive safe integer or "provider"');
     }
     assertNonNegativeInteger(this.timeoutMs, 'timeoutMs');
     assertNonNegativeInteger(this.retryOptions.maxRetries, 'maxRetries');
@@ -467,7 +487,7 @@ export class OpenAICompatibleAgentDriver<TObservation = unknown> implements Agen
         },
         body: JSON.stringify({
           model: this.model,
-          max_tokens: this.maxTokens,
+          ...(this.maxTokens === 'provider' ? {} : { max_tokens: this.maxTokens }),
           messages,
         }),
       }, signal, this.retryOptions);
@@ -524,7 +544,18 @@ export class AnthropicAgentDriver<TObservation = unknown> implements AgentDriver
     this.request = options.fetch ?? fetch;
     this.model = options.model ?? options.defaultModel ?? '';
     this.baseUrl = (options.baseUrl ?? options.defaultBaseUrl).replace(/\/$/, '');
-    this.maxTokens = options.maxTokens ?? 800;
+    const configuredMaxTokens = options.maxTokens ?? 800;
+    if (configuredMaxTokens === 'provider') {
+      const capabilities = options.resolveModelCapabilities?.(id, this.model);
+      if (!capabilities) {
+        throw new TypeError(
+          `maxTokens "provider" requires capabilities for keyed provider ${id} model ${this.model}`,
+        );
+      }
+      this.maxTokens = capabilities.maxOutputTokens;
+    } else {
+      this.maxTokens = configuredMaxTokens;
+    }
     this.maxHistoryTurns = options.maxHistoryTurns ?? 8;
     this.maxContextBytes = options.maxContextBytes ?? 256 * 1024;
     this.maxResponseBytes = options.maxResponseBytes ?? 1024 * 1024;
@@ -542,6 +573,9 @@ export class AnthropicAgentDriver<TObservation = unknown> implements AgentDriver
     }
     if (!Number.isSafeInteger(this.maxResponseBytes) || this.maxResponseBytes < 1) {
       throw new RangeError('maxResponseBytes must be a positive safe integer');
+    }
+    if (!Number.isSafeInteger(this.maxTokens) || this.maxTokens < 1) {
+      throw new RangeError('model capability maxOutputTokens must be a positive safe integer');
     }
     assertNonNegativeInteger(this.timeoutMs, 'timeoutMs');
     assertNonNegativeInteger(this.retryOptions.maxRetries, 'maxRetries');
