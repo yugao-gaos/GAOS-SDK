@@ -3,20 +3,26 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const npmCli = process.env.npm_execpath;
 const repository = process.cwd();
 const temporary = mkdtempSync(join(tmpdir(), 'gaos-package-smoke-'));
 
+function runNpm(args, options) {
+  if (npmCli) {
+    return execFileSync(process.execPath, [npmCli, ...args], options);
+  }
+  return execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, options);
+}
+
 try {
-  const packed = execFileSync(
-    npm,
+  const packed = runNpm(
     ['pack', '--silent', '--pack-destination', temporary],
     { cwd: repository, encoding: 'utf8' },
   ).trim().split(/\r?\n/).at(-1);
   if (!packed) throw new Error('npm pack did not report an archive');
 
-  execFileSync(npm, ['init', '-y'], { cwd: temporary, stdio: 'ignore' });
-  execFileSync(npm, ['install', join(temporary, packed)], {
+  runNpm(['init', '-y'], { cwd: temporary, stdio: 'ignore' });
+  runNpm(['install', join(temporary, packed)], {
     cwd: temporary,
     stdio: 'ignore',
   });
