@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import math
 import re
@@ -11,6 +12,7 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from .replay import canonical_json
 
 PROTOCOL_ID = "gaos.ticks"
 PROTOCOL_VERSION = "1.0"
@@ -208,6 +210,155 @@ def parse_tick_result(data: Any) -> dict[str, Any]:
     return data
 
 
+def session_attach_receipt_digest(receipt: dict[str, Any]) -> str:
+    """Digest a canonical receipt object that omits ``receiptDigest``."""
+    _validate_json(receipt, "session attach receipt")
+    if "receiptDigest" in receipt:
+        raise ProtocolMismatchError(
+            "unsigned session attach receipt must omit receiptDigest"
+        )
+    return hashlib.sha256(canonical_json(receipt).encode()).hexdigest()
+
+
+def create_session_attach_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
+    """Construct a portable ``gaos.session-attach-receipt.v1`` receipt."""
+    unsigned = {
+        "schema": "gaos.session-attach-receipt.v1",
+        **receipt,
+    }
+    unsigned.pop("receiptDigest", None)
+    return {
+        **unsigned,
+        "receiptDigest": session_attach_receipt_digest(unsigned),
+    }
+
+
+def verify_session_attach_receipt_chain(
+    receipts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Verify canonical contents, revision monotonicity, and digest links."""
+    problems: list[str] = []
+    previous: dict[str, Any] | None = None
+    for index, receipt in enumerate(receipts):
+        sequence = receipt.get("sequence")
+        revision = receipt.get("revision")
+        if receipt.get("schema") != "gaos.session-attach-receipt.v1":
+            problems.append(f"receipt {index} has an unsupported schema")
+            continue
+        if (
+            not isinstance(sequence, int)
+            or isinstance(sequence, bool)
+            or sequence < 0
+            or sequence > _MAX_SAFE_INTEGER
+            or not isinstance(revision, int)
+            or isinstance(revision, bool)
+            or revision < 0
+            or revision > _MAX_SAFE_INTEGER
+        ):
+            problems.append(f"receipt {index} sequence or revision is invalid")
+        for field in (
+            "sessionId",
+            "requestId",
+            "transcriptDigest",
+            "stateDigest",
+            "receiptDigest",
+        ):
+            if (
+                not isinstance(receipt.get(field), str)
+                or not receipt[field].strip()
+            ):
+                problems.append(f"receipt {index} {field} is invalid")
+        unsigned = {key: value for key, value in receipt.items()
+                    if key != "receiptDigest"}
+        try:
+            digest = session_attach_receipt_digest(unsigned)
+        except (ProtocolMismatchError, TypeError):
+            problems.append(f"receipt {index} is not canonical JSON")
+            digest = None
+        if digest is not None and digest != receipt.get("receiptDigest"):
+            problems.append(f"receipt {index} digest does not match its contents")
+        if previous is None:
+            if "previousReceiptDigest" in receipt:
+                problems.append(
+                    "first receipt unexpectedly links to an omitted predecessor"
+                )
+        else:
+            if receipt.get("sessionId") != previous.get("sessionId"):
+                problems.append(f"receipt {index} changes session identity")
+            previous_sequence = previous.get("sequence")
+            if (
+                not isinstance(previous_sequence, int)
+                or sequence != previous_sequence + 1
+            ):
+                problems.append(f"receipt {index} sequence is not contiguous")
+            if (
+                not isinstance(revision, int)
+                or not isinstance(previous.get("revision"), int)
+                or revision < previous["revision"]
+            ):
+                problems.append(f"receipt {index} rolls revision backward")
+            if (
+                receipt.get("previousReceiptDigest")
+                != previous.get("receiptDigest")
+            ):
+                problems.append(
+                    f"receipt {index} does not link to the previous receipt"
+                )
+        previous = receipt
+    return {"valid": not problems, "problems": problems}
+
+
+def parse_session_attach(
+    data: Any,
+    requested_session_id: str | None = None,
+) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        raise ProtocolMismatchError("session attachment must be an object")
+    session_id = data.get("sessionId")
+    if not isinstance(session_id, str) or not session_id.strip():
+        raise ProtocolMismatchError(
+            "attachment sessionId must be a non-empty string"
+        )
+    if requested_session_id is not None and session_id != requested_session_id:
+        raise ProtocolMismatchError("attachment session does not match request")
+    if "tick" not in data:
+        raise ProtocolMismatchError("attachment tick missing")
+    _validate_json(data["tick"], "attachment tick")
+    binding = parse_session_binding(data.get("binding"))
+    if binding["sessionId"] != session_id:
+        raise ProtocolMismatchError(
+            "attachment binding does not match session"
+        )
+    receipt = data.get("receipt")
+    if receipt is not None:
+        if not isinstance(receipt, dict):
+            raise ProtocolMismatchError("attach receipt must be an object")
+        checked = verify_session_attach_receipt_chain([receipt])
+        if not checked["valid"]:
+            raise ProtocolMismatchError(checked["problems"][0])
+    _validate_json(data, "session attachment")
+    return data
+
+
+def parse_session_result(
+    data: Any,
+    requested_session_id: str | None = None,
+) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        raise ProtocolMismatchError("session result must be an object")
+    session_id = data.get("sessionId")
+    if not isinstance(session_id, str) or not session_id.strip():
+        raise ProtocolMismatchError("result sessionId must be a non-empty string")
+    if requested_session_id is not None and session_id != requested_session_id:
+        raise ProtocolMismatchError("result session does not match request")
+    if data.get("status") != "finalized" or "outcome" not in data:
+        raise ProtocolMismatchError(
+            "session result must be finalized with an outcome"
+        )
+    _validate_json(data, "session result")
+    return data
+
+
 class SessionClient:
     """Product-neutral client for the GAOS ``/v1/sessions`` contract."""
 
@@ -357,6 +508,62 @@ class SessionClient:
         self._remember(result)
         return result
 
+    def attach_session(
+        self,
+        session_id: str,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        request_id = request.get("requestId")
+        if not isinstance(request_id, str) or not request_id.strip():
+            raise ProtocolMismatchError(
+                "attach requestId must be a non-empty string"
+            )
+        _validate_json(request, "attach request")
+        attachment = parse_session_attach(
+            self._call(
+                "POST",
+                f"/v1/sessions/{_quote(session_id)}/attach",
+                request,
+            ),
+            session_id,
+        )
+        binding = parse_session_binding(attachment["binding"])
+        requested_participant = request.get(
+            "participantId",
+            binding["participantId"],
+        )
+        if requested_participant != binding["participantId"]:
+            raise ProtocolMismatchError(
+                "attachment participant does not match request"
+            )
+        receipt = attachment.get("receipt")
+        if receipt is not None and receipt.get("requestId") != request_id:
+            raise ProtocolMismatchError(
+                "attachment receipt does not match request"
+            )
+        self._bindings[session_id] = binding
+        return attachment
+
+    def finalize_session(
+        self,
+        session_id: str,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        request_id = request.get("requestId")
+        if not isinstance(request_id, str) or not request_id.strip():
+            raise ProtocolMismatchError(
+                "finalization requestId must be a non-empty string"
+            )
+        _validate_json(request, "finalization request")
+        return parse_session_result(
+            self._call(
+                "POST",
+                f"/v1/sessions/{_quote(session_id)}/finalize",
+                request,
+            ),
+            session_id,
+        )
+
     def submit_intent(
         self,
         session_id: str,
@@ -461,6 +668,12 @@ class AsyncSessionClient:
         **kwargs: Any,
     ) -> dict[str, Any]:
         return await self._run("get_tick_envelope", *args, **kwargs)
+
+    async def attach_session(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return await self._run("attach_session", *args, **kwargs)
+
+    async def finalize_session(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return await self._run("finalize_session", *args, **kwargs)
 
     async def submit_intent(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return await self._run("submit_intent", *args, **kwargs)

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yugao-gaos.github.io/GAOS-SDK/schemas/gaos.session-attach-receipt-v1.schema.json",
+  "title": "GAOS session attachment receipt",
+  "type": "object",
+  "required": [
+    "schema",
+    "sessionId",
+    "requestId",
+    "sequence",
+    "revision",
+    "transcriptDigest",
+    "stateDigest",
+    "receiptDigest"
+  ],
+  "properties": {
+    "schema": { "const": "gaos.session-attach-receipt.v1" },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "requestId": { "type": "string", "minLength": 1 },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "transcriptDigest": { "type": "string", "minLength": 1 },
+    "stateDigest": { "type": "string", "minLength": 1 },
+    "attachedAt": { "type": "number" },
+    "previousReceiptDigest": { "type": "string", "minLength": 1 },
+    "receiptDigest": { "type": "string", "minLength": 1 },
+    "controller": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": {
+          "enum": ["human", "provider", "cli", "local-agent", "mixed"]
+        },
+        "id": { "type": "string", "minLength": 1 },
+        "provider": { "type": "string" },
+        "model": { "type": "string" },
+        "version": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

@@ -3,6 +3,27 @@
 For the public chronological changelog, see the
 [complete version history](/version-history).
 
+## v0.27.0
+
+Prepared July 31, 2026. This additive release implements RFC-017 and RFC-018:
+portal-aware pathfinding and a unified live-session lifecycle.
+
+- `withPortalNeighbors` composes eligible portal destinations into ordinary
+  breadth-first layout traversal without moving authoritative transit
+  mutation into pathfinding.
+- `SessionClient` adds generic attach and finalize operations, client-backed
+  session handles, canonical attachment receipts, and independent
+  receipt-chain verification.
+- `runSession` is the common paced or unpaced agent loop for normal, guided,
+  autonomous, watched, and headless execution.
+- `runBenchmark` can create or attach each episode through the common session
+  runner while preserving existing adapters, canonical ordering, bounded
+  parallelism, checkpoints, scoring, packing, and verification.
+
+All changes are additive. Existing session client methods, benchmark adapters,
+completed-episode checkpoints, bundles, and replay formats retain their
+interpretation.
+
 ## v0.26.0
 
 Released July 29, 2026. This is the coordinated breaking rename and

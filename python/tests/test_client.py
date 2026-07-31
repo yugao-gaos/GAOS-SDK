@@ -6,8 +6,10 @@ from gaos_sdk import (
     AsyncSessionClient,
     ProtocolMismatchError,
     SessionClient,
+    create_session_attach_receipt,
     parse_session_binding,
     parse_tick_result,
+    verify_session_attach_receipt_chain,
 )
 
 
@@ -133,6 +135,64 @@ def test_async_client_exposes_generic_session_surface():
         return await client.create_session({"game": "board"})
 
     assert asyncio.run(run())["tick"] == {"board": [1, 2]}
+
+
+def test_attaches_finalizes_and_verifies_receipts():
+    client = SessionClient("https://example.test")
+    receipt = create_session_attach_receipt({
+        "sessionId": "session-1",
+        "requestId": "attach-1",
+        "sequence": 0,
+        "revision": 3,
+        "transcriptDigest": "transcript-3",
+        "stateDigest": "state-3",
+    })
+    responses = [
+        {
+            "sessionId": "session-1",
+            "tick": {"state": 3},
+            "binding": {
+                "protocol": "gaos.ticks",
+                "protocolVersion": "1.0",
+                "sessionId": "session-1",
+                "tickId": "session-1:3",
+                "revision": 3,
+                "participantId": "player",
+            },
+            "receipt": receipt,
+        },
+        {
+            "sessionId": "session-1",
+            "status": "finalized",
+            "outcome": {"score": 3},
+        },
+    ]
+    requests = []
+
+    def call(method, path, body=None):
+        requests.append((method, path, body))
+        return responses.pop(0)
+
+    client._call = call
+    attached = client.attach_session(
+        "session-1",
+        {"requestId": "attach-1"},
+    )
+    result = client.finalize_session(
+        "session-1",
+        {"requestId": "finish-1"},
+    )
+
+    assert attached["binding"]["revision"] == 3
+    assert result["outcome"] == {"score": 3}
+    assert verify_session_attach_receipt_chain([receipt]) == {
+        "valid": True,
+        "problems": [],
+    }
+    assert [request[:2] for request in requests] == [
+        ("POST", "/v1/sessions/session-1/attach"),
+        ("POST", "/v1/sessions/session-1/finalize"),
+    ]
 
 
 def test_validates_client_limits():
