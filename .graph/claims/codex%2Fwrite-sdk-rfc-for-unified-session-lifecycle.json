@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/write-sdk-rfc-for-unified-session-lifecycle",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "019fb0af-7b04-71d2-813d-06531e26470d",
+  "branch": "orch/attempt/codex-write-sdk-rfc-for-unified-session-lifecycle",
+  "status": "claimed",
+  "claimed_at": "2026-07-31T16:58:16.886Z",
+  "lease_until": "2026-07-31T17:58:16.886Z"
+}
