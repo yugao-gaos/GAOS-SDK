@@ -7,3 +7,13 @@
 
 export * from './protocol.js';
 export * from './client.js';
+export {
+  runSession,
+  type SessionEpisodeIdentity,
+  type SessionObservationAdapter,
+  type SessionPacing,
+  type SessionPresentation,
+  type SessionRunEvents,
+  type SessionRunPolicy,
+  type SessionRunResult,
+} from './agent/session-runner.js';

@@ -1,12 +1,12 @@
 # GAOS SDK — RFC sequence and release roadmap
 
-Status: implemented through RFC-017 for v0.27; RFC-018 proposed for v0.28 ·
+Status: implemented through RFC-018 for v0.27 ·
 Target: v0.13 → v1.0 arc · Baseline: v0.12.0 export surface
 
 ::: info Design record and roadmap
 RFC-001 through RFC-013 record the design path that led to the current SDK.
-RFC-014 and RFC-015 are shipped in v0.24. RFC-016 ships in v0.25. RFC-017 is
-implemented for v0.27. For supported APIs and current terminology, use the
+RFC-014 and RFC-015 are shipped in v0.24. RFC-016 ships in v0.25. RFC-017 and
+RFC-018 are implemented for v0.27. For supported APIs and current terminology, use the
 [architecture map](/architecture), [capability map](/capabilities), and
 [mechanism reference](/mechanisms/).
 :::
@@ -51,7 +51,7 @@ Two standing design rules govern every RFC in this batch:
 | [015](rfc-015-verifiable-benchmark-publication.md) | Verifiable benchmark execution and publication | v0.24 | 013, 014 |
 | [016](rfc-016-product-owned-verifier-kits.md) | Product-owned historical verifier kits | v0.25 | 014, 015 |
 | [017](rfc-017-portal-aware-pathfinding.md) | Portal-aware pathfinding through layout neighbors | v0.27 | 002, 005 |
-| [018](rfc-018-unified-session-lifecycle.md) | Unified session lifecycle and runner | proposed v0.28 | 006, 013, 015 |
+| [018](rfc-018-unified-session-lifecycle.md) | Unified session lifecycle and runner | v0.27 | 006, 013, 015 |
 
 Sequencing rationale: RFC-001/002 are contract-level and mostly mechanical —
 they unblock naming and addressing for everything else. RFC-003 is the one

@@ -41,11 +41,13 @@ npm install 'git+https://github.com/yugao-gaos/GAOS-SDK.git#v0.26.0'
 
 Use the narrowest package surface:
 
-- package root or `./client` — product-neutral hosted sessions
+- package root or `./client` — product-neutral hosted sessions, attach/finalize,
+  and unified session handles
 - `./engine` — mechanisms, reducers, agents, solvers, and replay
 - `./session` — authoritative transitions and evidence capture
 - `./protocol` — product-neutral tick envelopes
-- `./agent` and `./agent-cli` — model drivers and MCP-capable CLIs
+- `./agent` and `./agent-cli` — the common session runner, model drivers, and
+  MCP-capable CLIs
 - Python — hosted evaluation and replay exchange
 
 [Build your first reducer →](docs/quickstart.md)

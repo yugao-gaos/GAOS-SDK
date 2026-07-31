@@ -80,19 +80,19 @@ contracts.
 |---|---|
 | package root | Browser-safe GAOS protocol and product-neutral `SessionClient` |
 | `./protocol` | Product-neutral tick protocol |
-| `./client` | Product-neutral hosted-session client with opaque observations and commands |
+| `./client` | Product-neutral hosted-session client, unified handles, attachment receipts, and finalization |
 | `./engine` | Mechanisms, reducers, agents, solvers, and replay |
 | `./session` | Authoritative transitions and evidence capture |
 | `./session-host` | Transport-neutral durable host lifecycle |
 | `./ecosystem` | Host conformance and presentation bridge contracts |
 | `./seat-control` | Stable-seat authority and controller epochs |
-| `./benchmark` | Benchmark manifests, planning, execution, bundles, and aggregation |
+| `./benchmark` | Benchmark manifests, session-backed execution, planning, bundles, and aggregation |
 | `./evidence` | Dynamic-control and external-attestation verification |
 | `./presentation-client` | Retry-safe presentation state |
 | `./leaderboard` | Neutral leaderboard service boundaries |
 | `./verifier-kit` | Node-only verifier-kit packing, inspection, cache, and resolution |
 | `./container-verifier-runner` | Node-only Docker/Podman restricted runner |
-| `./agent` | Provider-neutral and keyed model drivers |
+| `./agent` | Provider-neutral and keyed model drivers plus the common session runner |
 | `./agent-cli` | MCP-capable CLI launch integration |
 | Python `SessionClient` | Product-neutral hosted sessions with opaque observations and commands |
 | Python replay and verification APIs | Portable evidence exchange and verification |

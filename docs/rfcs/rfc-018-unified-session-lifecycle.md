@@ -1,6 +1,6 @@
 # RFC-018 — Unified session lifecycle and runner
 
-Status: **proposed** · Target: v0.28 · Compatibility: additive session client
+Status: **implemented** · Target: v0.27 · Compatibility: additive session client
 and runner contracts, followed by deprecation of duplicate product wrappers ·
 Depends on:
 [RFC-006](rfc-006-session-kernel.md),

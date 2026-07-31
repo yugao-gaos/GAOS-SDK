@@ -87,7 +87,7 @@ Arena/Zonoid clients and environments now live in the Zonoid product
 repository. Automated architecture checks enforce those dependency
 boundaries.
 
-### v0.27 — portal-aware pathfinding (implementation ready)
+### v0.27 — portal paths and one session lifecycle (implemented)
 
 [RFC-017](/rfcs/rfc-017-portal-aware-pathfinding) composes existing layouts,
 portal policy, and breadth-first pathfinding. `withPortalNeighbors` adds
@@ -100,6 +100,17 @@ destination adaptation, footprint, permission, and deterministic ordering
 semantics with execution while leaving capacity reservation, contention,
 transformation, and state mutation to `planPortalTransits` and
 `commitPortalTransits`.
+
+[RFC-018](/rfcs/rfc-018-unified-session-lifecycle) adds one
+`create/attach → observe/act → finalize → close` lifecycle for normal,
+guided, autonomous, watched, and headless play. The product-neutral client
+supports durable attachment and immutable finalization, while `runSession`
+supplies presentation-only pacing and per-episode conversation reset policy.
+
+Session-backed benchmarks use that same handle and runner. Benchmark
+orchestration still owns canonical planning, bounded parallelism,
+checkpoints, scoring, packing, and verification; existing `runEpisode`
+adapters remain compatible.
 
 ### Stable bridge contracts
 

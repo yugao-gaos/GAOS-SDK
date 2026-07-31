@@ -80,6 +80,25 @@ Each command carries the session cursor, participant, and a deterministic
 step. Use `submit_intent()` and `get_tick_envelope()` with opaque command and
 observation shapes.
 
+Attachable sessions resume at their current durable head:
+
+```python
+attached = client.attach_session(
+    session_id,
+    {"requestId": "attach-2026-07-31"},
+)
+result = client.finalize_session(
+    session_id,
+    {"requestId": "finalize-2026-07-31"},
+)
+```
+
+`create_session_attach_receipt()` constructs canonical portable receipts and
+`verify_session_attach_receipt_chain()` independently checks their digest
+links and monotonic revisions. Attachment never accepts an older cursor as a
+rollback target; host authorization and exact-retry enforcement remain
+authoritative.
+
 For an exact retry after a restart, persist
 `client.get_session_binding(session_id)`, restore it with
 `restore_session_binding(binding)`, and reuse the original `submission_id`.

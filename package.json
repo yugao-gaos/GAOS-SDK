@@ -91,6 +91,7 @@
     "./fixtures/ecosystem/presentation-client-v1.golden.json": "./fixtures/ecosystem/presentation-client-v1.golden.json",
     "./schemas/gaos.command-v1.schema.json": "./schemas/gaos.command-v1.schema.json",
     "./schemas/gaos.receipt-v1.schema.json": "./schemas/gaos.receipt-v1.schema.json",
+    "./schemas/gaos.session-attach-receipt-v1.schema.json": "./schemas/gaos.session-attach-receipt-v1.schema.json",
     "./schemas/gaos.observation-v1.schema.json": "./schemas/gaos.observation-v1.schema.json",
     "./schemas/gaos.replay-reference-v1.schema.json": "./schemas/gaos.replay-reference-v1.schema.json",
     "./schemas/gaos.seat-control-v2.schema.json": "./schemas/gaos.seat-control-v2.schema.json",
