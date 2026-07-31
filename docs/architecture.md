@@ -86,6 +86,7 @@ contracts.
 | `./session-host` | Transport-neutral durable host lifecycle |
 | `./ecosystem` | Host conformance and presentation bridge contracts |
 | `./seat-control` | Stable-seat authority and controller epochs |
+| `./control` | Behavior-tree, human-input, and agent-input control sources |
 | `./benchmark` | Benchmark manifests, planning, execution, bundles, and aggregation |
 | `./evidence` | Dynamic-control and external-attestation verification |
 | `./presentation-client` | Retry-safe presentation state |

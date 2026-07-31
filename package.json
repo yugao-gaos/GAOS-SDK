@@ -46,6 +46,10 @@
       "types": "./dist/seat-control.d.ts",
       "import": "./dist/seat-control.js"
     },
+    "./control": {
+      "types": "./dist/control.d.ts",
+      "import": "./dist/control.js"
+    },
     "./benchmark": {
       "types": "./dist/benchmark.d.ts",
       "import": "./dist/benchmark.js"

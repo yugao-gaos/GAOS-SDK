@@ -12,6 +12,7 @@ product-owned deterministic reducer.
 | Hidden information | Seat, team, fog, zone, revelation, and spectator projections | Secret state, visibility rules, and memory |
 | Resolution | Settlement waves, movement, claims, arrivals, portals, pushes, projectiles, gates, triggers, and transport | Conditions, effects, mutations, and presentation |
 | Agents | Single- and multi-agent environments, concrete actions, rewards, drivers, and CLI adapters | Prompts, decision policy, objectives, and hosted execution |
+| Control | Unified behavior-tree, human-input, and agent-input sources with replaceable actor or seat bindings | Actor eligibility, possession rules, handoff policy, and fallback actions |
 | Sessions | Prepared transitions, canonical inputs, idempotency, reconnect state, and evidence capture | Persistence, transport, matchmaking, and operational policy |
 | Verification | Replay, signatures, chains, semantic recheck, and verifier interfaces | Historical reducer, semantic adapter, publication, and trust policy |
 
