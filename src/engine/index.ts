@@ -459,6 +459,7 @@ export {
 export {
   commitPortalTransits,
   planPortalTransits,
+  withPortalNeighbors,
   type CommittedPortalTransit,
   type PortalAdaptation,
   type PortalBoardAdaptation,
@@ -467,6 +468,7 @@ export {
   type PortalEdge,
   type PortalEntrant,
   type PortalInsertPolicy,
+  type PortalNeighborLayoutOptions,
   type PortalPlanningOptions,
   type PortalPolicy,
   type PortalRejectedEntrant,

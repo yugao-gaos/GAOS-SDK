@@ -87,6 +87,20 @@ Arena/Zonoid clients and environments now live in the Zonoid product
 repository. Automated architecture checks enforce those dependency
 boundaries.
 
+### v0.27 — portal-aware pathfinding (implementation ready)
+
+[RFC-017](/rfcs/rfc-017-portal-aware-pathfinding) composes existing layouts,
+portal policy, and breadth-first pathfinding. `withPortalNeighbors` adds
+eligible cross-container portal destinations to a
+`BoardLayout<LocationRef>` without changing ordinary layout behavior or the
+authoritative portal plan/commit boundary.
+
+The helper is additive and advisory. It shares portal orientation,
+destination adaptation, footprint, permission, and deterministic ordering
+semantics with execution while leaving capacity reservation, contention,
+transformation, and state mutation to `planPortalTransits` and
+`commitPortalTransits`.
+
 ### Stable bridge contracts
 
 Continue hardening the smallest contracts shared by both audiences:
