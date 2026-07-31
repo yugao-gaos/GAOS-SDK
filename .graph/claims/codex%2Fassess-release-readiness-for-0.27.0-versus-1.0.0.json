@@ -3,7 +3,8 @@
   "git_user": "yugao-gaos <yu.gao@gaos.ca>",
   "session_id": "codex-mcp-59855-c40130ba9c438141ef1d5e9e192d8039",
   "branch": "orch/attempt/codex-assess-release-readiness-for-0.27.0-versus-1.0.0",
-  "status": "claimed",
+  "status": "tested",
   "claimed_at": "2026-07-31T15:56:52.835Z",
-  "lease_until": "2026-07-31T16:56:52.835Z"
+  "lease_until": "2026-07-31T16:56:52.835Z",
+  "completed_at": "2026-07-31T16:00:03.216Z"
 }
