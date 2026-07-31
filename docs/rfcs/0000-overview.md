@@ -1,14 +1,16 @@
 # GAOS SDK — RFC sequence and release roadmap
 
-Status: implemented through RFC-017 for v0.27; RFC-018 proposed for v0.28 ·
-Target: v0.13 → v1.0 arc · Baseline: v0.12.0 export surface
+Status: implemented through RFC-017 for v0.27; RFC-018 proposed for v0.28;
+RFC-019 implemented for v0.29 · Target: v0.13 → v1.0 arc · Baseline: v0.12.0
+export surface
 
 ::: info Design record and roadmap
 RFC-001 through RFC-013 record the design path that led to the current SDK.
 RFC-014 and RFC-015 are shipped in v0.24. RFC-016 ships in v0.25. RFC-017 is
-implemented for v0.27. For supported APIs and current terminology, use the
-[architecture map](/architecture), [capability map](/capabilities), and
-[mechanism reference](/mechanisms/).
+implemented for v0.27. RFC-018 is proposed and RFC-019 is implemented for
+v0.29. For supported APIs and current terminology, use the
+[architecture map](/architecture),
+[capability map](/capabilities), and [mechanism reference](/mechanisms/).
 :::
 
 ## Goal
@@ -52,6 +54,7 @@ Two standing design rules govern every RFC in this batch:
 | [016](rfc-016-product-owned-verifier-kits.md) | Product-owned historical verifier kits | v0.25 | 014, 015 |
 | [017](rfc-017-portal-aware-pathfinding.md) | Portal-aware pathfinding through layout neighbors | v0.27 | 002, 005 |
 | [018](rfc-018-unified-session-lifecycle.md) | Unified session lifecycle and runner | proposed v0.28 | 006, 013, 015 |
+| [019](rfc-019-unified-actor-control-sources.md) | Unified actor control sources | v0.29 | 001, 003, 006, 013, 014, 018 |
 
 Sequencing rationale: RFC-001/002 are contract-level and mostly mechanical —
 they unblock naming and addressing for everything else. RFC-003 is the one
@@ -76,6 +79,11 @@ benchmark, and arena play share one create/attach/observe/act/finalize/close
 session lifecycle and one paced-or-unpaced runner. Benchmark APIs remain the
 batch planning, scoring, packaging, and verification layer rather than a
 second live-session stack.
+RFC-019 then joins behavior-tree, human-input, and agent-input decisions at
+the canonical action boundary. It keeps lightweight actor possession separate
+from logical-seat authority, so products can change who controls an NPC
+without converting entity types or weakening observation, replay, and
+controller-epoch guarantees.
 
 The [batch implementation review](implementation-review.md) maps every
 normative requirement and test-plan fixture to its shipped API and evidence.

@@ -45,6 +45,7 @@ Use the narrowest package surface:
 - `./engine` — mechanisms, reducers, agents, solvers, and replay
 - `./session` — authoritative transitions and evidence capture
 - `./protocol` — product-neutral tick envelopes
+- `./control` — behavior-tree, human-input, and agent-input control sources
 - `./agent` and `./agent-cli` — model drivers and MCP-capable CLIs
 - Python — hosted evaluation and replay exchange
 
