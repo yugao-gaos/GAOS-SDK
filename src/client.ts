@@ -135,12 +135,15 @@ export interface SessionResult<TOutcome = JsonValue> {
   extensions?: ProtocolExtensions;
 }
 
-export interface SubmitIntentOptions {
+export interface SubmitCommandOptions {
   participantId?: string;
   submissionId?: string;
   cursor?: TickCursor;
   signal?: AbortSignal;
 }
+
+/** @deprecated Use SubmitCommandOptions. */
+export type SubmitIntentOptions = SubmitCommandOptions;
 
 export interface SessionHandle<
   TCommand = unknown,
@@ -528,6 +531,7 @@ async function readResponseText(response: Response, maxBytes: number): Promise<s
 
 export class SessionClient {
   private readonly bindings = new Map<string, SessionBinding>();
+  private readonly commandSequences = new Map<string, number>();
   private readonly request: typeof fetch;
   private readonly baseUrl: string;
 
@@ -924,10 +928,10 @@ export class SessionClient {
     return result;
   }
 
-  async submitIntent<TCommand = unknown, TObservation = unknown>(
+  async submitCommand<TCommand = unknown, TObservation = unknown>(
     sessionId: string,
     command: TCommand,
-    options: SubmitIntentOptions = {},
+    options: SubmitCommandOptions = {},
   ): Promise<TickResult<TObservation>> {
     assertJsonValue(command, 'command');
     let binding = this.bindings.get(sessionId);
@@ -943,6 +947,11 @@ export class SessionClient {
     const cursor = options.cursor ?? binding;
     if (!cursor) throw new ProtocolMismatchError('session cursor unavailable');
     const participantId = options.participantId ?? binding?.participantId ?? 'player';
+    const sequenceKey = `${sessionId}\u0000${participantId}\u0000${cursor.tickId}`;
+    const sequence = this.commandSequences.get(sequenceKey) ?? 0;
+    if (options.submissionId === undefined) {
+      this.commandSequences.set(sequenceKey, sequence + 1);
+    }
     const submission: CommandSubmission<TCommand> = {
       protocol: PROTOCOL_ID,
       protocolVersion: PROTOCOL_VERSION,
@@ -950,7 +959,8 @@ export class SessionClient {
       tickId: cursor.tickId,
       revision: cursor.revision,
       participantId,
-      submissionId: options.submissionId ?? `${participantId}:${cursor.tickId}`,
+      submissionId: options.submissionId
+        ?? `${participantId}:${cursor.tickId}:${sequence}`,
       command,
     };
     const result = parseTickResult<TObservation>(
@@ -966,6 +976,27 @@ export class SessionClient {
     }
     this.remember(result, participantId);
     return result;
+  }
+
+  /** @deprecated Use submitCommand. */
+  async submitIntent<TCommand = unknown, TObservation = unknown>(
+    sessionId: string,
+    command: TCommand,
+    options: SubmitIntentOptions = {},
+  ): Promise<TickResult<TObservation>> {
+    let binding = this.bindings.get(sessionId);
+    if (!binding && !options.cursor && options.submissionId === undefined) {
+      await this.getTickEnvelope(sessionId, { signal: options.signal });
+      binding = this.bindings.get(sessionId);
+    }
+    const cursor = options.cursor ?? binding;
+    const participantId = options.participantId ?? binding?.participantId ?? 'player';
+    return this.submitCommand<TCommand, TObservation>(sessionId, command, {
+      ...options,
+      ...(options.submissionId !== undefined || cursor === undefined
+        ? {}
+        : { submissionId: `${participantId}:${cursor.tickId}` }),
+    });
   }
 }
 
@@ -1036,7 +1067,7 @@ implements SessionHandle<TCommand, TObservation, TOutcome> {
     if (this.lifecycleStatus !== 'active') {
       throw new Error(`cannot act while session handle is ${this.lifecycleStatus}`);
     }
-    const result = await this.client.submitIntent<TCommand, TObservation>(
+    const result = await this.client.submitCommand<TCommand, TObservation>(
       this.sessionId,
       command,
       {

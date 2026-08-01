@@ -4,6 +4,7 @@ import {
   type AdvanceSummary,
   type ControlTransitionInput,
   type ControlTransitionReceipt,
+  type CommandReceipt,
   type IngestReceipt,
   type InterestReceipt,
   type InterestSubmission,
@@ -110,6 +111,11 @@ export class SessionKernelHost<
   ingest(submission: Parameters<SessionKernel<TCommand, TView>['prepareIngest']>[0]):
     Promise<IngestReceipt> {
     return this.enqueue(() => this.kernel.prepareIngest(submission));
+  }
+
+  command(submission: Parameters<SessionKernel<TCommand, TView>['prepareCommand']>[0]):
+    Promise<CommandReceipt> {
+    return this.enqueue(() => this.kernel.prepareCommand(submission));
   }
 
   advance(target?: number): Promise<AdvanceSummary<TView>> {

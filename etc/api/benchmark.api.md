@@ -901,7 +901,7 @@ export interface SubmissionVerificationFacts {
 }
 
 // @public (undocumented)
-interface SubmitIntentOptions {
+interface SubmitCommandOptions {
     // (undocumented)
     cursor?: TickCursor;
     // (undocumented)
@@ -911,6 +911,9 @@ interface SubmitIntentOptions {
     // (undocumented)
     submissionId?: string;
 }
+
+// @public @deprecated (undocumented)
+type SubmitIntentOptions = SubmitCommandOptions;
 
 // @public (undocumented)
 interface SubmittedAction {

@@ -10,6 +10,7 @@ from jsonschema import Draft202012Validator
 from gaos_sdk import (
     GAOS_REPLAY_DERIVED_SEEDS,
     GAOS_REPLAY_FORMAT_ID,
+    GAOS_REPLAY_ENDED_FORMAT_VERSION,
     GAOS_REPLAY_LEGACY_FORMAT_VERSION,
     GAOS_REPLAY_FORMAT_VERSION,
     GAOS_REPLAY_UNSIGNED_FORMAT_VERSION,
@@ -94,7 +95,7 @@ def test_v13_ended_fixture_round_trips_and_conforms_to_schema():
     jsonl = ENDED_FIXTURE.read_text(encoding="utf-8")
     artifact = parse_replay_jsonl(jsonl)
 
-    assert artifact["header"]["formatVersion"] == GAOS_REPLAY_FORMAT_VERSION
+    assert artifact["header"]["formatVersion"] == GAOS_REPLAY_ENDED_FORMAT_VERSION
     assert artifact["header"]["levels"][0]["result"] == {
         "status": "ended",
         "stars": None,
@@ -111,6 +112,35 @@ def test_v13_ended_fixture_round_trips_and_conforms_to_schema():
     assert any(
         "result.status must be won or failed" in problem
         for problem in validate_replay_artifact(legacy)
+    )
+
+
+def test_v14_interaction_conforms_to_schema_and_canonical_validation():
+    artifact = parse_replay_jsonl(ENDED_FIXTURE.read_text(encoding="utf-8"))
+    artifact["header"]["formatVersion"] = GAOS_REPLAY_FORMAT_VERSION
+    interaction = {
+        "kind": "interaction",
+        "n": 0,
+        "levelIndex": 0,
+        "tick": 0,
+        "cursor": 0,
+        "participantId": "player",
+        "submissionId": "interaction-1",
+        "command": {"kind": "open"},
+        "canonicalCommand": '{"kind":"open"}',
+    }
+    artifact["records"] = [interaction, *copy.deepcopy(artifact["actions"])]
+    for index, record in enumerate(artifact["records"]):
+        record["n"] = index
+
+    assert validate_replay_artifact(artifact) == []
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    Draft202012Validator(schema).validate(artifact)
+
+    interaction["canonicalCommand"] = '{"kind":"close"}'
+    assert any(
+        "canonicalCommand does not match command" in problem
+        for problem in validate_replay_artifact(artifact)
     )
 
 

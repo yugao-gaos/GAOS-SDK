@@ -44,8 +44,10 @@ import {
 
 /** Stable identifier carried by every SDK-owned portable replay. */
 export const GAOS_REPLAY_FORMAT_ID = 'gaos.replay' as const;
-/** Current schema version; adds replayable open-session termination. */
-export const GAOS_REPLAY_FORMAT_VERSION = '1.3' as const;
+/** Current schema version; adds ordered reducer-backed interactions. */
+export const GAOS_REPLAY_FORMAT_VERSION = '1.4' as const;
+/** Adds replayable open-session termination. */
+export const GAOS_REPLAY_ENDED_FORMAT_VERSION = '1.3' as const;
 /** Signed submission and per-seat audit-chain compatibility version. */
 export const GAOS_REPLAY_SIGNED_FORMAT_VERSION = '1.2' as const;
 /** Unsigned grouped/audit format accepted for migration compatibility. */
@@ -56,6 +58,7 @@ export type ReplayFormatVersion =
   | typeof GAOS_REPLAY_LEGACY_FORMAT_VERSION
   | typeof GAOS_REPLAY_UNSIGNED_FORMAT_VERSION
   | typeof GAOS_REPLAY_SIGNED_FORMAT_VERSION
+  | typeof GAOS_REPLAY_ENDED_FORMAT_VERSION
   | typeof GAOS_REPLAY_FORMAT_VERSION;
 /** Media type used by downloads, object storage, and module manifests. */
 export const GAOS_REPLAY_MIME = 'application/vnd.gaos.replay+jsonl' as const;
@@ -236,6 +239,22 @@ export interface ReplayInterest {
   hostTime?: number;
 }
 
+export interface ReplayInteraction {
+  kind: 'interaction';
+  n: number;
+  levelIndex: number;
+  tick: number;
+  cursor: number;
+  participantId: string;
+  submissionId: string;
+  command: JsonValue;
+  canonicalCommand: string;
+  clientTime?: number;
+  prevChainHash?: string;
+  sig?: string;
+  hostTime?: number;
+}
+
 export interface ReplayCheckpoint {
   kind: 'checkpoint';
   n: number;
@@ -292,6 +311,7 @@ export type ReplayRecord =
   | ReplayTimeout
   | ReplayExtension
   | ReplayInterest
+  | ReplayInteraction
   | ReplayCheckpoint
   | ReplayCommitMismatchAudit
   | ReplaySeatSignatureReservation;
@@ -382,11 +402,18 @@ export interface ReplayTimeoutContext<TLevel> {
   windowRef: number;
 }
 
-export interface ReplaySemanticAdapter<TLevel> {
+export interface ReplaySemanticAdapter<TLevel, TState = unknown> {
   commandToAction?: (
     command: JsonValue,
     context: ReplaySubmissionContext,
   ) => SubmittedAction;
+  classifyCommand?: (
+    state: TState,
+    command: JsonValue,
+    context: ReplaySubmissionContext,
+  ) =>
+    | { kind: 'interaction'; state: TState }
+    | { kind: 'intent'; action: SubmittedAction };
   timeoutToAction?: (
     context: ReplayTimeoutContext<TLevel>,
     timeout: ReplayTimeout,
@@ -410,7 +437,7 @@ export interface ReplayArtifactRecheckOptions<TLevel, TState> {
    */
   semanticAdapterForLevel?: (
     context: ReplayReducerContext<TLevel>,
-  ) => ReplaySemanticAdapter<TLevel> | undefined;
+  ) => ReplaySemanticAdapter<TLevel, TState> | undefined;
 }
 
 export interface ReplayLevelRecheck {
@@ -529,11 +556,18 @@ function validNonNegativeInteger(value: unknown): value is number {
 function isGroupedReplayVersion(value: unknown): boolean {
   return value === GAOS_REPLAY_UNSIGNED_FORMAT_VERSION
     || value === GAOS_REPLAY_SIGNED_FORMAT_VERSION
+    || value === GAOS_REPLAY_ENDED_FORMAT_VERSION
     || value === GAOS_REPLAY_FORMAT_VERSION;
 }
 
 function hasV12IntegritySemantics(value: unknown): boolean {
   return value === GAOS_REPLAY_SIGNED_FORMAT_VERSION
+    || value === GAOS_REPLAY_ENDED_FORMAT_VERSION
+    || value === GAOS_REPLAY_FORMAT_VERSION;
+}
+
+function supportsEndedResult(value: unknown): boolean {
+  return value === GAOS_REPLAY_ENDED_FORMAT_VERSION
     || value === GAOS_REPLAY_FORMAT_VERSION;
 }
 
@@ -649,7 +683,9 @@ export function createReplayArtifact<TLevel>(
   const header: ReplayHeader<TLevel> = {
     kind: 'header',
     format: GAOS_REPLAY_FORMAT_ID,
-    formatVersion: GAOS_REPLAY_FORMAT_VERSION,
+    formatVersion: input.records?.some((record) => record.kind === 'interaction')
+      ? GAOS_REPLAY_FORMAT_VERSION
+      : GAOS_REPLAY_ENDED_FORMAT_VERSION,
     sessionId: input.sessionId,
     game: input.game,
     seed: input.seed,
@@ -741,13 +777,15 @@ export function validateReplayArtifact(value: unknown): string[] {
     problems.push(`header.format must be ${GAOS_REPLAY_FORMAT_ID}`);
   }
   if (header['formatVersion'] !== GAOS_REPLAY_FORMAT_VERSION
+    && header['formatVersion'] !== GAOS_REPLAY_ENDED_FORMAT_VERSION
     && header['formatVersion'] !== GAOS_REPLAY_SIGNED_FORMAT_VERSION
     && header['formatVersion'] !== GAOS_REPLAY_UNSIGNED_FORMAT_VERSION
     && header['formatVersion'] !== GAOS_REPLAY_LEGACY_FORMAT_VERSION) {
     problems.push(
       `header.formatVersion must be ${GAOS_REPLAY_LEGACY_FORMAT_VERSION}`
       + `, ${GAOS_REPLAY_UNSIGNED_FORMAT_VERSION}, `
-      + `${GAOS_REPLAY_SIGNED_FORMAT_VERSION}, or ${GAOS_REPLAY_FORMAT_VERSION}`,
+      + `${GAOS_REPLAY_SIGNED_FORMAT_VERSION}, `
+      + `${GAOS_REPLAY_ENDED_FORMAT_VERSION}, or ${GAOS_REPLAY_FORMAT_VERSION}`,
     );
   }
   if (header['formatVersion'] === GAOS_REPLAY_LEGACY_FORMAT_VERSION
@@ -914,11 +952,11 @@ export function validateReplayArtifact(value: unknown): string[] {
         );
         if (result['status'] !== 'won'
           && result['status'] !== 'failed'
-          && (header['formatVersion'] !== GAOS_REPLAY_FORMAT_VERSION
+          && (!supportsEndedResult(header['formatVersion'])
             || result['status'] !== 'ended')) {
           problems.push(
             `level ${index} result.status must be won or failed`
-            + (header['formatVersion'] === GAOS_REPLAY_FORMAT_VERSION ? ' or ended' : ''),
+            + (supportsEndedResult(header['formatVersion']) ? ' or ended' : ''),
           );
         }
         if (result['stars'] !== null
@@ -1178,6 +1216,23 @@ export function validateReplayArtifact(value: unknown): string[] {
       let previousLevelIndex = -1;
       const recordTicks = new Map<number, number>();
       const permutation = validatePermutation(header['perm']) ? header['perm'] as number[] : [];
+      const submissionIdentities = new Set<string>();
+      const registerSubmissionIdentity = (
+        levelIndex: unknown,
+        participantId: unknown,
+        submissionId: unknown,
+        label: string,
+      ): void => {
+        if (!Number.isSafeInteger(levelIndex)
+          || typeof participantId !== 'string'
+          || typeof submissionId !== 'string') return;
+        const key = `${String(levelIndex)}\u0000${participantId}\u0000${submissionId}`;
+        if (submissionIdentities.has(key)) {
+          problems.push(`${label} reuses submissionId ${participantId}/${submissionId}`);
+        } else {
+          submissionIdentities.add(key);
+        }
+      };
       const validateResolutionInput = (
         candidate: unknown,
         label: string,
@@ -1339,6 +1394,7 @@ export function validateReplayArtifact(value: unknown): string[] {
           'timeout',
           'extension',
           'interest',
+          'interaction',
           'checkpoint',
           'commit-mismatch',
           'seat-signature',
@@ -1398,6 +1454,18 @@ export function validateReplayArtifact(value: unknown): string[] {
             'prevChainHash',
             'sig',
           ],
+          interaction: [
+            ...common,
+            'tick',
+            'cursor',
+            'participantId',
+            'submissionId',
+            'command',
+            'canonicalCommand',
+            'clientTime',
+            'prevChainHash',
+            'sig',
+          ],
           checkpoint: [...common, 'tick', 'digest'],
           'commit-mismatch': [
             ...common,
@@ -1431,6 +1499,12 @@ export function validateReplayArtifact(value: unknown): string[] {
           );
         }
         if (kind === 'action') {
+          registerSubmissionIdentity(
+            record['levelIndex'],
+            record['seat'],
+            record['submissionId'],
+            `action ${index}`,
+          );
           validateResolutionInput(record, `record ${index} action`, true);
         } else if (kind === 'resolution') {
           if (!validNonNegativeInteger(record['tick'])) {
@@ -1440,6 +1514,14 @@ export function validateReplayArtifact(value: unknown): string[] {
             problems.push(`resolution ${index} inputs must be an array`);
           } else {
             record['inputs'].forEach((input, inputIndex) => {
+              if (isRecord(input)) {
+                registerSubmissionIdentity(
+                  record['levelIndex'],
+                  input['seat'],
+                  input['submissionId'],
+                  `resolution ${index} input ${inputIndex}`,
+                );
+              }
               validateResolutionInput(input, `resolution ${index} input ${inputIndex}`);
             });
           }
@@ -1528,7 +1610,53 @@ export function validateReplayArtifact(value: unknown): string[] {
           if (!isRecord(record['record'])) {
             problems.push(`extension ${index} record must be an object`);
           }
+        } else if (kind === 'interaction') {
+          registerSubmissionIdentity(
+            record['levelIndex'],
+            record['participantId'],
+            record['submissionId'],
+            `interaction ${index}`,
+          );
+          if (header['formatVersion'] !== GAOS_REPLAY_FORMAT_VERSION) {
+            problems.push(
+              `interaction ${index} requires formatVersion ${GAOS_REPLAY_FORMAT_VERSION}`,
+            );
+          }
+          if (!validNonNegativeInteger(record['tick'])
+            || !validNonNegativeInteger(record['cursor'])) {
+            problems.push(
+              `interaction ${index} tick and cursor must be non-negative safe integers`,
+            );
+          }
+          for (const field of ['participantId', 'submissionId'] as const) {
+            if (typeof record[field] !== 'string' || record[field].length === 0) {
+              problems.push(`interaction ${index} ${field} must be a non-empty string`);
+            }
+          }
+          if (!Object.hasOwn(record, 'command')) {
+            problems.push(`interaction ${index} command is required`);
+          } else {
+            try {
+              const canonical = canonicalJson(record['command'] as JsonValue);
+              if (record['canonicalCommand'] !== canonical) {
+                problems.push(
+                  `interaction ${index} canonicalCommand does not match command`,
+                );
+              }
+            } catch {
+              problems.push(`interaction ${index} command must contain plain JSON`);
+            }
+          }
+          if (hasV12IntegritySemantics(header['formatVersion'])) {
+            validateV12IntegrityFields(record, `interaction ${index}`, problems);
+          }
         } else if (kind === 'interest') {
+          registerSubmissionIdentity(
+            record['levelIndex'],
+            record['participantId'],
+            record['submissionId'],
+            `interest ${index}`,
+          );
           if (!hasV12IntegritySemantics(header['formatVersion'])) {
             problems.push(
               `interest ${index} requires formatVersion `
@@ -1574,6 +1702,12 @@ export function validateReplayArtifact(value: unknown): string[] {
             problems.push(`checkpoint ${index} digest must be an unsigned 32-bit integer`);
           }
         } else if (kind === 'commit-mismatch') {
+          registerSubmissionIdentity(
+            record['levelIndex'],
+            record['participantId'],
+            record['submissionId'],
+            `commit-mismatch ${index}`,
+          );
           if (hasV12IntegritySemantics(header['formatVersion'])) {
             validateV12IntegrityFields(record, `commit-mismatch ${index}`, problems);
           }
@@ -1723,7 +1857,8 @@ interface ReplaySubmissionForSignature {
     | ReplayResolutionInput
     | ReplayAction
     | ReplayCommitMismatchAudit
-    | ReplayInterest;
+    | ReplayInterest
+    | ReplayInteraction;
   label: string;
   requiredTier?: 1 | 2;
 }
@@ -1793,6 +1928,17 @@ function signatureSubmissions(artifact: ReplayArtifact<unknown>): Array<
           value: record,
           label: `interest ${record.n}`,
           requiredTier: 2,
+        },
+      });
+    } else if (record.kind === 'interaction') {
+      result.push({
+        kind: 'submission',
+        submission: {
+          seat: record.participantId,
+          levelIndex: record.levelIndex,
+          tick: record.tick,
+          value: record,
+          label: `interaction ${record.n}`,
         },
       });
     } else if (record.kind === 'seat-signature') {
@@ -2108,8 +2254,8 @@ function recheckReplaySemantics<TLevel, TState>(
   let timeoutUnavailable = false;
   const problems: string[] = [];
   const records = artifact.records ?? [];
-  const adapters = new Map<number, ReplaySemanticAdapter<TLevel> | undefined>();
-  const adapterFor = (levelIndex: number): ReplaySemanticAdapter<TLevel> | undefined => {
+  const adapters = new Map<number, ReplaySemanticAdapter<TLevel, TState> | undefined>();
+  const adapterFor = (levelIndex: number): ReplaySemanticAdapter<TLevel, TState> | undefined => {
     if (!adapters.has(levelIndex)) {
       const context = contexts.get(levelIndex);
       adapters.set(
@@ -2159,7 +2305,11 @@ function recheckReplaySemantics<TLevel, TState>(
   };
 
   for (const [recordIndex, record] of records.entries()) {
-    if (record.kind === 'action') {
+    if (record.kind === 'interaction') {
+      submissionCount++;
+      const classifier = adapterFor(record.levelIndex)?.classifyCommand;
+      if (classifier === undefined) submissionUnavailable = true;
+    } else if (record.kind === 'action') {
       checkSubmission(record.levelIndex, record.tick ?? 0, record, `action ${record.n}`);
     } else if (record.kind === 'resolution') {
       for (const [inputIndex, input] of record.inputs.entries()) {
@@ -2277,6 +2427,7 @@ function recheckGroupedLevel<
   artifact: ReplayArtifact<TLevel>,
   level: ReplayLevelRecord<TLevel>,
   reducer: Reducer<TLevel, TState, TView>,
+  adapter: ReplaySemanticAdapter<TLevel, TState> | undefined,
   seenSalts: Map<string, { identity: string; location: string }>,
 ): RecheckResult {
   const problems: string[] = [];
@@ -2286,6 +2437,7 @@ function recheckGroupedLevel<
   const seenMismatchSubmissionIds = new Set<string>();
   let lastResolutionTick: number | undefined;
   let state = reducer.init(level.level, level.seed);
+  let cursor = 0;
   const records = (artifact.records ?? []).filter(
     (record) => record.levelIndex === level.index,
   );
@@ -2300,6 +2452,42 @@ function recheckGroupedLevel<
     }
   };
   for (const record of records) {
+    if (record.kind === 'interaction') {
+      if (record.cursor !== cursor) {
+        problems.push(
+          `interaction ${record.n} cursor ${record.cursor} must be ${cursor}`,
+        );
+        continue;
+      }
+      if (adapter?.classifyCommand === undefined) {
+        problems.push(`interaction ${record.n} requires a historical session adapter`);
+        continue;
+      }
+      try {
+        const effect = adapter.classifyCommand(
+          state,
+          structuredClone(record.command),
+          {
+            sessionId: artifact.header.sessionId,
+            tick: record.tick,
+            cursor: record.cursor,
+            participantId: record.participantId,
+            submissionId: record.submissionId,
+          },
+        );
+        if (effect.kind !== 'interaction') {
+          problems.push(`interaction ${record.n} reclassifies as an intent`);
+        } else {
+          state = effect.state;
+        }
+      } catch (error) {
+        problems.push(
+          `interaction ${record.n} classification failed: `
+          + `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      continue;
+    }
     const resolution: ReplayResolution | undefined = record.kind === 'resolution'
       ? record
       : record.kind === 'action'
@@ -2425,6 +2613,7 @@ function recheckGroupedLevel<
       try {
         state = advanceTick(reducer, state, inputs);
         lastResolutionTick = resolution.tick;
+        cursor++;
       } catch (error) {
         problems.push(
           `resolution ${resolution.n} rejected on replay: `
@@ -2630,7 +2819,13 @@ export function recheckReplayArtifact<
         n: index,
       }));
     const result = artifact.records
-      ? recheckGroupedLevel(artifact, level, reducer, seenSalts)
+      ? recheckGroupedLevel(
+          artifact,
+          level,
+          reducer,
+          options.semanticAdapterForLevel?.(context),
+          seenSalts,
+        )
       : recheckTranscript(
         reducer,
         {

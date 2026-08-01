@@ -417,6 +417,7 @@ class SessionClient:
         self.timeout = timeout
         self.max_response_bytes = max_response_bytes
         self._bindings: dict[str, dict[str, Any]] = {}
+        self._command_sequences: dict[tuple[str, str, str], int] = {}
 
     def _remember(
         self,
@@ -615,7 +616,7 @@ class SessionClient:
             session_id,
         )
 
-    def submit_intent(
+    def submit_command(
         self,
         session_id: str,
         command: Any,
@@ -651,6 +652,10 @@ class SessionClient:
             "player",
         )
         _validate_json(command, "command")
+        sequence_key = (session_id, participant, tick_id)
+        sequence = self._command_sequences.get(sequence_key, 0)
+        if submission_id is None:
+            self._command_sequences[sequence_key] = sequence + 1
         body = {
             "protocol": PROTOCOL_ID,
             "protocolVersion": PROTOCOL_VERSION,
@@ -658,7 +663,7 @@ class SessionClient:
             "tickId": tick_id,
             "revision": revision,
             "participantId": participant,
-            "submissionId": submission_id or f"{participant}:{tick_id}",
+            "submissionId": submission_id or f"{participant}:{tick_id}:{sequence}",
             "command": command,
         }
         result = parse_tick_result(
@@ -672,6 +677,37 @@ class SessionClient:
             raise ProtocolMismatchError("response session does not match request")
         self._remember(result, participant)
         return result
+
+    def submit_intent(
+        self,
+        session_id: str,
+        command: Any,
+        participant_id: str | None = None,
+        submission_id: str | None = None,
+        cursor: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Deprecated compatibility wrapper for one intent per tick."""
+        binding = self._bindings.get(session_id)
+        if binding is None and cursor is None and submission_id is None:
+            self.get_tick_envelope(session_id)
+            binding = self._bindings[session_id]
+        selected = cursor or binding
+        participant = participant_id or (binding or {}).get(
+            "participantId",
+            "player",
+        )
+        legacy_id = submission_id
+        if legacy_id is None and isinstance(selected, dict):
+            tick_id = selected.get("tickId")
+            if isinstance(tick_id, str) and tick_id:
+                legacy_id = f"{participant}:{tick_id}"
+        return self.submit_command(
+            session_id,
+            command,
+            participant,
+            legacy_id,
+            cursor,
+        )
 
 
 class AsyncSessionClient:
@@ -731,3 +767,6 @@ class AsyncSessionClient:
 
     async def submit_intent(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return await self._run("submit_intent", *args, **kwargs)
+
+    async def submit_command(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return await self._run("submit_command", *args, **kwargs)

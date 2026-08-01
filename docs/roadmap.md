@@ -11,11 +11,12 @@ Published release notes remain the source of truth for shipped behavior.
 
 ### v1.0 — stable complete SDK
 
-v1.0 includes every implemented roadmap item through RFC-019: the canonical
+v1.0 includes every implemented roadmap item through RFC-020: the canonical
 GAOS identity, historical verifier kits, portal-aware paths, one durable
 session lifecycle, unified actor control sources, and verifiable benchmark
 publication. The scheduled neutral-core compatibility aliases are removed;
-replay v1.0–v1.3 and evidence semantics remain stable.
+historical replay v1.0–v1.3 semantics remain stable, while replay v1.4 records
+ordered reducer-backed interactions.
 
 ### One complete path from game to verified agent run
 
@@ -132,6 +133,15 @@ Control-source switching is host-side and additive. The reducer and replay
 continue to receive canonical actions rather than rerunning external control
 sources, and security-relevant seat handoffs retain controller-epoch checks.
 
+### RFC-020 unified command effects — incorporated into v1.0
+
+[RFC-020](/rfcs/rfc-020-unified-command-effects) unifies reducer-backed
+interactions and simultaneous intents behind one product-classified command
+path. Interactions preserve the open intent window and gameplay cursor;
+accepted intents freeze their canonical action. `gaos.replay` v1.4 records
+interactions in order and historical v1.0–v1.3 artifacts keep their original
+interpretation.
+
 ### Stable bridge contracts
 
 Continue hardening the smallest contracts shared by both audiences:
@@ -140,7 +150,7 @@ Continue hardening the smallest contracts shared by both audiences:
 - deterministic seeds and settlement;
 - single-agent and multi-agent environments;
 - the `gaos.ticks` v1 protocol boundary; and
-- the `gaos.replay` v1.3 evidence format and verifier interface; and
+- the `gaos.replay` v1.4 evidence format and verifier interface; and
 - product-owned historical verifier export and content-addressed kit identity.
 
 ### Conformance and portability
@@ -164,8 +174,8 @@ The repository rename retains GitHub redirects from the former
 `GAOS-TurnBasedGrid-SDK` location. Releases through v0.25.0 retain their
 original package archive names. v0.26 intentionally adopts the `gaos_sdk`
 Python import and `gaos.ticks` wire identifier as breaking changes. Replay
-identifiers and the supported `gaos.replay` v1.0–v1.3 formats remain
-unchanged.
+identifiers and the historical `gaos.replay` v1.0–v1.3 formats retain their
+interpretation.
 
 ## Independent adoption
 

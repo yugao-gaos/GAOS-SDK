@@ -76,9 +76,10 @@ print(created["tick"])
 `parse_tick_result()` and `get_tick_envelope()` deliberately preserve the
 unchanged v1 `tickId`/`tick` JSON fields without interpreting product payloads.
 Each command carries the session cursor, participant, and a deterministic
-`submissionId`: stable for an exact retry, new for each logical control
-step. Use `submit_intent()` and `get_tick_envelope()` with opaque command and
+`submissionId`: stable for an exact retry, new for each logical command
+step. Use `submit_command()` and `get_tick_envelope()` with opaque command and
 observation shapes.
+`submit_intent()` remains as a compatibility wrapper for intent-only clients.
 
 Attachable sessions resume at their current durable head:
 
@@ -102,7 +103,7 @@ authoritative.
 For an exact retry after a restart, persist
 `client.get_session_binding(session_id)`, restore it with
 `restore_session_binding(binding)`, and reuse the original `submission_id`.
-`submit_intent(..., cursor=original_cursor)` also accepts an explicit original
+`submit_command(..., cursor=original_cursor)` also accepts an explicit original
 cursor. A fresh client rejects an explicit retry key if it would otherwise
 have to fetch and silently pair it with a newer cursor.
 

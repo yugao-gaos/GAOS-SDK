@@ -49,9 +49,10 @@ Record the evidence and named owner for every item in the release pull request.
 
 - [ ] The intended v1.0 export surface is captured and reviewed.
 - [ ] Deprecated aliases scheduled for v1.0 are removed, with a migration table.
-- [ ] RFC-017, RFC-018, and RFC-019 completion tests remain green.
-- [ ] Replay v1.0–v1.3, schemas, golden fixtures, signatures, and verifier
-      semantics retain their documented interpretation.
+- [ ] RFC-017 through RFC-020 completion tests remain green.
+- [ ] Historical replay v1.0–v1.3 retains its documented interpretation, and
+      replay v1.4 interaction records, schemas, signatures, and verifier
+      semantics remain green.
 - [ ] At least one independent product consumer builds and runs its integration
       suite against the exact release-candidate tag.
 

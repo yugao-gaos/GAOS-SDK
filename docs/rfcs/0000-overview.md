@@ -1,15 +1,17 @@
 # GAOS SDK — RFC sequence and release roadmap
 
-Status: RFC-001 through RFC-019 implemented and incorporated into v1.0; RFC-017
-through RFC-019 retain their historical target milestones ·
+Status: RFC-001 through RFC-020 implemented and incorporated into v1.0;
+RFC-017 through RFC-019 retain their historical target milestones ·
 Target: v0.13 → v1.0 arc · Baseline: v0.12.0 export surface
 
 ::: info Design record and roadmap
 RFC-001 through RFC-013 record the design path that led to the current SDK.
 RFC-014 and RFC-015 are shipped in v0.24. RFC-016 ships in v0.25. RFC-017 and
 RFC-018 were implemented for the historical v0.27 target and RFC-019 for the
-historical v0.29 target; all are incorporated into v1.0. For
-supported APIs and current terminology, use the
+historical v0.29 target; all are incorporated into v1.0. RFC-020 adds one
+command path with authoritative interaction-or-intent classification and
+complete interaction replay for v1.0. For supported APIs and current
+terminology, use the
 [architecture map](/architecture), [capability map](/capabilities), and
 [mechanism reference](/mechanisms/).
 :::
@@ -56,6 +58,7 @@ Two standing design rules govern every RFC in this batch:
 | [017](rfc-017-portal-aware-pathfinding.md) | Portal-aware pathfinding through layout neighbors | v0.27 | 002, 005 |
 | [018](rfc-018-unified-session-lifecycle.md) | Unified session lifecycle and runner | v0.27 | 006, 013, 015 |
 | [019](rfc-019-unified-actor-control-sources.md) | Unified actor control sources | v0.29 | 001, 003, 006, 013, 014, 018 |
+| [020](rfc-020-unified-command-effects.md) | Unified command effects: authoritative interaction-or-intent classification | v1.0 | 006, 010, 016, 018 |
 
 Sequencing rationale: RFC-001/002 are contract-level and mostly mechanical —
 they unblock naming and addressing for everything else. RFC-003 is the one
@@ -85,6 +88,12 @@ the canonical action boundary. It keeps lightweight actor possession separate
 from logical-seat authority, so products can change who controls an NPC
 without converting entity types or weakening observation, replay, and
 controller-epoch guarantees.
+RFC-020 implements one participant-command path above intent collection. A
+product-owned deterministic adapter classifies each command as either an
+immediate, turn-neutral interaction or a canonical intent. The SDK owns
+idempotency, prepared persistence, partial-window preservation, and ordered
+portable replay for both effects; products migrate only after those contracts
+and verifier support ship.
 
 The [batch implementation review](implementation-review.md) maps every
 normative requirement and test-plan fixture to its shipped API and evidence.

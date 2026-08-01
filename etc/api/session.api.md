@@ -64,6 +64,9 @@ export interface CanonicalInput extends SubmissionIntegrityReservation {
 type Cell = [number, number];
 
 // @public (undocumented)
+export type ClassifyCommand<TState, TCommand extends JsonValue> = (state: TState, command: TCommand, context: CommandContext) => CommandEffect<TState>;
+
+// @public (undocumented)
 interface CollectedIntent<TCommand = unknown> extends SubmissionIntegrityReservation {
     // (undocumented)
     command: TCommand;
@@ -86,6 +89,25 @@ export interface CommandContext {
     // (undocumented)
     readonly tick: number;
 }
+
+// @public (undocumented)
+export type CommandEffect<TState> = {
+    kind: 'interaction';
+    state: TState;
+} | {
+    kind: 'intent';
+    action: SubmittedAction;
+};
+
+// @public (undocumented)
+export type CommandReceipt = ({
+    effect: 'interaction';
+    transitionRevision: number;
+} & Pick<ControlTransitionReceipt, 'status' | 'participantId' | 'cursor' | 'tick'> & {
+    submissionId: string;
+}) | ({
+    effect: 'intent';
+} & IngestReceipt);
 
 // @public
 export interface CommandSubmission<TCommand = unknown> extends TickCursor, SubmissionIntegrityReservation {
@@ -229,10 +251,13 @@ export function finalizeRunReplay<TLevel>(transcripts: readonly SessionTranscrip
 const GAOS_REPLAY_DERIVED_SEEDS: "gaos.run-level-seed.v1";
 
 // @public
+const GAOS_REPLAY_ENDED_FORMAT_VERSION: "1.3";
+
+// @public
 const GAOS_REPLAY_FORMAT_ID: "gaos.replay";
 
 // @public
-const GAOS_REPLAY_FORMAT_VERSION: "1.3";
+const GAOS_REPLAY_FORMAT_VERSION: "1.4";
 
 // @public
 const GAOS_REPLAY_LEGACY_FORMAT_VERSION: "1.0";
@@ -416,6 +441,7 @@ export interface KernelCheckpoint<TLevel = unknown, TCommand extends JsonValue =
         seenSalts: Array<[string, string]>;
         interests: KernelCheckpointInterest[];
         controls?: KernelCheckpointControl[];
+        intentActions?: Array<[string, SubmittedAction]>;
         rejections: RetainedRejection[];
         historicalSubmissionKeys: string[];
         historicalInterestCommands: Array<[string, string]>;
@@ -478,7 +504,7 @@ interface KernelCheckpointReceipt {
     // (undocumented)
     key: string;
     // (undocumented)
-    receipt: IngestReceipt;
+    receipt: CommandReceipt;
     // (undocumented)
     tickId: string;
 }
@@ -544,7 +570,7 @@ export interface ObservationDelta<TView = TickView<unknown, unknown>> {
     interest?: {
         declaration: JsonValue;
     };
-    origin?: 'resolution' | 'snapshot' | 'interest' | 'control';
+    origin?: 'resolution' | 'snapshot' | 'interest' | 'control' | 'interaction';
     rejections: readonly ObservationRejectionNotice[];
     scopeId?: string;
     // (undocumented)
@@ -806,7 +832,7 @@ interface ReplayExtension {
 }
 
 // @public (undocumented)
-type ReplayFormatVersion = typeof GAOS_REPLAY_LEGACY_FORMAT_VERSION | typeof GAOS_REPLAY_UNSIGNED_FORMAT_VERSION | typeof GAOS_REPLAY_SIGNED_FORMAT_VERSION | typeof GAOS_REPLAY_FORMAT_VERSION;
+type ReplayFormatVersion = typeof GAOS_REPLAY_LEGACY_FORMAT_VERSION | typeof GAOS_REPLAY_UNSIGNED_FORMAT_VERSION | typeof GAOS_REPLAY_SIGNED_FORMAT_VERSION | typeof GAOS_REPLAY_ENDED_FORMAT_VERSION | typeof GAOS_REPLAY_FORMAT_VERSION;
 
 // @public
 export interface ReplayGameRef {
@@ -847,6 +873,36 @@ interface ReplayHeader<TLevel> {
     totals: ReplayTotals;
     // (undocumented)
     visibility?: TranscriptVisibility;
+}
+
+// @public (undocumented)
+interface ReplayInteraction {
+    // (undocumented)
+    canonicalCommand: string;
+    // (undocumented)
+    clientTime?: number;
+    // (undocumented)
+    command: JsonValue;
+    // (undocumented)
+    cursor: number;
+    // (undocumented)
+    hostTime?: number;
+    // (undocumented)
+    kind: 'interaction';
+    // (undocumented)
+    levelIndex: number;
+    // (undocumented)
+    n: number;
+    // (undocumented)
+    participantId: string;
+    // (undocumented)
+    prevChainHash?: string;
+    // (undocumented)
+    sig?: string;
+    // (undocumented)
+    submissionId: string;
+    // (undocumented)
+    tick: number;
 }
 
 // @public (undocumented)
@@ -914,7 +970,7 @@ export interface ReplayMetrics {
 }
 
 // @public (undocumented)
-type ReplayRecord = ReplayAction | ReplayResolution | ReplayTimeout | ReplayExtension | ReplayInterest | ReplayCheckpoint | ReplayCommitMismatchAudit | ReplaySeatSignatureReservation;
+type ReplayRecord = ReplayAction | ReplayResolution | ReplayTimeout | ReplayExtension | ReplayInterest | ReplayInteraction | ReplayCheckpoint | ReplayCommitMismatchAudit | ReplaySeatSignatureReservation;
 
 // @public
 interface ReplayResolution {
@@ -1106,6 +1162,17 @@ export type SessionConflictErrorCode = 'conflict' | 'unknown_submission';
 
 // @public (undocumented)
 export type SessionEvent = (SessionEventBase & {
+    kind: 'interaction';
+    tick: number;
+    cursor: number;
+    participantId: string;
+    submissionId: string;
+    command: JsonValue;
+    canonicalCommand: string;
+    clientTime?: number;
+    prevChainHash?: string;
+    sig?: string;
+}) | (SessionEventBase & {
     kind: 'intent-accepted';
     tick: number;
     revision: number;
@@ -1113,6 +1180,7 @@ export type SessionEvent = (SessionEventBase & {
     submissionId: string;
     command: JsonValue;
     canonicalCommand: string;
+    action?: SubmittedAction;
     clientTime?: number;
     prevChainHash?: string;
     sig?: string;
@@ -1284,6 +1352,8 @@ export interface SessionKernel<TCommand extends JsonValue, TView, TLevel = unkno
     // (undocumented)
     prepareAdvance(target?: number): Prepared<AdvanceSummary<TView>, TView>;
     // (undocumented)
+    prepareCommand(submission: CommandSubmission<TCommand>): Prepared<CommandReceipt, TView>;
+    // (undocumented)
     prepareControlTransition(input: ControlTransitionInput): Prepared<ControlTransitionReceipt, TView>;
     // (undocumented)
     prepareExtension(lane: string, record: JsonObject): Prepared<void, TView>;
@@ -1324,7 +1394,9 @@ export interface SessionKernelOptions<TLevel, TState, TCommand extends JsonValue
     // (undocumented)
     checkpointCodec?: SessionCheckpointCodec<TState>;
     // (undocumented)
-    commandToAction(command: TCommand, context: CommandContext): SubmittedAction;
+    classifyCommand?: ClassifyCommand<any, TCommand>;
+    // (undocumented)
+    commandToAction?(command: TCommand, context: CommandContext): SubmittedAction;
     // (undocumented)
     dmath?: Dmath;
     // (undocumented)

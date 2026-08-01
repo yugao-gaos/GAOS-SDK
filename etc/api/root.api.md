@@ -473,6 +473,8 @@ export class SessionClient {
     // (undocumented)
     restoreSessionBinding(value: unknown): SessionBinding;
     // (undocumented)
+    submitCommand<TCommand = unknown, TObservation = unknown>(sessionId: string, command: TCommand, options?: SubmitCommandOptions): Promise<TickResult<TObservation>>;
+    // @deprecated (undocumented)
     submitIntent<TCommand = unknown, TObservation = unknown>(sessionId: string, command: TCommand, options?: SubmitIntentOptions): Promise<TickResult<TObservation>>;
 }
 
@@ -684,7 +686,7 @@ export interface SubmissionIntegrityReservation {
 }
 
 // @public (undocumented)
-export interface SubmitIntentOptions {
+export interface SubmitCommandOptions {
     // (undocumented)
     cursor?: TickCursor;
     // (undocumented)
@@ -694,6 +696,9 @@ export interface SubmitIntentOptions {
     // (undocumented)
     submissionId?: string;
 }
+
+// @public @deprecated (undocumented)
+export type SubmitIntentOptions = SubmitCommandOptions;
 
 // @public (undocumented)
 interface SubmittedAction {

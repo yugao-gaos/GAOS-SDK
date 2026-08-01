@@ -9,7 +9,8 @@ Prepared August 1, 2026. v1.0 freezes the complete product-neutral SDK after
 the v0.26 release and includes all subsequently implemented work: RFC-017
 portal-aware pathfinding, RFC-018 unified sessions, RFC-019 unified actor
 control sources, benchmark resource reporting, and the 1.0 quality and
-architecture gates. No separate v0.27 or v0.29 package was published.
+architecture gates, plus RFC-020 unified command effects. No separate v0.27
+or v0.29 package was published.
 
 - Normal, guided, autonomous, watched, and benchmark play share one
   `create/attach → observe/act → finalize → close` session lifecycle.
@@ -20,12 +21,17 @@ architecture gates. No separate v0.27 or v0.29 package was published.
 - Behavior-tree, human-input, and agent-input sources converge on the same
   validated action path without conflating actors, seats, controllers, or
   transports.
+- One authoritative command classifier distinguishes reducer-backed
+  interactions from collected intents; accepted intents freeze their
+  canonical action and interactions preserve the open window.
+- `gaos.replay` v1.4 preserves interactions in order for recovery and
+  independent verification.
 - Benchmark bundles carry token, cost, timing, and provider data under the
   explicit `selfReportedObservations` trust label.
 - Reviewed API reports, coverage floors, mutation tests, cross-runtime
   deterministic-math checks, and install-from-archive smoke tests guard the
   frozen surface.
-- `gaos.replay` v1.0–v1.3, signatures, schemas, verifier-kit identities, and
+- Historical `gaos.replay` v1.0–v1.3, signatures, schemas, verifier-kit identities, and
   independent-verification semantics retain their documented interpretation.
 
 ### Migration to v1.0.0

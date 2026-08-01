@@ -32,7 +32,7 @@ try {
     [
       "const sdk = '@yugao-gaos/gaos-sdk';",
       "const engine = await import(`${sdk}/engine`);",
-      "if (engine.GAOS_REPLAY_FORMAT_VERSION !== '1.3') process.exit(1);",
+      "if (engine.GAOS_REPLAY_FORMAT_VERSION !== '1.4') process.exit(1);",
       "for (const entry of ['session-host', 'benchmark', 'ecosystem', 'evidence',",
       "  'leaderboard', 'presentation-client', 'seat-control']) {",
       "  await import(`${sdk}/${entry}`);",

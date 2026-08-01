@@ -4,8 +4,9 @@ GAOS used the v0.x line to refine its contracts before v1.0. Products should
 review the migration notes before adopting the stable surface.
 
 ::: tip Next release: v1.0.0
-The complete implemented SDK—including RFC-017, RFC-018, and RFC-019—is
-prepared as one stable release. Replay v1.0–v1.3 compatibility is unchanged.
+The complete implemented SDK—including RFC-017 through RFC-020—is prepared as
+one stable release. Replay v1.0–v1.3 compatibility is unchanged; unified
+command sessions emit replay v1.4.
 :::
 
 ## v1.0.0: stable complete SDK
@@ -14,8 +15,9 @@ Prepared August 1, 2026. v1.0 includes the previously planned v0.27 and v0.29
 scope without publishing intermediate packages. It freezes the neutral API,
 removes the scheduled `Grid*`/grid-named aliases, and ships unified sessions,
 portal-aware paths, unified actor control sources, self-reported benchmark
-resource observations, historical verifier kits, and the full quality gate.
-Replay, signature, schema, and verifier semantics remain compatible.
+resource observations, unified command effects, historical verifier kits, and
+the full quality gate. Historical replay, signature, schema, and verifier
+semantics remain compatible.
 
 [Migration and release notes →](/releases#v100)
 

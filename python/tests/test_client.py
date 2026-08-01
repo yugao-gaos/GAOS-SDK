@@ -63,6 +63,30 @@ def test_submits_opaque_command_against_remembered_cursor():
     assert requests[1][2]["submissionId"] == "player:session-1:0"
 
 
+def test_submit_command_uses_distinct_ids_at_the_same_cursor():
+    client = SessionClient("https://example.test")
+    requests = []
+    pending = envelope(
+        "pending",
+        submittedParticipants=[],
+        awaitingParticipants=["player"],
+    )
+
+    def call(method, path, body=None):
+        requests.append((method, path, body))
+        return envelope() if len(requests) == 1 else pending
+
+    client._call = call
+    client.create_session({"game": "graph"})
+    client.submit_command("session-1", {"kind": "open"})
+    client.submit_command("session-1", {"kind": "select", "value": 2})
+
+    assert [request[2]["submissionId"] for request in requests[1:]] == [
+        "player:session-1:0:0",
+        "player:session-1:0:1",
+    ]
+
+
 def test_requires_original_cursor_for_explicit_retry():
     client = SessionClient("https://example.test")
     with pytest.raises(ProtocolMismatchError, match="original cursor"):

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://yugao-gaos.github.io/GAOS-SDK/schemas/gaos.replay-v1.schema.json",
   "title": "GAOS portable replay v1",
-  "description": "Schema for a decoded gaos.replay v1 artifact. v1.0 stores actions, v1.1 adds grouped audit records, v1.2 assigns RFC-010 signature semantics, and v1.3 adds replayable ended results.",
+  "description": "Schema for a decoded gaos.replay v1 artifact. v1.0 stores actions, v1.1 adds grouped audit records, v1.2 assigns RFC-010 signature semantics, v1.3 adds replayable ended results, and v1.4 adds ordered interactions.",
   "type": "object",
   "additionalProperties": false,
   "required": ["header", "actions"],
@@ -76,7 +76,7 @@
         "properties": {
           "header": {
             "properties": {
-              "formatVersion": { "enum": ["1.2", "1.3"] }
+              "formatVersion": { "enum": ["1.2", "1.3", "1.4"] }
             },
             "required": ["formatVersion"]
           }
@@ -165,6 +165,31 @@
                       },
                       "systemInput": { "$ref": "#/$defs/integrityV12" }
                     }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "header": {
+            "properties": {
+              "formatVersion": { "enum": ["1.0", "1.1", "1.2", "1.3"] }
+            },
+            "required": ["formatVersion"]
+          }
+        },
+        "required": ["header"]
+      },
+      "then": {
+        "properties": {
+          "records": {
+            "items": {
+              "not": {
+                "properties": { "kind": { "const": "interaction" } },
+                "required": ["kind"]
+              }
+            }
+          }
+        }
       }
     },
     {
@@ -460,7 +485,7 @@
       "properties": {
         "kind": { "const": "header" },
         "format": { "const": "gaos.replay" },
-        "formatVersion": { "enum": ["1.0", "1.1", "1.2", "1.3"] },
+        "formatVersion": { "enum": ["1.0", "1.1", "1.2", "1.3", "1.4"] },
         "sessionId": { "type": "string", "minLength": 1 },
         "game": { "$ref": "#/$defs/gameRef" },
         "seed": {
@@ -729,6 +754,36 @@
         "hostTime": { "$ref": "#/$defs/nonNegativeSafeInteger" }
       }
     },
+    "interaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "n",
+        "levelIndex",
+        "tick",
+        "cursor",
+        "participantId",
+        "submissionId",
+        "command",
+        "canonicalCommand"
+      ],
+      "properties": {
+        "kind": { "const": "interaction" },
+        "n": { "type": "integer", "minimum": 0 },
+        "levelIndex": { "type": "integer", "minimum": 0 },
+        "tick": { "$ref": "#/$defs/nonNegativeSafeInteger" },
+        "cursor": { "$ref": "#/$defs/nonNegativeSafeInteger" },
+        "participantId": { "type": "string", "minLength": 1 },
+        "submissionId": { "type": "string", "minLength": 1 },
+        "command": true,
+        "canonicalCommand": { "type": "string", "minLength": 1 },
+        "clientTime": { "$ref": "#/$defs/nonNegativeSafeInteger" },
+        "prevChainHash": { "$ref": "#/$defs/hashBase64" },
+        "sig": { "$ref": "#/$defs/signatureBase64" },
+        "hostTime": { "$ref": "#/$defs/nonNegativeSafeInteger" }
+      }
+    },
     "checkpoint": {
       "type": "object",
       "additionalProperties": false,
@@ -815,6 +870,7 @@
         { "$ref": "#/$defs/timeout" },
         { "$ref": "#/$defs/extension" },
         { "$ref": "#/$defs/interest" },
+        { "$ref": "#/$defs/interaction" },
         { "$ref": "#/$defs/checkpoint" },
         { "$ref": "#/$defs/commitMismatch" },
         { "$ref": "#/$defs/seatSignature" }

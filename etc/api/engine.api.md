@@ -963,13 +963,16 @@ export type GameTransform = 'simultaneous-to-sequential' | 'repeated-game' | 'st
 export const GAOS_REPLAY_DERIVED_SEEDS: "gaos.run-level-seed.v1";
 
 // @public
+const GAOS_REPLAY_ENDED_FORMAT_VERSION: "1.3";
+
+// @public
 export const GAOS_REPLAY_EXTENSION: "gaos-replay.jsonl";
 
 // @public
 export const GAOS_REPLAY_FORMAT_ID: "gaos.replay";
 
 // @public
-export const GAOS_REPLAY_FORMAT_VERSION: "1.3";
+export const GAOS_REPLAY_FORMAT_VERSION: "1.4";
 
 // @public
 export const GAOS_REPLAY_LEGACY_FORMAT_VERSION: "1.0";
@@ -1984,7 +1987,7 @@ export interface ReplayArtifact<TLevel> {
 export interface ReplayArtifactRecheckOptions<TLevel, TState> {
     // (undocumented)
     optionsForLevel?: (context: ReplayReducerContext<TLevel>) => RecheckOptions<TState> | undefined;
-    semanticAdapterForLevel?: (context: ReplayReducerContext<TLevel>) => ReplaySemanticAdapter<TLevel> | undefined;
+    semanticAdapterForLevel?: (context: ReplayReducerContext<TLevel>) => ReplaySemanticAdapter<TLevel, TState> | undefined;
 }
 
 // @public (undocumented)
@@ -2079,7 +2082,7 @@ export class ReplayFormatError extends Error {
 }
 
 // @public (undocumented)
-export type ReplayFormatVersion = typeof GAOS_REPLAY_LEGACY_FORMAT_VERSION | typeof GAOS_REPLAY_UNSIGNED_FORMAT_VERSION | typeof GAOS_REPLAY_SIGNED_FORMAT_VERSION | typeof GAOS_REPLAY_FORMAT_VERSION;
+export type ReplayFormatVersion = typeof GAOS_REPLAY_LEGACY_FORMAT_VERSION | typeof GAOS_REPLAY_UNSIGNED_FORMAT_VERSION | typeof GAOS_REPLAY_SIGNED_FORMAT_VERSION | typeof GAOS_REPLAY_ENDED_FORMAT_VERSION | typeof GAOS_REPLAY_FORMAT_VERSION;
 
 // @public
 export interface ReplayGameRef {
@@ -2120,6 +2123,36 @@ export interface ReplayHeader<TLevel> {
     totals: ReplayTotals;
     // (undocumented)
     visibility?: TranscriptVisibility;
+}
+
+// @public (undocumented)
+interface ReplayInteraction {
+    // (undocumented)
+    canonicalCommand: string;
+    // (undocumented)
+    clientTime?: number;
+    // (undocumented)
+    command: JsonValue;
+    // (undocumented)
+    cursor: number;
+    // (undocumented)
+    hostTime?: number;
+    // (undocumented)
+    kind: 'interaction';
+    // (undocumented)
+    levelIndex: number;
+    // (undocumented)
+    n: number;
+    // (undocumented)
+    participantId: string;
+    // (undocumented)
+    prevChainHash?: string;
+    // (undocumented)
+    sig?: string;
+    // (undocumented)
+    submissionId: string;
+    // (undocumented)
+    tick: number;
 }
 
 // @public (undocumented)
@@ -2217,7 +2250,7 @@ export interface ReplayMetrics {
 export function replayMetricsFor<TLevel, TState, TView extends SessionView>(reducer: Reducer<TLevel, TState, TView>, state: TState, view?: TView): ReplayMetrics;
 
 // @public (undocumented)
-export type ReplayRecord = ReplayAction | ReplayResolution | ReplayTimeout | ReplayExtension | ReplayInterest | ReplayCheckpoint | ReplayCommitMismatchAudit | ReplaySeatSignatureReservation;
+export type ReplayRecord = ReplayAction | ReplayResolution | ReplayTimeout | ReplayExtension | ReplayInterest | ReplayInteraction | ReplayCheckpoint | ReplayCommitMismatchAudit | ReplaySeatSignatureReservation;
 
 // @public (undocumented)
 export interface ReplayReducerContext<TLevel> {
@@ -2308,7 +2341,15 @@ export interface ReplaySeatSignatureReservation {
 export type ReplaySeedPolicy = 'explicit' | typeof GAOS_REPLAY_DERIVED_SEEDS;
 
 // @public (undocumented)
-export interface ReplaySemanticAdapter<TLevel> {
+export interface ReplaySemanticAdapter<TLevel, TState = unknown> {
+    // (undocumented)
+    classifyCommand?: (state: TState, command: JsonValue, context: ReplaySubmissionContext) => {
+        kind: 'interaction';
+        state: TState;
+    } | {
+        kind: 'intent';
+        action: SubmittedAction;
+    };
     // (undocumented)
     commandToAction?: (command: JsonValue, context: ReplaySubmissionContext) => SubmittedAction;
     // (undocumented)
