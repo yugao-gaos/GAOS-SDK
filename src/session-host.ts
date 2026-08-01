@@ -2,6 +2,8 @@ import { canonicalJson, type JsonObject, type JsonValue } from './protocol.js';
 import {
   SessionConflictError,
   type AdvanceSummary,
+  type ControlTransitionInput,
+  type ControlTransitionReceipt,
   type IngestReceipt,
   type InterestReceipt,
   type InterestSubmission,
@@ -123,6 +125,10 @@ export class SessionKernelHost<
 
   extension(lane: string, record: JsonObject): Promise<void> {
     return this.enqueue(() => this.kernel.prepareExtension(lane, record));
+  }
+
+  control(input: ControlTransitionInput): Promise<ControlTransitionReceipt> {
+    return this.enqueue(() => this.kernel.prepareControlTransition(input));
   }
 
   interest(submission: InterestSubmission): Promise<InterestReceipt> {
