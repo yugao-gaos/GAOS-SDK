@@ -1,9 +1,15 @@
 node_modules/
 dist/
 coverage/
+html-report/
+mutants/
+reports/
+temp/
 *.tsbuildinfo
 
 .pytest_cache/
+.coverage
+htmlcov/
 __pycache__/
 *.py[cod]
 *.egg-info/

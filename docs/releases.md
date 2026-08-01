@@ -3,6 +3,11 @@
 For the public chronological changelog, see the
 [complete version history](/version-history).
 
+::: info Implemented after the v0.27 release scope
+RFC-019 unified actor control sources are implemented on `main` for the planned
+v0.29 target. They are not included in the v0.27 release notes below.
+:::
+
 ## v0.27.0
 
 Prepared July 31, 2026. This additive release implements RFC-017 and RFC-018:
@@ -491,28 +496,33 @@ view also accepts an existing product-owned `grid` payload of any shape.
 ## Release process
 
 TypeScript and Python distributions share one semantic version. Before a
-release, update both `package.json` and `python/pyproject.toml`, then run:
+release, follow the complete [quality and release gates](/quality). Update both
+`package.json` and `python/pyproject.toml`, then run:
 
 ```sh
 npm ci
 npm run typecheck
-npm test
+npm run test:coverage
+npm run test:mutation
 npm run build
 
-python3 -m pip install build pytest
-PYTHONPATH=python python3 -m pytest python/tests
+python3 -m pip install build -e "python[dev]"
+python3 -m pytest python/tests --cov=gaos_sdk --cov-branch --cov-fail-under=65
 python3 -m build python
 ```
 
-Commit the version change separately and push it. Create a GitHub release whose
-tag is `v` followed by that version, such as `v0.1.0`.
+Commit the version change separately and push it. Create and push an annotated
+tag whose name is `v` followed by that version, such as `v1.0.0`, then create a
+GitHub **draft** release for that tag.
 
-Publishing the release runs `.github/workflows/release.yml`. It:
+Run the **Publish SDK release** workflow with the draft tag. It:
 
-1. validates the TypeScript SDK and publishes it to GitHub Packages;
-2. validates and builds the Python SDK; and
-3. attaches the npm tarball, Python wheel, and Python source distribution to
-   the GitHub release.
+1. validates coverage and mutation testing before publishing anything;
+2. validates the TypeScript SDK and publishes it to GitHub Packages;
+3. validates and builds the Python SDK;
+4. smoke-tests the installable archives; and
+5. attaches the npm tarball, Python wheel, and Python source distribution and
+   publishes the validated GitHub release.
 
 GitHub Packages uses the repository's `GITHUB_TOKEN`; no long-lived npm token
 is required. Package consumers authenticate with a token that has

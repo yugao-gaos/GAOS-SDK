@@ -24,6 +24,11 @@ from gaos_sdk import (
 )
 from gaos_sdk.verify import verify_replay
 
+REPOSITORY_ROOT = next(
+    parent
+    for parent in Path(__file__).resolve().parents
+    if (parent / "fixtures").is_dir() and (parent / "schemas").is_dir()
+)
 
 def test_rfc_8032_vectors() -> None:
     vectors = [
@@ -112,7 +117,7 @@ def test_framing_and_roster_are_deterministic() -> None:
 
 def test_published_submission_vectors_match_typescript() -> None:
     fixture = json.loads((
-        Path(__file__).parents[2]
+        REPOSITORY_ROOT
         / "fixtures"
         / "signatures"
         / "gaos.submission.ed25519.v1.vectors.json"
@@ -138,7 +143,7 @@ def test_published_submission_vectors_match_typescript() -> None:
 
 def test_signed_v12_artifact_rechecks_cross_runtime_vectors() -> None:
     fixture = json.loads((
-        Path(__file__).parents[2]
+        REPOSITORY_ROOT
         / "fixtures"
         / "signatures"
         / "gaos.submission.ed25519.v1.vectors.json"
@@ -208,7 +213,7 @@ def test_signed_v12_artifact_rechecks_cross_runtime_vectors() -> None:
     }
     assert validate_replay_artifact(artifact) == []
     schema = json.loads((
-        Path(__file__).parents[2]
+        REPOSITORY_ROOT
         / "schemas"
         / "gaos.replay-v1.schema.json"
     ).read_text(encoding="utf-8"))
@@ -343,7 +348,7 @@ def test_signed_interest_record_is_tier_two_chain_material() -> None:
     }
     assert validate_replay_artifact(artifact) == []
     schema = json.loads((
-        Path(__file__).parents[2]
+        REPOSITORY_ROOT
         / "schemas"
         / "gaos.replay-v1.schema.json"
     ).read_text(encoding="utf-8"))

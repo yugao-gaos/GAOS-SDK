@@ -115,6 +115,8 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "api:check": "npm run build && node scripts/check-api-surface.mjs",
+    "api:update": "npm run build && node scripts/check-api-surface.mjs --update",
     "architecture:check": "node scripts/check-architecture.mjs",
     "docs:dev": "node scripts/sync-public-schemas.mjs && vitepress dev docs",
     "docs:build": "node scripts/sync-public-schemas.mjs && vitepress build docs",
@@ -125,6 +127,9 @@
     "signatures:benchmark": "npm run build && node scripts/benchmark-signatures.mjs",
     "observations:benchmark": "npm run build && node scripts/benchmark-observation-codec.mjs",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:mutation": "stryker run",
+    "smoke:package": "npm run build && node scripts/smoke-package.mjs",
     "typecheck": "tsc --noEmit",
     "prepare": "npm run build",
     "prepack": "npm run build"
@@ -141,14 +146,19 @@
     "registry": "https://npm.pkg.github.com"
   },
   "devDependencies": {
+    "@microsoft/api-extractor": "7.58.12",
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
     "@types/node": "^22.20.1",
+    "@vitest/coverage-v8": "^4.1.10",
     "playwright": "^1.62.0",
     "typescript": "^5.5.4",
     "vitepress": "1.6.4",
-    "vitest": "^3.2.7",
+    "vitest": "^4.1.10",
     "workerd": "^1.20260724.1"
   },
   "overrides": {
+    "qs": "6.15.3",
     "vite": "6.4.3"
   }
 }
