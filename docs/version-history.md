@@ -16,6 +16,9 @@ Prepared July 31, 2026 as an additive release.
   preserving the separate authoritative transit plan/commit boundary.
 - Create and attach produce the same live-session handle at the durable head;
   close remains local-only.
+- Product-owned create and attach routes can synchronously adopt an existing
+  binding with either a full initial tick or the standard resolved-head
+  projection into that same handle without another request.
 - Generic attachment receipts are canonically digested and independently
   chain-verifiable.
 - Normal and evaluated play share one immutable finalization operation.

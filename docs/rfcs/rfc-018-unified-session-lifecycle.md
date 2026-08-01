@@ -180,6 +180,13 @@ interface SessionResult<TOutcome = JsonValue> {
   extensions?: ProtocolExtensions;
 }
 
+interface ExistingSessionHandle<TObservation> {
+  sessionId: string;
+  binding: SessionBinding;
+  initialTick: TickResult<TObservation>;
+  attachReceipt?: SessionAttachReceipt;
+}
+
 class SessionClient {
   createSession<TRequest, TObservation>(
     request: TRequest,
@@ -209,6 +216,16 @@ class SessionClient {
     request: SessionFinalizeRequest,
     options?: SessionCallOptions,
   ): Promise<SessionResult<TOutcome>>;
+
+  createSessionHandleFromExisting<TCommand, TObservation, TOutcome>(
+    existing: ExistingSessionHandle<TObservation>,
+    policy: SessionPolicy,
+  ): SessionHandle<TCommand, TObservation, TOutcome>;
+
+  createSessionHandleFromExisting<TCommand, TObservation, TOutcome>(
+    existing: SessionStart<TObservation> | SessionAttach<TObservation>,
+    policy: SessionPolicy,
+  ): SessionHandle<TCommand, TObservation, TOutcome>;
 }
 ```
 
@@ -246,6 +263,19 @@ interface SessionHandle<TCommand, TObservation, TOutcome = JsonValue> {
 The handle may cache the most recent authoritative observation, but
 `observe()` always has a transport-neutral asynchronous contract. A local
 implementation may resolve immediately.
+
+Product-owned create or attach routes can hand their already-validated wire
+head to `createSessionHandleFromExisting`. This constructor is synchronous and
+performs no network request. A custom route can provide the full `TickResult`
+envelope. The standard `SessionStart` and `SessionAttach` projections are also
+accepted: their observation payload and extensions are synthesized into a
+resolved tick envelope at the supplied durable binding head. These projections
+therefore represent the resolved current head, not a pending transition. The
+constructor checks session identity and cursor consistency, validates any
+attachment receipt at the same durable revision, and consumes the supplied
+tick on the handle's first `observe()`. The binding's `participantId` remains
+the handle seat. A terminal finalization extension initializes the handle as
+terminal before any method call.
 
 `close()` is idempotent and local. Cleanup of expired or abandoned
 authoritative records is host retention policy, never an implicit side effect
