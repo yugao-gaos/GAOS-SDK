@@ -131,6 +131,41 @@ conformance kit proves byte-identical retry and rejection of conflicting bytes
 under a reused event id; products still test their own transaction, crash, and
 delivery boundaries.
 
+## Durable control-only transitions
+
+Some sessions have seat controls—modal acknowledgement, ready state, loadout
+selection—that must update authoritative state and observations without
+advancing the gameplay turn. Configure `applyControlTransition` and submit
+them through `kernel.prepareControlTransition(input)` or `host.control(input)`:
+
+```ts
+const kernel = createSessionKernel({
+  // ...normal session options...
+  applyControlTransition: (state, control, context) =>
+    applyModalControl(state, context.participantId, control),
+});
+
+await host.control({
+  participantId: 'blue',
+  controlId: 'modal:blue:4',
+  control: { kind: 'continue', revision: 4 },
+});
+```
+
+`controlId` is a seat-scoped durable idempotency key. An exact retry returns a
+`duplicate` receipt without another event or reducer call; reuse with different
+canonical control bytes is a conflict. The resulting `control-transition`
+event records the seat, id, control value, gameplay cursor, and tick.
+Rehydration reapplies these events in log order.
+Use `defineControlTransition<State>(callback)` when declaring the callback
+separately and you want explicit state inference.
+
+A control transition increments `transitionRevision` and each seat's
+`viewRevision`, emits `origin: 'control'` observation deltas, and leaves
+`cursor`, `tick`, and the open intent window unchanged. In particular, an
+intent already collected from another seat remains pending. Authorization is
+host-owned: only pass the authenticated seat as `participantId`.
+
 Accepted intents are events even before a simultaneous window is complete.
 `rehydrateKernel(options, transcript)` therefore restores pending commands and
 idempotency receipts after a crash. A resolution records the complete
@@ -153,7 +188,9 @@ distinguishes repair from ordinary resolution; absence remains readable as
 `acknowledgements`, the applied
 `(participantId, submissionId)` identities in canonical reducer order.
 Host-derived inputs are excluded and reconnect snapshots carry an empty list.
-At every observable state, `viewRevision(seat) === cursor()` for every seat.
+Without control transitions, `viewRevision(seat) === cursor()` for every seat.
+Control transitions deliberately increase view revision without increasing
+the gameplay cursor.
 
 Rejected inputs do not advance gameplay or `viewRevision`. They produce a
 rejection-only unchanged envelope per seat at the new `transitionRevision`,

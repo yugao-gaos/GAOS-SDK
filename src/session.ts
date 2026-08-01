@@ -133,6 +133,7 @@ export interface SessionHistoryLookup {
   gameplaySubmission(participantId: string, submissionId: string): boolean;
   interestCommand(participantId: string, submissionId: string): string | undefined;
   saltIdentity(salt: string): string | undefined;
+  controlTransition?(participantId: string, controlId: string): string | undefined;
 }
 
 interface KernelCheckpointReceipt {
@@ -160,6 +161,12 @@ interface KernelCheckpointInterest {
   canonical: string;
   patchBackoffRemaining: number;
   patchBackoffWindow: number;
+}
+
+interface KernelCheckpointControl {
+  key: string;
+  canonicalControl: string;
+  receipt: ControlTransitionReceipt;
 }
 
 interface RetainedRejection {
@@ -199,6 +206,7 @@ export interface KernelCheckpoint<TLevel = unknown, TCommand extends JsonValue =
     nextCommitmentIds: Array<[string, number]>;
     seenSalts: Array<[string, string]>;
     interests: KernelCheckpointInterest[];
+    controls?: KernelCheckpointControl[];
     rejections: RetainedRejection[];
     historicalSubmissionKeys: string[];
     historicalInterestCommands: Array<[string, string]>;
@@ -284,6 +292,43 @@ export interface CommandContext {
   readonly tick: number;
 }
 
+export interface ControlTransitionContext {
+  readonly sessionId: string;
+  readonly participantId: string;
+  readonly controlId: string;
+  readonly cursor: number;
+  readonly tick: number;
+}
+
+export interface ControlTransitionInput {
+  participantId: string;
+  /** Stable idempotency key within this seat. */
+  controlId: string;
+  control: JsonValue;
+}
+
+export interface ControlTransitionReceipt {
+  status: 'accepted' | 'duplicate';
+  participantId: string;
+  controlId: string;
+  transitionRevision: number;
+  cursor: number;
+  tick: number;
+}
+
+export type ControlTransitionReducer<TState> = (
+  state: TState,
+  control: JsonValue,
+  context: ControlTransitionContext,
+) => TState;
+
+/** Preserve state inference when declaring a control reducer separately. */
+export function defineControlTransition<TState>(
+  reducer: ControlTransitionReducer<TState>,
+): ControlTransitionReducer<TState> {
+  return reducer;
+}
+
 export interface InterestContext {
   readonly sessionId: string;
   readonly participantId: string;
@@ -329,6 +374,15 @@ export interface SessionKernelOptions<
     | { mode: 'turns' }
     | { mode: 'ticks'; rate: TickRate };
   commandToAction(command: TCommand, context: CommandContext): SubmittedAction;
+  /**
+   * Optional reducer lane for modal, ready-state, and other seat controls.
+   * It updates durable reducer state and observations without advancing the
+   * gameplay cursor or tick.
+   */
+  // Erased here so spreading options while replacing `reducer` with another
+  // state type remains source-compatible. Use `defineControlTransition` for
+  // state inference when declaring the callback.
+  applyControlTransition?: ControlTransitionReducer<any>;
   /**
    * Required host timestamp policy. A provider returns UTC epoch
    * milliseconds (`Date.now()` is suitable; `performance.now()` is not).
@@ -451,6 +505,15 @@ export type SessionEvent =
     record: JsonObject;
   })
   | (SessionEventBase & {
+    kind: 'control-transition';
+    tick: number;
+    cursor: number;
+    participantId: string;
+    controlId: string;
+    control: JsonValue;
+    canonicalControl: string;
+  })
+  | (SessionEventBase & {
     kind: 'interest';
     tick: number;
     cursor: number;
@@ -520,7 +583,7 @@ export interface ObservationDelta<TView = TickView<unknown, unknown>> {
   tick: number;
   codec: 'v2';
   /** How this envelope was produced. Absent is read as `resolution`. */
-  origin?: 'resolution' | 'snapshot' | 'interest';
+  origin?: 'resolution' | 'snapshot' | 'interest' | 'control';
   /**
    * Applied user inputs in canonical reducer order for this view revision.
    * A reconnect snapshot applies no new input and therefore carries `[]`.
@@ -674,6 +737,10 @@ interface KernelState<TState, TCommand extends JsonValue, TView> {
   nextCommitmentIds: Map<string, number>;
   seenSalts: Map<string, string>;
   interestScopes: Map<string, InterestScopeState<TView>>;
+  controls: Map<string, {
+    canonicalControl: string;
+    receipt: ControlTransitionReceipt;
+  }>;
 }
 
 interface PreparedState<TState, TCommand extends JsonValue, TView> {
@@ -756,6 +823,9 @@ export interface SessionKernel<
     forcedInput?: SubmittedAction,
   ): Prepared<AdvanceSummary<TView>, TView>;
   prepareExtension(lane: string, record: JsonObject): Prepared<void, TView>;
+  prepareControlTransition(
+    input: ControlTransitionInput,
+  ): Prepared<ControlTransitionReceipt, TView>;
   prepareInterest(submission: InterestSubmission): Prepared<InterestReceipt, TView>;
   prepareSeatSignature(input: SeatSignatureInput): Prepared<void, TView>;
   commit(prepared: Prepared<unknown, TView>): void;
@@ -1203,6 +1273,10 @@ class SessionKernelImpl<
     if (options.hostTime !== 'none' && typeof options.hostTime !== 'function') {
       throw new TypeError("hostTime must be a UTC epoch-millisecond provider or 'none'");
     }
+    if (options.applyControlTransition !== undefined
+      && typeof options.applyControlTransition !== 'function') {
+      throw new TypeError('applyControlTransition must be a function');
+    }
     this.tickTimeoutPolicy = undefined;
     if (options.timeoutPolicy !== undefined) {
       if (!isObjectRecord(options.timeoutPolicy)) {
@@ -1410,6 +1484,7 @@ class SessionKernelImpl<
       nextCommitmentIds: new Map(),
       seenSalts: new Map(),
       interestScopes,
+      controls: new Map(),
     };
     if (checkpoint !== undefined) this.restoreCheckpoint(checkpoint);
     if (transcript !== undefined) this.rehydrate(transcript);
@@ -1589,6 +1664,7 @@ class SessionKernelImpl<
       nextCommitmentIds: new Map(this.live.nextCommitmentIds),
       seenSalts: new Map(this.live.seenSalts),
       interestScopes: forkInterestScopes(this.live.interestScopes),
+      controls: cloneMapValues(this.live.controls),
     };
     this.draftForks.set(draft, reducerState);
     return draft;
@@ -2561,6 +2637,142 @@ class SessionKernelImpl<
     }
   }
 
+  prepareControlTransition(
+    input: ControlTransitionInput,
+  ): Prepared<ControlTransitionReceipt, TView> {
+    if (this.options.applyControlTransition === undefined) {
+      throw new SessionConflictError('session has no control-transition reducer');
+    }
+    if (!isObjectRecord(input)) throw new TypeError('control transition must be an object');
+    if (!this.options.seats.includes(input.participantId)) {
+      throw new SessionConflictError('control transition names an unknown participant');
+    }
+    if (typeof input.controlId !== 'string' || !input.controlId.trim()) {
+      throw new TypeError('controlId must be a non-empty string');
+    }
+    let canonicalControl: string;
+    try {
+      canonicalControl = canonicalJson(input.control);
+    } catch (error) {
+      throw new TypeError(
+        error instanceof Error ? error.message : 'control must contain plain JSON',
+      );
+    }
+    const key = receiptKey(input.participantId, input.controlId);
+    const existing = this.live.controls.get(key);
+    const durableCanonical = existing?.canonicalControl
+      ?? this.historyLookup?.controlTransition?.(input.participantId, input.controlId);
+    if (durableCanonical !== undefined) {
+      if (durableCanonical !== canonicalControl) {
+        throw new SessionConflictError(
+          'controlId was reused with different canonical content',
+        );
+      }
+      const receipt: ControlTransitionReceipt = existing
+        ? { ...existing.receipt, status: 'duplicate' }
+        : {
+          status: 'duplicate',
+          participantId: input.participantId,
+          controlId: input.controlId,
+          transitionRevision: this.live.transitionRevision,
+          cursor: this.live.cursor,
+          tick: this.live.tick,
+        };
+      const draft = this.forkLive();
+      try {
+        return this.makePrepared(draft, [], [], receipt, true);
+      } catch (error) {
+        this.discardDraft(draft);
+        throw error;
+      }
+    }
+    if (this.options.reducer.view(this.live.reducerState).status !== 'playing') {
+      throw new SessionAdvanceError('terminal', 'session is already terminal');
+    }
+    const draft = this.forkLive();
+    try {
+      draft.reducerState = this.options.applyControlTransition(
+        draft.reducerState,
+        structuredClone(input.control),
+        {
+          sessionId: this.options.sessionId,
+          participantId: input.participantId,
+          controlId: input.controlId,
+          cursor: draft.cursor,
+          tick: draft.tick,
+        },
+      );
+      const fullView = this.options.reducer.view(draft.reducerState);
+      this.validatedParticipantsForView(fullView);
+      const deltas: ObservationDelta<TView>[] = [];
+      for (const seat of this.options.seats) {
+        const next = this.viewFor(draft.reducerState, seat);
+        const revision = (draft.viewRevisions.get(seat) ?? 0) + 1;
+        const canonicalNext = canonicalSessionView(next);
+        const nextSnapshot = structuredClone(next);
+        draft.views.set(seat, nextSnapshot);
+        draft.viewCanonical.set(seat, canonicalNext);
+        draft.viewRevisions.set(seat, revision);
+        for (const scope of draft.interestScopes.values()) {
+          if (scope.participantId !== seat) continue;
+          const scoped = this.scopedView(nextSnapshot, scope, draft.cursor, draft.tick);
+          const encoded = this.encodedObservation(
+            scope.view,
+            scoped.view,
+            scoped.canonical,
+            scope.canonical === scoped.canonical,
+            scope.patchBackoffRemaining,
+            scope.patchBackoffWindow,
+          );
+          deltas.push({
+            seat,
+            scopeId: scope.scopeId,
+            ...(scope.declared
+              ? { interest: { declaration: structuredClone(scope.declaration) } }
+              : {}),
+            transitionRevision: draft.transitionRevision + 1,
+            viewRevision: revision,
+            tick: draft.tick,
+            codec: encoded.codec,
+            origin: 'control',
+            acknowledgements: [],
+            rejections: [],
+            body: encoded.body,
+            viewDigest: fnv1a(scoped.canonical),
+          });
+          scope.view = scoped.view;
+          scope.canonical = scoped.canonical;
+          scope.patchBackoffRemaining = encoded.patchBackoffRemaining;
+          scope.patchBackoffWindow = encoded.patchBackoffWindow;
+        }
+      }
+      const receipt: ControlTransitionReceipt = {
+        status: 'accepted',
+        participantId: input.participantId,
+        controlId: input.controlId,
+        transitionRevision: draft.transitionRevision + 1,
+        cursor: draft.cursor,
+        tick: draft.tick,
+      };
+      draft.controls.set(key, {
+        canonicalControl,
+        receipt: structuredClone(receipt),
+      });
+      return this.makePrepared(draft, [{
+        kind: 'control-transition',
+        tick: draft.tick,
+        cursor: draft.cursor,
+        participantId: input.participantId,
+        controlId: input.controlId,
+        control: structuredClone(input.control),
+        canonicalControl,
+      }], deltas, receipt);
+    } catch (error) {
+      this.discardDraft(draft);
+      throw error;
+    }
+  }
+
   prepareInterest(submission: InterestSubmission): Prepared<InterestReceipt, TView> {
     if (this.options.interest === undefined) {
       throw new SessionConflictError('session has no interest policy');
@@ -2952,6 +3164,11 @@ class SessionKernelImpl<
           patchBackoffRemaining: scope.patchBackoffRemaining,
           patchBackoffWindow: scope.patchBackoffWindow,
         })),
+        controls: sortedEntries(this.live.controls).map(([key, control]) => ({
+          key,
+          canonicalControl: control.canonicalControl,
+          receipt: structuredClone(control.receipt),
+        })),
         rejections: structuredClone(this.live.rejectionHistory),
         historicalSubmissionKeys: [...this.historicalSubmissionKeys]
           .sort(compareUnicodeCodePoints),
@@ -2987,11 +3204,18 @@ class SessionKernelImpl<
     if (this.historyLookup === undefined) {
       throw new TypeError('compaction requires a host-backed historyLookup');
     }
+    if (this.live.controls.size > 0
+      && this.historyLookup.controlTransition === undefined) {
+      throw new TypeError(
+        'compaction after control transitions requires historyLookup.controlTransition',
+      );
+    }
     this.live.events = [];
     this.live.rejectionHistory = [];
     this.live.expiredReceiptKeys.clear();
     this.historicalSubmissionKeys.clear();
     this.historicalInterestCommands.clear();
+    this.live.controls.clear();
     this.live.seenSalts.clear();
     for (const [key, commitment] of this.live.commitments) {
       if (commitment.revealed) this.live.commitments.delete(key);
@@ -3079,10 +3303,41 @@ class SessionKernelImpl<
       || !Array.isArray(protocol.nextCommitmentIds)
       || !Array.isArray(protocol.seenSalts)
       || !Array.isArray(protocol.interests)
+      || (protocol.controls !== undefined && !Array.isArray(protocol.controls))
       || !Array.isArray(protocol.rejections)
       || !Array.isArray(protocol.historicalSubmissionKeys)
       || !Array.isArray(protocol.historicalInterestCommands)) {
       throw new TypeError('checkpoint protocol payload is invalid');
+    }
+    for (const control of protocol.controls ?? []) {
+      const receipt = control?.receipt;
+      let canonical = '';
+      try {
+        canonical = canonicalJson(JSON.parse(control.canonicalControl));
+      } catch {
+        // Report one stable checkpoint error below.
+      }
+      if (!isObjectRecord(control)
+        || typeof control.key !== 'string'
+        || typeof control.canonicalControl !== 'string'
+        || canonical !== control.canonicalControl
+        || !isObjectRecord(receipt)
+        || receipt.status !== 'accepted'
+        || !this.options.seats.includes(receipt.participantId)
+        || typeof receipt.controlId !== 'string'
+        || !receipt.controlId
+        || control.key !== receiptKey(receipt.participantId, receipt.controlId)
+        || !Number.isSafeInteger(receipt.transitionRevision)
+        || receipt.transitionRevision < 1
+        || receipt.transitionRevision > watermark.transitionRevision
+        || !Number.isSafeInteger(receipt.cursor)
+        || receipt.cursor < 0
+        || receipt.cursor > watermark.cursor
+        || !Number.isSafeInteger(receipt.tick)
+        || receipt.tick < 0
+        || receipt.tick > watermark.tick) {
+        throw new TypeError('checkpoint control-transition history is invalid');
+      }
     }
     let previousRejectionRevision = checkpoint.retentionFloor;
     for (const rejection of protocol.rejections) {
@@ -3163,6 +3418,13 @@ class SessionKernelImpl<
         patchBackoffWindow: scope.patchBackoffWindow,
       },
     ]));
+    const controls = new Map((protocol.controls ?? []).map((control) => [
+      control.key,
+      {
+        canonicalControl: control.canonicalControl,
+        receipt: structuredClone(control.receipt),
+      },
+    ]));
     this.live = {
       reducerState,
       window: structuredClone(checkpoint.window),
@@ -3181,6 +3443,7 @@ class SessionKernelImpl<
       nextCommitmentIds,
       seenSalts,
       interestScopes,
+      controls,
     };
     this.historicalSubmissionKeys.clear();
     for (const key of protocol.historicalSubmissionKeys) {
@@ -3305,6 +3568,69 @@ class SessionKernelImpl<
             patchBackoffWindow: this.observationCodec.patchBackoffTicks,
           },
         );
+      } else if (event.kind === 'control-transition') {
+        if (this.options.applyControlTransition === undefined) {
+          throw new TypeError(
+            'transcript contains a control transition but options have no control reducer',
+          );
+        }
+        if (!this.options.seats.includes(event.participantId)
+          || typeof event.controlId !== 'string'
+          || !event.controlId
+          || event.cursor !== this.live.cursor
+          || event.tick !== this.live.tick
+          || canonicalJson(event.control) !== event.canonicalControl) {
+          throw new TypeError('transcript contains an invalid control transition');
+        }
+        const key = receiptKey(event.participantId, event.controlId);
+        if (this.live.controls.has(key)) {
+          throw new TypeError('transcript reuses a control transition id');
+        }
+        this.live.reducerState = this.options.applyControlTransition(
+          this.live.reducerState,
+          structuredClone(event.control),
+          {
+            sessionId: this.options.sessionId,
+            participantId: event.participantId,
+            controlId: event.controlId,
+            cursor: event.cursor,
+            tick: event.tick,
+          },
+        );
+        const fullView = this.options.reducer.view(this.live.reducerState);
+        this.validatedParticipantsForView(fullView);
+        for (const seat of this.options.seats) {
+          const seatView = this.viewFor(this.live.reducerState, seat);
+          this.live.views.set(seat, seatView);
+          const canonical = canonicalSessionView(seatView);
+          this.live.viewCanonical.set(seat, canonical);
+          this.live.viewRevisions.set(
+            seat,
+            (this.live.viewRevisions.get(seat) ?? 0) + 1,
+          );
+          for (const scope of this.live.interestScopes.values()) {
+            if (scope.participantId !== seat) continue;
+            const scoped = this.scopedView(
+              seatView,
+              scope,
+              this.live.cursor,
+              this.live.tick,
+            );
+            scope.view = scoped.view;
+            scope.canonical = scoped.canonical;
+          }
+        }
+        this.live.controls.set(key, {
+          canonicalControl: event.canonicalControl,
+          receipt: {
+            status: 'accepted',
+            participantId: event.participantId,
+            controlId: event.controlId,
+            transitionRevision: event.transitionRevision,
+            cursor: event.cursor,
+            tick: event.tick,
+          },
+        });
       } else if (event.kind === 'resolution') {
         for (const { participantId, action } of event.inputs) {
           if (!participantId) continue;
