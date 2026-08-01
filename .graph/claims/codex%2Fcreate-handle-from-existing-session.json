@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/create-handle-from-existing-session",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "codex-mcp-65304-6e3e795ad768b06634e7fbf0f8bbc049",
+  "branch": "orch/attempt/codex-create-handle-from-existing-session",
+  "status": "claimed",
+  "claimed_at": "2026-08-01T00:44:47.358Z",
+  "lease_until": "2026-08-01T01:44:47.358Z"
+}
