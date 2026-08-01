@@ -180,6 +180,10 @@ describe('RFC-016 release gate', () => {
     expect(invocation.args).toEqual(expect.arrayContaining([
       '--network=none',
       '--read-only',
+      '--cap-drop=ALL',
+      '--security-opt=no-new-privileges',
+      '--user',
+      '65532:65532',
       '--pids-limit',
       '1',
       '--memory',
@@ -201,6 +205,52 @@ describe('RFC-016 release gate', () => {
       processes: 1,
       outputBytes: 1024,
     })).toThrow(/pinned/);
+
+    expect(() => containerVerifierInvocation({
+      image: `registry.invalid/gaos-runner@sha256:${'a'.repeat(64)}`,
+      user: '0:0',
+    }, {
+      schema: 'gaos.verifier-request.v1',
+      kitDigest: `sha256:${'b'.repeat(64)}`,
+      kitDirectory: '/kits/demo',
+      replayPath: '/replays/run.jsonl',
+    }, {
+      cpuMilliseconds: 1_000,
+      wallMilliseconds: 5_000,
+      memoryBytes: 64 * 1024 * 1024,
+      processes: 1,
+      outputBytes: 1024,
+    })).toThrow(/non-root numeric/);
+
+    expect(() => containerVerifierInvocation({
+      image: `registry.invalid/gaos-runner@sha256:${'a'.repeat(64)}`,
+    }, {
+      schema: 'gaos.verifier-request.v1',
+      kitDigest: `sha256:${'b'.repeat(64)}`,
+      kitDirectory: '/kits/demo',
+      replayPath: '/replays/run.jsonl',
+    }, {
+      cpuMilliseconds: 1_000,
+      wallMilliseconds: 5_000,
+      memoryBytes: 1,
+      processes: 1,
+      outputBytes: 1024,
+    })).toThrow(/at least 16 MiB/);
+
+    expect(() => containerVerifierInvocation({
+      image: `registry.invalid/gaos-runner@sha256:${'a'.repeat(64)}`,
+    }, {
+      schema: 'gaos.verifier-request.v1',
+      kitDigest: `sha256:${'b'.repeat(64)}`,
+      kitDirectory: '/kits/demo',
+      replayPath: '/replays/run.jsonl',
+    }, {
+      cpuMilliseconds: 1,
+      wallMilliseconds: 1_000,
+      memoryBytes: 64 * 1024 * 1024,
+      processes: 1,
+      outputBytes: 1024,
+    })).toThrow(/at least 0.01 CPUs/);
   });
 
   it('provides explicit pack and read-only inspect CLI commands', async () => {

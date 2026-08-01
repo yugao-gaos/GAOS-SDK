@@ -10,12 +10,20 @@ export interface ContainerVerifierRunnerOptions {
   /** Immutable image reference, for example registry/repo@sha256:<64 hex>. */
   image: string;
   command?: 'docker' | 'podman';
+  /** Numeric container uid or uid:gid. Defaults to the non-root uid 65532. */
+  user?: string;
 }
 
 export interface ContainerVerifierInvocation {
   command: 'docker' | 'podman';
   args: string[];
   request: string;
+}
+
+function assertPositiveSafeInteger(value: number, label: string): void {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new RangeError(`${label} must be a positive safe integer`);
+  }
 }
 
 /**
@@ -31,10 +39,28 @@ export function containerVerifierInvocation(
   if (!/@sha256:[0-9a-f]{64}$/.test(options.image)) {
     throw new TypeError('restricted verifier image must be pinned by SHA-256 digest');
   }
+  const user = options.user ?? '65532:65532';
+  if (!/^[1-9][0-9]*(?::[1-9][0-9]*)?$/.test(user)) {
+    throw new TypeError('restricted verifier user must be a non-root numeric uid or uid:gid');
+  }
+  assertPositiveSafeInteger(limits.cpuMilliseconds, 'cpuMilliseconds');
+  assertPositiveSafeInteger(limits.wallMilliseconds, 'wallMilliseconds');
+  assertPositiveSafeInteger(limits.memoryBytes, 'memoryBytes');
+  assertPositiveSafeInteger(limits.processes, 'processes');
+  assertPositiveSafeInteger(limits.outputBytes, 'outputBytes');
+  if (limits.wallMilliseconds > 2_147_483_647) {
+    throw new RangeError('wallMilliseconds exceeds the supported timer range');
+  }
+  if (limits.memoryBytes < 16 * 1024 * 1024) {
+    throw new RangeError('memoryBytes must be at least 16 MiB');
+  }
   const kitDirectory = resolve(request.kitDirectory);
   const replayPath = resolve(request.replayPath);
-  const memoryMiB = Math.max(16, Math.floor(limits.memoryBytes / (1024 * 1024)));
-  const cpu = Math.max(0.01, limits.cpuMilliseconds / limits.wallMilliseconds);
+  const memoryMiB = Math.floor(limits.memoryBytes / (1024 * 1024));
+  const cpu = limits.cpuMilliseconds / limits.wallMilliseconds;
+  if (cpu < 0.01) {
+    throw new RangeError('cpuMilliseconds must provide at least 0.01 CPUs');
+  }
   return {
     command: options.command ?? 'docker',
     args: [
@@ -42,6 +68,10 @@ export function containerVerifierInvocation(
       '--rm',
       '--network=none',
       '--read-only',
+      '--cap-drop=ALL',
+      '--security-opt=no-new-privileges',
+      '--user',
+      user,
       '--pids-limit',
       String(limits.processes),
       '--memory',

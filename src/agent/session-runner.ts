@@ -17,6 +17,8 @@ export interface SessionRunPolicy {
   pacing: SessionPacing;
   conversation: 'continuous' | 'fresh-per-episode';
   finalize: 'automatic' | 'caller';
+  /** Maximum concurrent presentation calls when pacing is `unpaced`. */
+  maxPendingPresentations?: number;
 }
 
 export interface SessionEpisodeIdentity {
@@ -130,11 +132,30 @@ export async function runSession<TCommand, TObservation, TOutcome>(
   if (session.status !== 'active' && session.status !== 'terminal') {
     throw new Error(`cannot run a ${session.status} session handle`);
   }
+  const maxPendingPresentations = options.policy.maxPendingPresentations ?? 32;
+  if (
+    !Number.isSafeInteger(maxPendingPresentations)
+    || maxPendingPresentations < 1
+  ) {
+    throw new RangeError('maxPendingPresentations must be a positive safe integer');
+  }
   const adapter = options.observationAdapter ?? defaultObservationAdapter<TObservation>();
   const decisions: AgentDecision[] = [];
-  const backgroundPresentation: Promise<void>[] = [];
+  const backgroundPresentations = new Set<Promise<void>>();
+  let backgroundFailure: { error: unknown } | undefined;
   let observations = 0;
   let priorEpisode: SessionEpisodeIdentity | undefined;
+
+  const trackPresentation = (presentation: Promise<void>): void => {
+    const tracked = presentation.catch((error: unknown) => {
+      backgroundFailure ??= { error };
+    });
+    backgroundPresentations.add(tracked);
+    void tracked.then(() => backgroundPresentations.delete(tracked));
+  };
+  const throwBackgroundFailure = (): void => {
+    if (backgroundFailure) throw backgroundFailure.error;
+  };
 
   if (options.policy.conversation === 'fresh-per-episode') {
     await driver.reset?.();
@@ -145,6 +166,7 @@ export async function runSession<TCommand, TObservation, TOutcome>(
 
   let observed = await session.observe({ signal: options.signal });
   while (true) {
+    throwBackgroundFailure();
     if (options.signal?.aborted) throw options.signal.reason;
     observations += 1;
     await options.events?.onObservation?.(observed);
@@ -156,7 +178,11 @@ export async function runSession<TCommand, TObservation, TOutcome>(
       if (options.policy.pacing === 'paced') {
         await presentation;
       } else {
-        backgroundPresentation.push(presentation);
+        trackPresentation(presentation);
+        if (backgroundPresentations.size >= maxPendingPresentations) {
+          await Promise.race(backgroundPresentations);
+          throwBackgroundFailure();
+        }
       }
     }
 
@@ -190,7 +216,8 @@ export async function runSession<TCommand, TObservation, TOutcome>(
     );
   }
 
-  await Promise.all(backgroundPresentation);
+  await Promise.all(backgroundPresentations);
+  throwBackgroundFailure();
   if (options.policy.finalize === 'caller') {
     return { status: 'terminal', observations, decisions };
   }
