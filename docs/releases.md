@@ -3,15 +3,60 @@
 For the public chronological changelog, see the
 [complete version history](/version-history).
 
-::: info Implemented after the v0.27 release scope
-RFC-019 unified actor control sources are implemented on `main` for the planned
-v0.29 target. They are not included in the v0.27 release notes below.
-:::
+## v1.0.0
 
-## v0.27.0
+Prepared August 1, 2026. v1.0 freezes the complete product-neutral SDK after
+the v0.26 release and includes all subsequently implemented work: RFC-017
+portal-aware pathfinding, RFC-018 unified sessions, RFC-019 unified actor
+control sources, benchmark resource reporting, and the 1.0 quality and
+architecture gates. No separate v0.27 or v0.29 package was published.
 
-Prepared July 31, 2026. This additive release implements RFC-017 and RFC-018:
-portal-aware pathfinding and a unified live-session lifecycle.
+- Normal, guided, autonomous, watched, and benchmark play share one
+  `create/attach → observe/act → finalize → close` session lifecycle.
+- Product-owned create and attach routes can adopt an existing durable binding
+  without a redundant request, in both TypeScript and Python.
+- Portal-aware layout neighbors reuse ordinary deterministic pathfinding while
+  preserving authoritative transit planning and commit.
+- Behavior-tree, human-input, and agent-input sources converge on the same
+  validated action path without conflating actors, seats, controllers, or
+  transports.
+- Benchmark bundles carry token, cost, timing, and provider data under the
+  explicit `selfReportedObservations` trust label.
+- Reviewed API reports, coverage floors, mutation tests, cross-runtime
+  deterministic-math checks, and install-from-archive smoke tests guard the
+  frozen surface.
+- `gaos.replay` v1.0–v1.3, signatures, schemas, verifier-kit identities, and
+  independent-verification semantics retain their documented interpretation.
+
+### Migration to v1.0.0
+
+Update TypeScript and Python pins to `v1.0.0`. The deprecated v0.12 neutral-core
+aliases are removed:
+
+| Removed name | Use instead |
+|---|---|
+| `GridSubmittedAction` | `SubmittedAction` |
+| `GridActionDefinition` | `ActionDefinition` |
+| `solveGridLevel` | `solveLevel` |
+| `enumerateGridActions` | `enumerateActions` |
+| `GridSolveResult` | `SolveResult` |
+| `GridSolverOptions` | `SolverOptions` |
+| `recheckGridTranscript` | `recheckTranscript` |
+| `GridRecheckResult` | `RecheckResult` |
+| `GridTranscriptAction` | `TranscriptAction` |
+| `GridTranscriptHeader` | `TranscriptHeader` |
+
+The required solo `status` field and optional sequential `activeSeat` sugar
+remain supported because they are part of the frozen replay and session
+compatibility boundary. The deprecated resource-budget helpers remain
+available for now; new products should use product-defined resource
+transactions and `aiActionLimitExceeded`.
+
+## Unpublished v0.27 scope
+
+This additive scope was incorporated into v1.0.0 rather than published as a
+separate package. It implements RFC-017 and RFC-018: portal-aware pathfinding
+and a unified live-session lifecycle.
 
 - `withPortalNeighbors` composes eligible portal destinations into ordinary
   breadth-first layout traversal without moving authoritative transit

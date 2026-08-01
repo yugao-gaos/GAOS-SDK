@@ -851,9 +851,6 @@ export function elapsedMillisecondsAtTick(tick: number, rate: TickRate): number;
 // @public
 export function enumerateActions(view: TickView<unknown, unknown>): SubmittedAction[];
 
-// @public @deprecated (undocumented)
-export const enumerateGridActions: typeof enumerateActions;
-
 // @public
 export function enumerateTargetChoices<TCandidate, TView extends TickView<unknown, unknown>>(spec: TargetSpec<TCandidate, TView>, view: TView, options?: TargetEnumerationOptions): TargetChoiceEnumeration<TCandidate>;
 
@@ -1035,9 +1032,6 @@ export interface GraphLayoutOptions {
     nodes: readonly string[];
 }
 
-// @public @deprecated (undocumented)
-export type GridActionDefinition = ActionDefinition;
-
 // @public (undocumented)
 export type GridRayDirective<TStop> = {
     action: 'continue';
@@ -1057,26 +1051,8 @@ export type GridRayResult<TCell, TStop> = {
     steps: number;
 };
 
-// @public @deprecated (undocumented)
-export type GridRecheckResult = RecheckResult;
-
-// @public @deprecated (undocumented)
-export type GridSolveResult = SolveResult;
-
-// @public @deprecated (undocumented)
-export type GridSolverOptions<TState> = SolverOptions<TState>;
-
-// @public @deprecated (undocumented)
-export type GridSubmittedAction = SubmittedAction;
-
 // @public
 export type GridTargetingView = GridViewNamespace | Readonly<Record<string, GridViewNamespace>>;
-
-// @public @deprecated (undocumented)
-export type GridTranscriptAction = TranscriptAction;
-
-// @public @deprecated (undocumented)
-export type GridTranscriptHeader<TLevel> = TranscriptHeader<TLevel>;
 
 // @public (undocumented)
 export interface GridViewNamespace {
@@ -1898,9 +1874,6 @@ export interface ReachableCellPath<TCell = Cell> {
     goal: TCell;
     path: TCell[];
 }
-
-// @public @deprecated (undocumented)
-export const recheckGridTranscript: typeof recheckTranscript;
 
 // @public (undocumented)
 export interface RecheckOptions<TState> {
@@ -2852,9 +2825,6 @@ export function signSubmissionV1(privateKey: CryptoKey, envelope: SubmissionSign
 
 // @public
 export function slotRow(keys: readonly string[], id?: string): ZoneConfig;
-
-// @public @deprecated (undocumented)
-export const solveGridLevel: typeof solveLevel;
 
 // @public
 export function solveLevel<TLevel, TState, TView extends TickView<unknown, unknown>>(reducer: Reducer<TLevel, TState, TView>, level: TLevel, options: SolverOptions<TState>): SolveResult;

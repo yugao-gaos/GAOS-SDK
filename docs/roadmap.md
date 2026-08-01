@@ -1,13 +1,21 @@
 # Roadmap
 
 GAOS is an open-source Game-as-a-Benchmark bridge between game development and
-agent evaluation. The current v0.x line is focused on making that bridge easier
-to adopt and stable enough for independent games and benchmarks to share.
+agent evaluation. v1.0 freezes the complete product-neutral bridge for
+independent games and benchmarks to share.
 
 Roadmap items describe direction, not a compatibility promise or release date.
 Published release notes remain the source of truth for shipped behavior.
 
 ## Current focus
+
+### v1.0 — stable complete SDK
+
+v1.0 includes every implemented roadmap item through RFC-019: the canonical
+GAOS identity, historical verifier kits, portal-aware paths, one durable
+session lifecycle, unified actor control sources, and verifiable benchmark
+publication. The scheduled neutral-core compatibility aliases are removed;
+replay v1.0–v1.3 and evidence semantics remain stable.
 
 ### One complete path from game to verified agent run
 
@@ -87,7 +95,7 @@ Arena/Zonoid clients and environments now live in the Zonoid product
 repository. Automated architecture checks enforce those dependency
 boundaries.
 
-### v0.27 — portal paths and one session lifecycle (implemented)
+### Historical v0.27 scope — incorporated into v1.0
 
 [RFC-017](/rfcs/rfc-017-portal-aware-pathfinding) composes existing layouts,
 portal policy, and breadth-first pathfinding. `withPortalNeighbors` adds
@@ -112,12 +120,13 @@ orchestration still owns canonical planning, bounded parallelism,
 checkpoints, scoring, packing, and verification; existing `runEpisode`
 adapters remain compatible.
 
-### v0.29 — unified actor control sources (implemented)
+### Historical v0.29 scope — incorporated into v1.0
 
-[RFC-019](/rfcs/rfc-019-unified-actor-control-sources) is implemented for its
-v0.29 target. Behavior-tree, human-input, and agent-input adapters converge on
-the same validated `SubmittedAction` path while actor identity, logical seats,
-controller authority, and transport connections remain distinct.
+[RFC-019](/rfcs/rfc-019-unified-actor-control-sources) was implemented for its
+historical v0.29 target and ships in v1.0. Behavior-tree, human-input, and
+agent-input adapters converge on the same validated `SubmittedAction` path
+while actor identity, logical seats, controller authority, and transport
+connections remain distinct.
 
 Control-source switching is host-side and additive. The reducer and replay
 continue to receive canonical actions rather than rerunning external control

@@ -22,10 +22,10 @@ research harness needs to control the hosted game or inspect portable evidence.
 
 ## Install
 
-Install the v0.26 Python package directly from the tagged repository:
+Install the v1.0 Python package directly from the tagged repository:
 
 ```sh
-python -m pip install "git+https://github.com/yugao-gaos/GAOS-SDK.git@v0.26.0#subdirectory=python"
+python -m pip install "git+https://github.com/yugao-gaos/GAOS-SDK.git@v1.0.0#subdirectory=python"
 ```
 
 The distribution name is `gaos-sdk` and the import name is `gaos_sdk`.

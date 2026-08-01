@@ -127,6 +127,48 @@ export interface CompactionConfirmation {
     historyDurablyCommitted: true;
 }
 
+// @public (undocumented)
+export interface ControlTransitionContext {
+    // (undocumented)
+    readonly controlId: string;
+    // (undocumented)
+    readonly cursor: number;
+    // (undocumented)
+    readonly participantId: string;
+    // (undocumented)
+    readonly sessionId: string;
+    // (undocumented)
+    readonly tick: number;
+}
+
+// @public (undocumented)
+export interface ControlTransitionInput {
+    // (undocumented)
+    control: JsonValue;
+    controlId: string;
+    // (undocumented)
+    participantId: string;
+}
+
+// @public (undocumented)
+export interface ControlTransitionReceipt {
+    // (undocumented)
+    controlId: string;
+    // (undocumented)
+    cursor: number;
+    // (undocumented)
+    participantId: string;
+    // (undocumented)
+    status: 'accepted' | 'duplicate';
+    // (undocumented)
+    tick: number;
+    // (undocumented)
+    transitionRevision: number;
+}
+
+// @public (undocumented)
+export type ControlTransitionReducer<TState> = (state: TState, control: JsonValue, context: ControlTransitionContext) => TState;
+
 // @public
 export function createJsonPatch(previous: JsonValue, next: JsonValue): JsonPatchOperation[];
 
@@ -135,6 +177,9 @@ export function createSessionKernel<TLevel, TState, TCommand extends JsonValue, 
 
 // @public
 export function createTickRate(ticksPerSecond: number): TickRate;
+
+// @public
+export function defineControlTransition<TState>(reducer: ControlTransitionReducer<TState>): ControlTransitionReducer<TState>;
 
 // @public (undocumented)
 export interface Dmath {
@@ -370,6 +415,7 @@ export interface KernelCheckpoint<TLevel = unknown, TCommand extends JsonValue =
         nextCommitmentIds: Array<[string, number]>;
         seenSalts: Array<[string, string]>;
         interests: KernelCheckpointInterest[];
+        controls?: KernelCheckpointControl[];
         rejections: RetainedRejection[];
         historicalSubmissionKeys: string[];
         historicalInterestCommands: Array<[string, string]>;
@@ -389,6 +435,16 @@ export interface KernelCheckpoint<TLevel = unknown, TCommand extends JsonValue =
     };
     // (undocumented)
     window: IntentWindow<TCommand>;
+}
+
+// @public (undocumented)
+interface KernelCheckpointControl {
+    // (undocumented)
+    canonicalControl: string;
+    // (undocumented)
+    key: string;
+    // (undocumented)
+    receipt: ControlTransitionReceipt;
 }
 
 // @public (undocumented)
@@ -488,7 +544,7 @@ export interface ObservationDelta<TView = TickView<unknown, unknown>> {
     interest?: {
         declaration: JsonValue;
     };
-    origin?: 'resolution' | 'snapshot' | 'interest';
+    origin?: 'resolution' | 'snapshot' | 'interest' | 'control';
     rejections: readonly ObservationRejectionNotice[];
     scopeId?: string;
     // (undocumented)
@@ -1090,6 +1146,14 @@ export type SessionEvent = (SessionEventBase & {
     lane: string;
     record: JsonObject;
 }) | (SessionEventBase & {
+    kind: 'control-transition';
+    tick: number;
+    cursor: number;
+    participantId: string;
+    controlId: string;
+    control: JsonValue;
+    canonicalControl: string;
+}) | (SessionEventBase & {
     kind: 'interest';
     tick: number;
     cursor: number;
@@ -1184,6 +1248,8 @@ export function sessionHeaderFor<TLevel, TState, TCommand extends JsonValue, TVi
 // @public
 export interface SessionHistoryLookup {
     // (undocumented)
+    controlTransition?(participantId: string, controlId: string): string | undefined;
+    // (undocumented)
     gameplaySubmission(participantId: string, submissionId: string): boolean;
     // (undocumented)
     interestCommand(participantId: string, submissionId: string): string | undefined;
@@ -1218,6 +1284,8 @@ export interface SessionKernel<TCommand extends JsonValue, TView, TLevel = unkno
     // (undocumented)
     prepareAdvance(target?: number): Prepared<AdvanceSummary<TView>, TView>;
     // (undocumented)
+    prepareControlTransition(input: ControlTransitionInput): Prepared<ControlTransitionReceipt, TView>;
+    // (undocumented)
     prepareExtension(lane: string, record: JsonObject): Prepared<void, TView>;
     // (undocumented)
     prepareIngest(submission: CommandSubmission<TCommand>): Prepared<IngestReceipt, TView>;
@@ -1245,6 +1313,7 @@ export interface SessionKernel<TCommand extends JsonValue, TView, TLevel = unkno
 
 // @public (undocumented)
 export interface SessionKernelOptions<TLevel, TState, TCommand extends JsonValue, TView extends SessionView> {
+    applyControlTransition?: ControlTransitionReducer<any>;
     // (undocumented)
     cadence: {
         mode: 'turns';

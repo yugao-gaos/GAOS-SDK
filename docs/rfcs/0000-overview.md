@@ -1,13 +1,14 @@
 # GAOS SDK — RFC sequence and release roadmap
 
-Status: RFC-001 through RFC-018 implemented through v0.27; RFC-019 implemented
-for v0.29 ·
+Status: RFC-001 through RFC-019 implemented and incorporated into v1.0; RFC-017
+through RFC-019 retain their historical target milestones ·
 Target: v0.13 → v1.0 arc · Baseline: v0.12.0 export surface
 
 ::: info Design record and roadmap
 RFC-001 through RFC-013 record the design path that led to the current SDK.
 RFC-014 and RFC-015 are shipped in v0.24. RFC-016 ships in v0.25. RFC-017 and
-RFC-018 are implemented for v0.27. RFC-019 is implemented for v0.29. For
+RFC-018 were implemented for the historical v0.27 target and RFC-019 for the
+historical v0.29 target; all are incorporated into v1.0. For
 supported APIs and current terminology, use the
 [architecture map](/architecture), [capability map](/capabilities), and
 [mechanism reference](/mechanisms/).

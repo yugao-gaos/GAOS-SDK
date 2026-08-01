@@ -100,6 +100,31 @@ interface CompactionConfirmation {
     historyDurablyCommitted: true;
 }
 
+// @public (undocumented)
+interface ControlTransitionInput {
+    // (undocumented)
+    control: JsonValue;
+    controlId: string;
+    // (undocumented)
+    participantId: string;
+}
+
+// @public (undocumented)
+interface ControlTransitionReceipt {
+    // (undocumented)
+    controlId: string;
+    // (undocumented)
+    cursor: number;
+    // (undocumented)
+    participantId: string;
+    // (undocumented)
+    status: 'accepted' | 'duplicate';
+    // (undocumented)
+    tick: number;
+    // (undocumented)
+    transitionRevision: number;
+}
+
 // @public
 const GAOS_REPLAY_DERIVED_SEEDS: "gaos.run-level-seed.v1";
 
@@ -252,6 +277,7 @@ interface KernelCheckpoint<TLevel = unknown, TCommand extends JsonValue = JsonVa
         nextCommitmentIds: Array<[string, number]>;
         seenSalts: Array<[string, string]>;
         interests: KernelCheckpointInterest[];
+        controls?: KernelCheckpointControl[];
         rejections: RetainedRejection[];
         historicalSubmissionKeys: string[];
         historicalInterestCommands: Array<[string, string]>;
@@ -271,6 +297,16 @@ interface KernelCheckpoint<TLevel = unknown, TCommand extends JsonValue = JsonVa
     };
     // (undocumented)
     window: IntentWindow<TCommand>;
+}
+
+// @public (undocumented)
+interface KernelCheckpointControl {
+    // (undocumented)
+    canonicalControl: string;
+    // (undocumented)
+    key: string;
+    // (undocumented)
+    receipt: ControlTransitionReceipt;
 }
 
 // @public (undocumented)
@@ -358,7 +394,7 @@ interface ObservationDelta<TView = TickView<unknown, unknown>> {
     interest?: {
         declaration: JsonValue;
     };
-    origin?: 'resolution' | 'snapshot' | 'interest';
+    origin?: 'resolution' | 'snapshot' | 'interest' | 'control';
     rejections: readonly ObservationRejectionNotice[];
     scopeId?: string;
     // (undocumented)
@@ -543,6 +579,14 @@ type SessionEvent = (SessionEventBase & {
     lane: string;
     record: JsonObject;
 }) | (SessionEventBase & {
+    kind: 'control-transition';
+    tick: number;
+    cursor: number;
+    participantId: string;
+    controlId: string;
+    control: JsonValue;
+    canonicalControl: string;
+}) | (SessionEventBase & {
     kind: 'interest';
     tick: number;
     cursor: number;
@@ -665,6 +709,8 @@ interface SessionKernel<TCommand extends JsonValue, TView, TLevel = unknown> {
     // (undocumented)
     prepareAdvance(target?: number): Prepared<AdvanceSummary<TView>, TView>;
     // (undocumented)
+    prepareControlTransition(input: ControlTransitionInput): Prepared<ControlTransitionReceipt, TView>;
+    // (undocumented)
     prepareExtension(lane: string, record: JsonObject): Prepared<void, TView>;
     // (undocumented)
     prepareIngest(submission: CommandSubmission<TCommand>): Prepared<IngestReceipt, TView>;
@@ -695,6 +741,8 @@ export class SessionKernelHost<TCommand extends JsonValue, TView, TLevel = unkno
     constructor(kernel: SessionKernel<TCommand, TView, TLevel>, store: SessionEventStore, publish: SessionObservationPublisher<TView>);
     // (undocumented)
     advance(target?: number): Promise<AdvanceSummary<TView>>;
+    // (undocumented)
+    control(input: ControlTransitionInput): Promise<ControlTransitionReceipt>;
     // (undocumented)
     extension(lane: string, record: JsonObject): Promise<void>;
     // (undocumented)

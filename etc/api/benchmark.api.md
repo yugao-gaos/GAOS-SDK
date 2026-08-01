@@ -175,6 +175,7 @@ export interface BenchmarkBundleEpisode {
     replayDigest: string;
     // (undocumented)
     score: number;
+    selfReportedObservations?: BenchmarkResourceObservations;
     // (undocumented)
     terminalOutcome: JsonValue;
 }
@@ -312,7 +313,6 @@ export interface BenchmarkResourceObservations {
     cost?: number;
     // (undocumented)
     provider?: string;
-    // (undocumented)
     steps: number;
     // (undocumented)
     tokens?: number;
