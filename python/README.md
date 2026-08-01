@@ -113,6 +113,26 @@ Calls on one async client are serialized because the underlying cursor bindings
 are mutable. Cancelling an awaiting task cannot stop an already-running
 standard-library HTTP thread; configure `timeout` to bound that work.
 
+Product adapters can reuse the same transport for small host-specific JSON
+routes without reaching into private client methods:
+
+```python
+room = client.request_json("GET", f"/v1/arena/rooms/{room_id}")
+await async_client.request_json(
+    "POST",
+    f"/v1/arena/rooms/{room_id}/presence",
+    {"connected": True},
+)
+```
+
+`request_json()` accepts only uppercase `GET`, `POST`, and `DELETE`, requires a
+same-origin `/...` path without traversal or fragments, and permits request
+bodies only for `POST`. Responses remain product-owned JSON, while bearer
+authentication, timeout, response-size limits, JSON safety checks,
+`GaosAPIError`, and `IllegalActionRejected` are identical to the standard
+session methods. Build path segments with `urllib.parse.quote(value, safe="")`;
+do not pass absolute URLs.
+
 Product repositories own typed observations, matchmaking, convenience
 methods, rewards, and Gymnasium-style environments. Run the product-neutral
 suite with:
