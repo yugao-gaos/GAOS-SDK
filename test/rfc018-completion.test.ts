@@ -300,6 +300,57 @@ describe('RFC-018 unified session lifecycle', () => {
     expect(pacedRun.result?.outcome).toEqual(unpacedRun.result?.outcome);
   });
 
+  it('bounds unpaced presentation work and surfaces background failures', async () => {
+    const handle = new MemoryHandle('bounded');
+    const releases: Array<() => void> = [];
+    const present = vi.fn(() => new Promise<void>((resolve) => {
+      releases.push(resolve);
+    }));
+    const running = runSession(handle, driver([]), {
+      policy: {
+        pacing: 'unpaced',
+        conversation: 'continuous',
+        finalize: 'automatic',
+        maxPendingPresentations: 1,
+      },
+      presentation: { present },
+    });
+
+    await vi.waitFor(() => expect(present).toHaveBeenCalledTimes(1));
+    expect(handle.commands).toEqual([]);
+    releases.shift()?.();
+    await vi.waitFor(() => expect(present).toHaveBeenCalledTimes(2));
+    expect(handle.commands).toEqual(['move-0']);
+    releases.shift()?.();
+    await vi.waitFor(() => expect(present).toHaveBeenCalledTimes(3));
+    expect(handle.commands).toEqual(['move-0', 'move-1']);
+    releases.shift()?.();
+    await expect(running).resolves.toMatchObject({ status: 'finalized' });
+
+    await expect(runSession(new MemoryHandle('failed'), driver([]), {
+      policy: {
+        pacing: 'unpaced',
+        conversation: 'continuous',
+        finalize: 'automatic',
+        maxPendingPresentations: 1,
+      },
+      presentation: {
+        present: async () => {
+          throw new Error('presentation failed');
+        },
+      },
+    })).rejects.toThrow('presentation failed');
+
+    await expect(runSession(new MemoryHandle('invalid'), driver([]), {
+      policy: {
+        pacing: 'unpaced',
+        conversation: 'continuous',
+        finalize: 'automatic',
+        maxPendingPresentations: 0,
+      },
+    })).rejects.toThrow('positive safe integer');
+  });
+
   it('leaves authoritative state untouched when a handle closes', () => {
     const handle = new MemoryHandle('local-close');
     handle.close();

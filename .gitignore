@@ -4,6 +4,7 @@ coverage/
 html-report/
 mutants/
 reports/
+temp/
 *.tsbuildinfo
 
 .pytest_cache/

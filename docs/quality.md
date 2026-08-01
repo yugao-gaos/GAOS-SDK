@@ -19,6 +19,11 @@ Coverage thresholds are checked into the repository. They are baseline floors,
 not targets: pull requests must not lower them, and releases should raise them
 when new tests make a higher floor sustainable.
 
+`npm run api:check` compares every TypeScript package entry point with the
+reviewed reports in `etc/api/`. Any declaration drift fails pull-request and
+release CI. Run `npm run api:update` only when an intentional compatibility
+change has been reviewed.
+
 ## Mutation testing
 
 `npm run test:mutation` uses Stryker against deterministic randomness,

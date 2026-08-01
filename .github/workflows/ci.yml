@@ -36,6 +36,7 @@ jobs:
           godot --version
       - run: npm test
       - run: npm run build
+      - run: npm run api:check
       - run: npm run dmath:evidence
       - run: npm pack --dry-run
 

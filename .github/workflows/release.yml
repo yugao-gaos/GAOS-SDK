@@ -52,6 +52,7 @@ jobs:
       - run: npm run test:coverage
       - run: npm run test:mutation
       - run: npm run build
+      - run: npm run api:check
       - run: npm run dmath:evidence
       - run: npx playwright install --with-deps chromium firefox webkit
       - run: npm run dmath:browsers

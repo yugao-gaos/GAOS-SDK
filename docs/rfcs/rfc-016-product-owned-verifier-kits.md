@@ -193,6 +193,8 @@ The reference `ContainerVerifierRunner` requires an immutable
 
 - no network;
 - no inherited host environment or credentials;
+- a numeric non-root uid/gid, with all Linux capabilities dropped and
+  `no-new-privileges` enabled;
 - a read-only root filesystem;
 - read-only kit and replay mounts;
 - an isolated bounded temporary filesystem;
