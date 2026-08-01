@@ -3,7 +3,8 @@
   "git_user": "yugao-gaos <yu.gao@gaos.ca>",
   "session_id": "codex-mcp-65304-6e3e795ad768b06634e7fbf0f8bbc049",
   "branch": "orch/attempt/codex-add-sdk-durable-control-transitions",
-  "status": "claimed",
+  "status": "tested",
   "claimed_at": "2026-08-01T00:05:00.081Z",
-  "lease_until": "2026-08-01T01:05:00.081Z"
+  "lease_until": "2026-08-01T01:05:00.081Z",
+  "completed_at": "2026-08-01T00:14:58.538Z"
 }
