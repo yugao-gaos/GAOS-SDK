@@ -20,10 +20,40 @@ PARTICIPANT_ID_PATTERN = r"^[A-Za-z0-9_.:@-]{1,128}$"
 _PARTICIPANT_ID_RE = re.compile(PARTICIPANT_ID_PATTERN)
 _MAX_SAFE_INTEGER = 9_007_199_254_740_991
 _MAX_FINITE_NUMBER = float.fromhex("0x1.fffffffffffffp+1023")
+_JSON_ROUTE_METHODS = frozenset(("GET", "POST", "DELETE"))
 
 
 def _quote(value: str) -> str:
     return urllib.parse.quote(value, safe="")
+
+
+def _validate_json_route(method: str, path: str, body: Any | None) -> None:
+    if method not in _JSON_ROUTE_METHODS:
+        raise ValueError("JSON route method must be GET, POST, or DELETE")
+    if (
+        not isinstance(path, str)
+        or not path.startswith("/")
+        or path.startswith("//")
+    ):
+        raise ValueError("JSON route path must be a same-origin absolute path")
+    if "\\" in path or any(ord(character) < 0x20 or ord(character) == 0x7F
+                           for character in path):
+        raise ValueError("JSON route path contains unsafe characters")
+    parsed = urllib.parse.urlsplit(path)
+    if parsed.scheme or parsed.netloc or parsed.fragment:
+        raise ValueError(
+            "JSON route path must not change origin or contain a fragment"
+        )
+    try:
+        decoded_path = urllib.parse.unquote(parsed.path, errors="strict")
+    except UnicodeDecodeError as error:
+        raise ValueError("JSON route path contains invalid UTF-8 escapes") from error
+    if "\\" in decoded_path or any(
+        segment in (".", "..") for segment in decoded_path.split("/")
+    ):
+        raise ValueError("JSON route path must not contain traversal segments")
+    if method != "POST" and body is not None:
+        raise ValueError("only POST JSON routes accept a request body")
 
 
 class GaosAPIError(Exception):
@@ -425,11 +455,9 @@ class SessionClient:
         self,
         method: str,
         path: str,
-        body: dict[str, Any] | None = None,
+        body: Any | None = None,
     ) -> Any:
         headers = {"content-type": "application/json"}
-        if self.api_key:
-            headers["authorization"] = f"Bearer {self.api_key}"
         request = urllib.request.Request(
             self.base_url + path,
             method=method,
@@ -440,6 +468,13 @@ class SessionClient:
             ),
             headers=headers,
         )
+        if self.api_key:
+            # urllib copies ordinary headers to redirected requests, including
+            # across origins. Keep bearer credentials on the original request.
+            request.add_unredirected_header(
+                "authorization",
+                f"Bearer {self.api_key}",
+            )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 return _json_loads(
@@ -481,6 +516,22 @@ class SessionClient:
                 code,
                 raw_body,
             ) from None
+
+    def request_json(
+        self,
+        method: str,
+        path: str,
+        body: Any | None = None,
+    ) -> Any:
+        """
+        Call a product-owned same-origin JSON route.
+
+        This intentionally exposes only GET, POST, and DELETE relative routes.
+        It shares this client's bearer authentication, timeout, response-size
+        bound, JSON validation, and HTTP error mapping.
+        """
+        _validate_json_route(method, path, body)
+        return self._call(method, path, body)
 
     def create_session(
         self,
@@ -661,6 +712,9 @@ class AsyncSessionClient:
 
     async def create_session(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return await self._run("create_session", *args, **kwargs)
+
+    async def request_json(self, *args: Any, **kwargs: Any) -> Any:
+        return await self._run("request_json", *args, **kwargs)
 
     async def get_tick_envelope(
         self,

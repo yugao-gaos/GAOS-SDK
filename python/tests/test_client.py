@@ -1,9 +1,14 @@
 import asyncio
+import io
+import json
+import urllib.error
+import urllib.request
 
 import pytest
 
 from gaos_sdk import (
     AsyncSessionClient,
+    IllegalActionRejected,
     ProtocolMismatchError,
     SessionClient,
     create_session_attach_receipt,
@@ -135,6 +140,112 @@ def test_async_client_exposes_generic_session_surface():
         return await client.create_session({"game": "board"})
 
     assert asyncio.run(run())["tick"] == {"board": [1, 2]}
+
+
+def test_public_json_route_reuses_auth_json_validation_and_error_mapping(
+    monkeypatch,
+):
+    seen = []
+    responses = [
+        io.BytesIO(json.dumps({"room": "ready"}).encode()),
+        urllib.error.HTTPError(
+            "https://example.test/v1/arena/control",
+            422,
+            "Unprocessable Entity",
+            {},
+            io.BytesIO(b'{"error":"stale control","code":"stale_control"}'),
+        ),
+    ]
+
+    def open_request(request, **kwargs):
+        seen.append((request, kwargs))
+        response = responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    monkeypatch.setattr(urllib.request, "urlopen", open_request)
+    client = SessionClient(
+        "https://example.test",
+        api_key="secret",
+        timeout=4,
+        max_response_bytes=128,
+    )
+    assert client.request_json(
+        "POST",
+        "/v1/arena/control",
+        {"revision": 3},
+    ) == {"room": "ready"}
+    request, options = seen[0]
+    assert request.full_url == "https://example.test/v1/arena/control"
+    assert request.method == "POST"
+    assert request.get_header("Authorization") == "Bearer secret"
+    assert json.loads(request.data) == {"revision": 3}
+    assert options["timeout"] == 4
+
+    with pytest.raises(IllegalActionRejected) as rejected:
+        client.request_json("GET", "/v1/arena/control")
+    assert rejected.value.code == "stale_control"
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("PATCH", "/v1/arena/room", None),
+        ("get", "/v1/arena/room", None),
+        ("GET", "v1/arena/room", None),
+        ("GET", "//other.test/room", None),
+        ("GET", "/v1/../admin", None),
+        ("GET", "/v1/%2e%2e/admin", None),
+        ("GET", "/v1/arena/room#fragment", None),
+        ("GET", "/v1/arena/room", {}),
+        ("DELETE", "/v1/arena/room", {}),
+    ],
+)
+def test_public_json_route_rejects_unsafe_or_ambiguous_requests(
+    method,
+    path,
+    body,
+):
+    with pytest.raises(ValueError):
+        SessionClient().request_json(method, path, body)
+
+
+def test_public_json_route_preserves_response_limit(monkeypatch):
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: io.BytesIO(b'{"too":"large"}'),
+    )
+    client = SessionClient(max_response_bytes=4)
+    with pytest.raises(ProtocolMismatchError, match="exceeds 4 bytes"):
+        client.request_json("GET", "/v1/arena/room")
+
+
+def test_public_json_route_rejects_non_json_post_body():
+    with pytest.raises(ProtocolMismatchError, match="plain JSON"):
+        SessionClient().request_json("POST", "/v1/arena/room", object())
+
+
+def test_async_client_exposes_public_json_route():
+    async def run():
+        client = AsyncSessionClient("https://example.test")
+        client.sync_client._call = lambda method, path, body=None: {
+            "method": method,
+            "path": path,
+            "body": body,
+        }
+        return await client.request_json(
+            "POST",
+            "/v1/arena/presence",
+            {"connected": True},
+        )
+
+    assert asyncio.run(run()) == {
+        "method": "POST",
+        "path": "/v1/arena/presence",
+        "body": {"connected": True},
+    }
 
 
 def test_attaches_finalizes_and_verifies_receipts():
