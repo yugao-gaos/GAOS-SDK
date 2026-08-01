@@ -144,6 +144,12 @@ describe('RFC-015 release gate', () => {
       aggregate: run.aggregate,
       facts: { replay: 'verified', semantics: 'verified', evidenceComplete: 'verified' },
     });
+    expect(first.bundle.episodes[0]?.selfReportedObservations).toEqual(
+      run.checkpoint.completed[0]?.observations,
+    );
+    expect(
+      JSON.parse(first.files['scores.json']!).episodes[0].selfReportedObservations,
+    ).toEqual(run.checkpoint.completed[0]?.observations);
 
     const missing = structuredClone(first.bundle);
     missing.episodes = missing.episodes.slice(1);
@@ -157,6 +163,13 @@ describe('RFC-015 release gate', () => {
     const incorrectScore = structuredClone(first.bundle);
     incorrectScore.episodes[0]!.score += 1;
     expect((await verifyBenchmarkBundle(incorrectScore, manifest, verify)).valid).toBe(false);
+    const modifiedObservations = structuredClone(first.bundle);
+    modifiedObservations.episodes[0]!.selfReportedObservations!.tokens = 999;
+    expect((await verifyBenchmarkBundle(
+      modifiedObservations,
+      manifest,
+      verify,
+    )).valid).toBe(false);
     const incompatible = structuredClone(first.bundle);
     incompatible.manifestDigest = '0'.repeat(64);
     expect((await verifyBenchmarkBundle(incompatible, manifest, verify)).valid).toBe(false);
@@ -499,7 +512,7 @@ export default {
       score,
       replay: { score },
       terminalOutcome: { score },
-      observations: { steps: 1 }
+      observations: { steps: 1, tokens: 42, cost: 0.003, provider: 'fixture' }
     };
   }
 };
@@ -539,6 +552,10 @@ export async function verifyEpisode(episode) {
         '--output',
         bundlePath,
       ], io)).toBe(0);
+      expect(
+        JSON.parse(readFileSync(join(bundlePath, 'scores.json'), 'utf8'))
+          .episodes[0].selfReportedObservations,
+      ).toEqual({ steps: 1, tokens: 42, cost: 0.003, provider: 'fixture' });
       expect(await runBenchmarkCli([
         'benchmark',
         'verify',

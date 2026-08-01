@@ -23,6 +23,11 @@ gaos-benchmark verify \
 The runner writes each replay atomically and checkpoints after each case.
 Resume skips completed cases only after rechecking their replay evidence.
 
+Packed episodes retain the agent/provider's step, token, cost, wall-clock, and
+provider data under `selfReportedObservations`. The explicit name is the trust
+label: these fields support operational comparison but are not verified replay
+evidence unless a separately trusted authority attests them.
+
 The benchmark manifest must come from an independent trusted source. A manifest
 embedded only inside the submitted bundle cannot authorize itself.
 

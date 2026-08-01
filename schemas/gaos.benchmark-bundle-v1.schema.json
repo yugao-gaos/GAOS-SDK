@@ -21,7 +21,20 @@
           "replay": {},
           "terminalOutcome": {},
           "score": { "type": "number" },
-          "replayDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          "replayDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "selfReportedObservations": {
+            "description": "Self-reported operational data; not independently verified.",
+            "type": "object",
+            "required": ["steps"],
+            "properties": {
+              "steps": { "type": "integer", "minimum": 0 },
+              "wallClockMs": { "type": "number", "minimum": 0 },
+              "tokens": { "type": "number", "minimum": 0 },
+              "cost": { "type": "number", "minimum": 0 },
+              "provider": { "type": "string", "minLength": 1 }
+            },
+            "additionalProperties": false
+          }
         },
         "additionalProperties": false
       }
