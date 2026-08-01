@@ -1845,7 +1845,12 @@ class SessionKernelImpl<
     if (submission === null || typeof submission !== 'object' || Array.isArray(submission)) {
       throw new IntentCollectionError('invalid_submission', 'submission must be an object');
     }
-    validateIntentSubmission(this.live.window, submission);
+    if (submission.protocol !== PROTOCOL_ID || submission.protocolVersion !== PROTOCOL_VERSION) {
+      throw new IntentCollectionError(
+        'invalid_protocol',
+        `expected ${PROTOCOL_ID} ${PROTOCOL_VERSION}`,
+      );
+    }
     if (submission.sessionId !== this.options.sessionId) {
       throw new IntentCollectionError('wrong_session', 'submission session does not match endpoint');
     }
@@ -1918,6 +1923,7 @@ class SessionKernelImpl<
         throw error;
       }
     }
+    validateIntentSubmission(this.live.window, submission);
     if (this.live.expiredReceiptKeys.has(key)
       || this.historicalSubmissionKeys.has(key)
       || this.historicalInterestCommands.has(key)
@@ -3959,6 +3965,17 @@ class SessionKernelImpl<
             seat,
             (this.live.viewRevisions.get(seat) ?? 0) + 1,
           );
+          for (const scope of this.live.interestScopes.values()) {
+            if (scope.participantId !== seat) continue;
+            const scoped = this.scopedView(
+              seatView,
+              scope,
+              this.live.cursor,
+              this.live.tick,
+            );
+            scope.view = scoped.view;
+            scope.canonical = scoped.canonical;
+          }
         }
         this.historicalSubmissionKeys.add(key);
         this.live.receipts.set(key, {
