@@ -43,7 +43,10 @@ const reducer: TickReducer<null, State> = {
     ...(state.total >= 11 ? { stars: 1 } : {}),
     actions: [{ id: 'Action 1', params: 'index' }],
     participation: { mode: 'simultaneous', seats: ['blue', 'red'] },
-    hud: { actionsUsed: state.actionsUsed },
+    hud: {
+      actionsUsed: state.actionsUsed,
+      items: [{ index: state.multiplier }],
+    },
   }),
   replayMetrics: (state) => ({ actionsUsed: state.actionsUsed }),
 };
@@ -218,6 +221,17 @@ describe('RFC-020 unified command effects', () => {
     kernel.commit(kernel.prepareAdvance());
 
     expect(kernel.observe('red').status).toBe('won');
+    const resolvedRetry = kernel.prepareCommand(submit('red', 'red-intent', {
+      kind: 'add',
+      value: 1,
+    }));
+    expect(resolvedRetry.result).toMatchObject({
+      status: 'duplicate',
+      effect: 'intent',
+      resolved: true,
+      cursor: 0,
+    });
+    kernel.abort(resolvedRetry);
     const resolution = kernel.liveTranscript().events.find((event) => event.kind === 'resolution');
     expect(resolution?.kind === 'resolution'
       ? resolution.inputs.map((input) => input.action.index)
@@ -337,6 +351,24 @@ describe('RFC-020 unified command effects', () => {
     expect(() => rehydrateKernel(options(), invalidTranscript)).toThrowError(
       /transcript contains an invalid interaction/,
     );
+  });
+
+  it('restores interaction observations while an intent remains pending', () => {
+    const kernel = createSessionKernel(options());
+    kernel.commit(kernel.prepareCommand(submit('red', 'red-intent', {
+      kind: 'add',
+      value: 1,
+    })));
+    kernel.commit(kernel.prepareCommand(submit('blue', 'blue-interaction', {
+      kind: 'set-multiplier',
+      value: 10,
+    })));
+
+    const recovered = rehydrateKernel(options(), kernel.liveTranscript());
+    expect(recovered.digest()).toBe(kernel.digest());
+    expect(recovered.observe('red')).toEqual(kernel.observe('red'));
+    expect(recovered.observe('blue')).toEqual(kernel.observe('blue'));
+    expect(recovered.awaitingSeats()).toEqual(['blue']);
   });
 
   it('restores frozen pending actions and interactions from a checkpoint', () => {
