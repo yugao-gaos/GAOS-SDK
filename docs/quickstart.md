@@ -20,8 +20,7 @@ duplicate the TypeScript mechanism engine.
 
 ## Install TypeScript
 
-The renamed package will be published through GitHub Packages with the next
-release:
+The package is published through GitHub Packages:
 
 ```ini
 @yugao-gaos:registry=https://npm.pkg.github.com
@@ -35,7 +34,7 @@ npm install @yugao-gaos/gaos-sdk
 Or install the exact Git tag directly:
 
 ```sh
-npm install 'git+https://github.com/yugao-gaos/GAOS-SDK.git#v0.26.0'
+npm install 'git+https://github.com/yugao-gaos/GAOS-SDK.git#v1.0.0'
 ```
 
 ## Build a reducer

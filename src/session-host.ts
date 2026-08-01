@@ -2,6 +2,9 @@ import { canonicalJson, type JsonObject, type JsonValue } from './protocol.js';
 import {
   SessionConflictError,
   type AdvanceSummary,
+  type ControlTransitionInput,
+  type ControlTransitionReceipt,
+  type CommandReceipt,
   type IngestReceipt,
   type InterestReceipt,
   type InterestSubmission,
@@ -110,6 +113,11 @@ export class SessionKernelHost<
     return this.enqueue(() => this.kernel.prepareIngest(submission));
   }
 
+  command(submission: Parameters<SessionKernel<TCommand, TView>['prepareCommand']>[0]):
+    Promise<CommandReceipt> {
+    return this.enqueue(() => this.kernel.prepareCommand(submission));
+  }
+
   advance(target?: number): Promise<AdvanceSummary<TView>> {
     return this.enqueue(() => this.kernel.prepareAdvance(target));
   }
@@ -123,6 +131,10 @@ export class SessionKernelHost<
 
   extension(lane: string, record: JsonObject): Promise<void> {
     return this.enqueue(() => this.kernel.prepareExtension(lane, record));
+  }
+
+  control(input: ControlTransitionInput): Promise<ControlTransitionReceipt> {
+    return this.enqueue(() => this.kernel.prepareControlTransition(input));
   }
 
   interest(submission: InterestSubmission): Promise<InterestReceipt> {

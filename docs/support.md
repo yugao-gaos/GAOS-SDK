@@ -2,9 +2,9 @@
 
 ## Versioning
 
-TypeScript and Python distributions share one semantic version. While the SDK
-is below `1.0.0`, minor releases may include breaking API changes. Patch
-releases are reserved for compatible fixes.
+TypeScript and Python distributions share one semantic version. Starting with
+`1.0.0`, breaking public API changes require a new major version. Minor
+releases are additive and patch releases contain compatible fixes.
 
 The generic `gaos.ticks` v1 wire contract has its own compatibility promise:
 breaking its envelope, cursor, retry, or simultaneous-intent behavior requires
@@ -14,12 +14,12 @@ The current SDK establishes `gaos.ticks` v1 as the canonical transport with
 `kind: "tick"`, `tickId`, and `tick`.
 
 Pin an exact release for production and review the GitHub release notes before
-upgrading. v0.26.0 uses the canonical package name:
+upgrading. v1.0.0 uses the canonical package name:
 
 ```json
 {
   "dependencies": {
-    "@yugao-gaos/gaos-sdk": "git+https://github.com/yugao-gaos/GAOS-SDK.git#v0.26.0"
+    "@yugao-gaos/gaos-sdk": "git+https://github.com/yugao-gaos/GAOS-SDK.git#v1.0.0"
   }
 }
 ```

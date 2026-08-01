@@ -107,7 +107,7 @@ export async function runVerifierKitCli(
           gaosVersion: '0.26.0',
           nodeRange: '>=20.3',
         },
-        replayFormats: ['gaos.replay@1.0', 'gaos.replay@1.1', 'gaos.replay@1.2', 'gaos.replay@1.3'],
+        replayFormats: ['gaos.replay@1.0', 'gaos.replay@1.1', 'gaos.replay@1.2', 'gaos.replay@1.3', 'gaos.replay@1.4'],
         files: {
           'adapter.bundle.mjs': adapterBytes,
         },

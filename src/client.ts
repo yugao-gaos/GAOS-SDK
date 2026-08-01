@@ -34,6 +34,16 @@ export interface SessionStart<TObservation = unknown> {
   binding: SessionBinding;
 }
 
+export interface ExistingSessionHandle<
+  TObservation = unknown,
+> {
+  sessionId: string;
+  binding: SessionBinding;
+  /** Full current GAOS tick envelope, not only its observation payload. */
+  initialTick: TickResult<TObservation>;
+  attachReceipt?: SessionAttachReceipt;
+}
+
 export interface SessionControllerIdentity {
   kind: 'human' | 'provider' | 'cli' | 'local-agent' | 'mixed';
   id: string;
@@ -125,12 +135,15 @@ export interface SessionResult<TOutcome = JsonValue> {
   extensions?: ProtocolExtensions;
 }
 
-export interface SubmitIntentOptions {
+export interface SubmitCommandOptions {
   participantId?: string;
   submissionId?: string;
   cursor?: TickCursor;
   signal?: AbortSignal;
 }
+
+/** @deprecated Use SubmitCommandOptions. */
+export type SubmitIntentOptions = SubmitCommandOptions;
 
 export interface SessionHandle<
   TCommand = unknown,
@@ -518,6 +531,7 @@ async function readResponseText(response: Response, maxBytes: number): Promise<s
 
 export class SessionClient {
   private readonly bindings = new Map<string, SessionBinding>();
+  private readonly commandSequences = new Map<string, number>();
   private readonly request: typeof fetch;
   private readonly baseUrl: string;
 
@@ -771,6 +785,130 @@ export class SessionClient {
     );
   }
 
+  /**
+   * Adopt a session created or attached through a product-owned wire route.
+   * This performs no network request. A supplied full tick is preserved;
+   * current SessionStart/SessionAttach projections synthesize a resolved tick.
+   */
+  createSessionHandleFromExisting<
+    TCommand = unknown,
+    TObservation = unknown,
+    TOutcome = JsonValue,
+  >(
+    existing: ExistingSessionHandle<TObservation>,
+    policy: SessionPolicy,
+  ): SessionHandle<TCommand, TObservation, TOutcome>;
+  createSessionHandleFromExisting<
+    TCommand = unknown,
+    TObservation = unknown,
+    TOutcome = JsonValue,
+  >(
+    existing: SessionStart<TObservation> | SessionAttach<TObservation>,
+    policy: SessionPolicy,
+  ): SessionHandle<TCommand, TObservation, TOutcome>;
+  createSessionHandleFromExisting<
+    TCommand = unknown,
+    TObservation = unknown,
+    TOutcome = JsonValue,
+  >(
+    existing:
+      | ExistingSessionHandle<TObservation>
+      | SessionStart<TObservation>
+      | SessionAttach<TObservation>,
+    policy: SessionPolicy,
+  ): SessionHandle<TCommand, TObservation, TOutcome> {
+    assertJsonValue(policy, 'session policy');
+    if (!existing || typeof existing !== 'object' || Array.isArray(existing)) {
+      throw new ProtocolMismatchError('existing session must be an object');
+    }
+    assertNonEmptyString(existing.sessionId, 'existing sessionId');
+    const binding = parseSessionBinding(existing.binding);
+    let initialTick: TickResult<TObservation>;
+    let receiptValue: unknown;
+    if (Object.hasOwn(existing, 'initialTick')) {
+      const full = existing as ExistingSessionHandle<TObservation>;
+      initialTick = parseTickResult<TObservation>(full.initialTick);
+      receiptValue = full.attachReceipt;
+    } else {
+      const projected = existing as SessionStart<TObservation> | SessionAttach<TObservation>;
+      if (!Object.hasOwn(projected, 'tick')) {
+        throw new ProtocolMismatchError('existing session initial tick is missing');
+      }
+      try {
+        assertJsonValue(projected.tick, 'existing session initial tick');
+      } catch (error) {
+        throw new ProtocolMismatchError(
+          error instanceof Error ? error.message : 'existing session initial tick is invalid',
+        );
+      }
+      let extensions: ProtocolExtensions | undefined;
+      if (Object.hasOwn(projected, 'extensions')) {
+        const attachment = projected as SessionAttach<TObservation>;
+        try {
+          assertJsonObject(attachment.extensions, 'existing session extensions');
+          extensions = structuredClone(attachment.extensions);
+        } catch (error) {
+          throw new ProtocolMismatchError(
+            error instanceof Error ? error.message : 'existing session extensions are invalid',
+          );
+        }
+      }
+      initialTick = {
+        kind: 'tick',
+        protocol: PROTOCOL_ID,
+        protocolVersion: PROTOCOL_VERSION,
+        sessionId: binding.sessionId,
+        tickId: binding.tickId,
+        revision: binding.revision,
+        tick: structuredClone(projected.tick),
+        ...(extensions === undefined ? {} : { extensions }),
+      };
+      receiptValue = Object.hasOwn(projected, 'receipt')
+        ? (projected as SessionAttach<TObservation>).receipt
+        : undefined;
+    }
+    try {
+      assertJsonValue(initialTick.tick, 'existing session initial tick');
+    } catch (error) {
+      throw new ProtocolMismatchError(
+        error instanceof Error ? error.message : 'existing session initial tick is invalid',
+      );
+    }
+    if (
+      binding.sessionId !== existing.sessionId
+      || initialTick.sessionId !== existing.sessionId
+    ) {
+      throw new ProtocolMismatchError('existing session identities do not match');
+    }
+    if (
+      binding.tickId !== initialTick.tickId
+      || binding.revision !== initialTick.revision
+    ) {
+      throw new ProtocolMismatchError('existing session binding does not match initial tick');
+    }
+    const attachReceipt = receiptValue === undefined
+      ? undefined
+      : parseSessionAttachReceipt(receiptValue);
+    if (
+      attachReceipt !== undefined
+      && (
+        attachReceipt.sessionId !== existing.sessionId
+        || attachReceipt.revision !== binding.revision
+      )
+    ) {
+      throw new ProtocolMismatchError('existing session receipt does not match durable head');
+    }
+    this.bindings.set(existing.sessionId, binding);
+    return new ClientSessionHandle<TCommand, TObservation, TOutcome>(
+      this,
+      existing.sessionId,
+      binding.participantId,
+      structuredClone(policy),
+      attachReceipt,
+      structuredClone(initialTick),
+    );
+  }
+
   async getTickEnvelope<TObservation = unknown>(
     sessionId: string,
     callOptions: SessionCallOptions = {},
@@ -790,10 +928,10 @@ export class SessionClient {
     return result;
   }
 
-  async submitIntent<TCommand = unknown, TObservation = unknown>(
+  async submitCommand<TCommand = unknown, TObservation = unknown>(
     sessionId: string,
     command: TCommand,
-    options: SubmitIntentOptions = {},
+    options: SubmitCommandOptions = {},
   ): Promise<TickResult<TObservation>> {
     assertJsonValue(command, 'command');
     let binding = this.bindings.get(sessionId);
@@ -809,6 +947,11 @@ export class SessionClient {
     const cursor = options.cursor ?? binding;
     if (!cursor) throw new ProtocolMismatchError('session cursor unavailable');
     const participantId = options.participantId ?? binding?.participantId ?? 'player';
+    const sequenceKey = `${sessionId}\u0000${participantId}\u0000${cursor.tickId}`;
+    const sequence = this.commandSequences.get(sequenceKey) ?? 0;
+    if (options.submissionId === undefined) {
+      this.commandSequences.set(sequenceKey, sequence + 1);
+    }
     const submission: CommandSubmission<TCommand> = {
       protocol: PROTOCOL_ID,
       protocolVersion: PROTOCOL_VERSION,
@@ -816,7 +959,8 @@ export class SessionClient {
       tickId: cursor.tickId,
       revision: cursor.revision,
       participantId,
-      submissionId: options.submissionId ?? `${participantId}:${cursor.tickId}`,
+      submissionId: options.submissionId
+        ?? `${participantId}:${cursor.tickId}:${sequence}`,
       command,
     };
     const result = parseTickResult<TObservation>(
@@ -832,6 +976,27 @@ export class SessionClient {
     }
     this.remember(result, participantId);
     return result;
+  }
+
+  /** @deprecated Use submitCommand. */
+  async submitIntent<TCommand = unknown, TObservation = unknown>(
+    sessionId: string,
+    command: TCommand,
+    options: SubmitIntentOptions = {},
+  ): Promise<TickResult<TObservation>> {
+    let binding = this.bindings.get(sessionId);
+    if (!binding && !options.cursor && options.submissionId === undefined) {
+      await this.getTickEnvelope(sessionId, { signal: options.signal });
+      binding = this.bindings.get(sessionId);
+    }
+    const cursor = options.cursor ?? binding;
+    const participantId = options.participantId ?? binding?.participantId ?? 'player';
+    return this.submitCommand<TCommand, TObservation>(sessionId, command, {
+      ...options,
+      ...(options.submissionId !== undefined || cursor === undefined
+        ? {}
+        : { submissionId: `${participantId}:${cursor.tickId}` }),
+    });
   }
 }
 
@@ -849,7 +1014,10 @@ implements SessionHandle<TCommand, TObservation, TOutcome> {
     readonly participantId: string,
     readonly policy: SessionPolicy,
     readonly attachReceipt?: SessionAttachReceipt,
-  ) {}
+    private initialTick?: TickResult<TObservation>,
+  ) {
+    if (initialTick !== undefined) this.updateStatus(initialTick);
+  }
 
   get status(): SessionHandle<TCommand, TObservation, TOutcome>['status'] {
     return this.lifecycleStatus;
@@ -859,7 +1027,7 @@ implements SessionHandle<TCommand, TObservation, TOutcome> {
     if (this.lifecycleStatus === 'closed') throw new Error('session handle is closed');
   }
 
-  private rememberStatus(result: TickResult<TObservation>): TickResult<TObservation> {
+  private updateStatus(result: TickResult<TObservation>): void {
     const finalization = result.extensions?.['gaos.session.finalization'];
     if (
       finalization
@@ -869,6 +1037,10 @@ implements SessionHandle<TCommand, TObservation, TOutcome> {
     ) {
       this.lifecycleStatus = 'terminal';
     }
+  }
+
+  private rememberStatus(result: TickResult<TObservation>): TickResult<TObservation> {
+    this.updateStatus(result);
     return result;
   }
 
@@ -876,6 +1048,11 @@ implements SessionHandle<TCommand, TObservation, TOutcome> {
     this.requireOpen();
     if (this.lifecycleStatus === 'finalized') {
       throw new Error('session is already finalized');
+    }
+    if (this.initialTick !== undefined) {
+      const result = this.initialTick;
+      this.initialTick = undefined;
+      return this.rememberStatus(structuredClone(result));
     }
     return this.rememberStatus(
       await this.client.getTickEnvelope<TObservation>(this.sessionId, options),
@@ -890,12 +1067,16 @@ implements SessionHandle<TCommand, TObservation, TOutcome> {
     if (this.lifecycleStatus !== 'active') {
       throw new Error(`cannot act while session handle is ${this.lifecycleStatus}`);
     }
-    return this.rememberStatus(
-      await this.client.submitIntent<TCommand, TObservation>(this.sessionId, command, {
+    const result = await this.client.submitCommand<TCommand, TObservation>(
+      this.sessionId,
+      command,
+      {
         ...options,
         participantId: options.participantId ?? this.participantId,
-      }),
+      },
     );
+    this.initialTick = undefined;
+    return this.rememberStatus(result);
   }
 
   async finalize(

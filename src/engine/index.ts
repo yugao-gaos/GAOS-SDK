@@ -216,10 +216,6 @@ export {
   type ZoneEntryView,
   type ZoneViewNamespace,
   type ZoneViews,
-  /** @deprecated Use `ActionDefinition`. */
-  type GridActionDefinition,
-  /** @deprecated Use `SubmittedAction`. */
-  type GridSubmittedAction,
 } from './contracts.js';
 export {
   createTickRate,
@@ -232,30 +228,15 @@ export {
   solveLevel,
   type SolveResult,
   type SolverOptions,
-  /** @deprecated Use `enumerateActions`. */
-  enumerateGridActions,
-  /** @deprecated Use `solveLevel`. */
-  solveGridLevel,
-  /** @deprecated Use `SolveResult`. */
-  type GridSolveResult,
-  /** @deprecated Use `SolverOptions`. */
-  type GridSolverOptions,
 } from './solver.js';
 export {
   recheckTranscript,
-  recheckGridTranscript,
   runLevelSeed,
   type RecheckResult,
   type RecheckOptions,
   type TranscriptAction,
   type TranscriptHeader,
   type TranscriptVisibility,
-  /** @deprecated Use `RecheckResult`. */
-  type GridRecheckResult,
-  /** @deprecated Use `TranscriptAction`. */
-  type GridTranscriptAction,
-  /** @deprecated Use `TranscriptHeader`. */
-  type GridTranscriptHeader,
 } from './replay.js';
 export {
   GAOS_REPLAY_DERIVED_SEEDS,

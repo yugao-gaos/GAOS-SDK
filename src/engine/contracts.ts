@@ -236,9 +236,3 @@ export function replayMetricsFor<
   }
   return { actionsUsed: actionsUsed as number };
 }
-
-/** @deprecated Renamed to `ActionDefinition`; this alias will be removed in v1.0. */
-export type GridActionDefinition = ActionDefinition;
-
-/** @deprecated Renamed to `SubmittedAction`; this alias will be removed in v1.0. */
-export type GridSubmittedAction = SubmittedAction;

@@ -133,13 +133,14 @@ export interface SessionHistoryLookup {
   gameplaySubmission(participantId: string, submissionId: string): boolean;
   interestCommand(participantId: string, submissionId: string): string | undefined;
   saltIdentity(salt: string): string | undefined;
+  controlTransition?(participantId: string, controlId: string): string | undefined;
 }
 
 interface KernelCheckpointReceipt {
   key: string;
   canonicalCommand: string;
   tickId: string;
-  receipt: IngestReceipt;
+  receipt: CommandReceipt;
   cursor: number;
 }
 
@@ -160,6 +161,12 @@ interface KernelCheckpointInterest {
   canonical: string;
   patchBackoffRemaining: number;
   patchBackoffWindow: number;
+}
+
+interface KernelCheckpointControl {
+  key: string;
+  canonicalControl: string;
+  receipt: ControlTransitionReceipt;
 }
 
 interface RetainedRejection {
@@ -199,6 +206,8 @@ export interface KernelCheckpoint<TLevel = unknown, TCommand extends JsonValue =
     nextCommitmentIds: Array<[string, number]>;
     seenSalts: Array<[string, string]>;
     interests: KernelCheckpointInterest[];
+    controls?: KernelCheckpointControl[];
+    intentActions?: Array<[string, SubmittedAction]>;
     rejections: RetainedRejection[];
     historicalSubmissionKeys: string[];
     historicalInterestCommands: Array<[string, string]>;
@@ -284,6 +293,62 @@ export interface CommandContext {
   readonly tick: number;
 }
 
+export type CommandEffect<TState> =
+  | {
+      kind: 'interaction';
+      state: TState;
+    }
+  | {
+      kind: 'intent';
+      action: SubmittedAction;
+    };
+
+export type ClassifyCommand<
+  TState,
+  TCommand extends JsonValue,
+> = (
+  state: TState,
+  command: TCommand,
+  context: CommandContext,
+) => CommandEffect<TState>;
+
+export interface ControlTransitionContext {
+  readonly sessionId: string;
+  readonly participantId: string;
+  readonly controlId: string;
+  readonly cursor: number;
+  readonly tick: number;
+}
+
+export interface ControlTransitionInput {
+  participantId: string;
+  /** Stable idempotency key within this seat. */
+  controlId: string;
+  control: JsonValue;
+}
+
+export interface ControlTransitionReceipt {
+  status: 'accepted' | 'duplicate';
+  participantId: string;
+  controlId: string;
+  transitionRevision: number;
+  cursor: number;
+  tick: number;
+}
+
+export type ControlTransitionReducer<TState> = (
+  state: TState,
+  control: JsonValue,
+  context: ControlTransitionContext,
+) => TState;
+
+/** Preserve state inference when declaring a control reducer separately. */
+export function defineControlTransition<TState>(
+  reducer: ControlTransitionReducer<TState>,
+): ControlTransitionReducer<TState> {
+  return reducer;
+}
+
 export interface InterestContext {
   readonly sessionId: string;
   readonly participantId: string;
@@ -328,7 +393,19 @@ export interface SessionKernelOptions<
   cadence:
     | { mode: 'turns' }
     | { mode: 'ticks'; rate: TickRate };
-  commandToAction(command: TCommand, context: CommandContext): SubmittedAction;
+  commandToAction?(command: TCommand, context: CommandContext): SubmittedAction;
+  // State is deliberately erased so spreading options while replacing the
+  // reducer remains source-compatible, matching applyControlTransition.
+  classifyCommand?: ClassifyCommand<any, TCommand>;
+  /**
+   * Optional reducer lane for modal, ready-state, and other seat controls.
+   * It updates durable reducer state and observations without advancing the
+   * gameplay cursor or tick.
+   */
+  // Erased here so spreading options while replacing `reducer` with another
+  // state type remains source-compatible. Use `defineControlTransition` for
+  // state inference when declaring the callback.
+  applyControlTransition?: ControlTransitionReducer<any>;
   /**
    * Required host timestamp policy. A provider returns UTC epoch
    * milliseconds (`Date.now()` is suitable; `performance.now()` is not).
@@ -404,6 +481,18 @@ export interface CanonicalInput extends SubmissionIntegrityReservation {
 
 export type SessionEvent =
   | (SessionEventBase & {
+    kind: 'interaction';
+    tick: number;
+    cursor: number;
+    participantId: string;
+    submissionId: string;
+    command: JsonValue;
+    canonicalCommand: string;
+    clientTime?: number;
+    prevChainHash?: string;
+    sig?: string;
+  })
+  | (SessionEventBase & {
     kind: 'intent-accepted';
     tick: number;
     revision: number;
@@ -411,6 +500,8 @@ export type SessionEvent =
     submissionId: string;
     command: JsonValue;
     canonicalCommand: string;
+    /** Frozen at acceptance; absent only on historical pre-RFC-020 logs. */
+    action?: SubmittedAction;
     clientTime?: number;
     prevChainHash?: string;
     sig?: string;
@@ -449,6 +540,15 @@ export type SessionEvent =
     tick: number;
     lane: string;
     record: JsonObject;
+  })
+  | (SessionEventBase & {
+    kind: 'control-transition';
+    tick: number;
+    cursor: number;
+    participantId: string;
+    controlId: string;
+    control: JsonValue;
+    canonicalControl: string;
   })
   | (SessionEventBase & {
     kind: 'interest';
@@ -520,7 +620,7 @@ export interface ObservationDelta<TView = TickView<unknown, unknown>> {
   tick: number;
   codec: 'v2';
   /** How this envelope was produced. Absent is read as `resolution`. */
-  origin?: 'resolution' | 'snapshot' | 'interest';
+  origin?: 'resolution' | 'snapshot' | 'interest' | 'control' | 'interaction';
   /**
    * Applied user inputs in canonical reducer order for this view revision.
    * A reconnect snapshot applies no new input and therefore carries `[]`.
@@ -552,6 +652,20 @@ export interface IngestReceipt {
   /** True when the accepted window has already resolved. */
   resolved: boolean;
 }
+
+export type CommandReceipt =
+  | ({
+      effect: 'interaction';
+      transitionRevision: number;
+    } & Pick<
+      ControlTransitionReceipt,
+      'status' | 'participantId' | 'cursor' | 'tick'
+    > & {
+      submissionId: string;
+    })
+  | ({
+      effect: 'intent';
+    } & IngestReceipt);
 
 export interface InterestReceipt {
   status: 'accepted' | 'duplicate';
@@ -632,7 +746,7 @@ type PreparedCompletion = 'open' | 'committed' | 'aborted';
 interface ReceiptState {
   canonicalCommand: string;
   tickId: string;
-  receipt: IngestReceipt;
+  receipt: CommandReceipt;
   cursor: number;
 }
 
@@ -674,6 +788,11 @@ interface KernelState<TState, TCommand extends JsonValue, TView> {
   nextCommitmentIds: Map<string, number>;
   seenSalts: Map<string, string>;
   interestScopes: Map<string, InterestScopeState<TView>>;
+  controls: Map<string, {
+    canonicalControl: string;
+    receipt: ControlTransitionReceipt;
+  }>;
+  intentActions: Map<string, SubmittedAction>;
 }
 
 interface PreparedState<TState, TCommand extends JsonValue, TView> {
@@ -749,6 +868,7 @@ export interface SessionKernel<
   TView,
   TLevel = unknown,
 > {
+  prepareCommand(submission: CommandSubmission<TCommand>): Prepared<CommandReceipt, TView>;
   prepareIngest(submission: CommandSubmission<TCommand>): Prepared<IngestReceipt, TView>;
   prepareAdvance(target?: number): Prepared<AdvanceSummary<TView>, TView>;
   prepareTimeout(
@@ -756,6 +876,9 @@ export interface SessionKernel<
     forcedInput?: SubmittedAction,
   ): Prepared<AdvanceSummary<TView>, TView>;
   prepareExtension(lane: string, record: JsonObject): Prepared<void, TView>;
+  prepareControlTransition(
+    input: ControlTransitionInput,
+  ): Prepared<ControlTransitionReceipt, TView>;
   prepareInterest(submission: InterestSubmission): Prepared<InterestReceipt, TView>;
   prepareSeatSignature(input: SeatSignatureInput): Prepared<void, TView>;
   commit(prepared: Prepared<unknown, TView>): void;
@@ -1203,6 +1326,15 @@ class SessionKernelImpl<
     if (options.hostTime !== 'none' && typeof options.hostTime !== 'function') {
       throw new TypeError("hostTime must be a UTC epoch-millisecond provider or 'none'");
     }
+    if (options.applyControlTransition !== undefined
+      && typeof options.applyControlTransition !== 'function') {
+      throw new TypeError('applyControlTransition must be a function');
+    }
+    const hasLegacyAdapter = typeof options.commandToAction === 'function';
+    const hasClassifier = typeof options.classifyCommand === 'function';
+    if (hasLegacyAdapter === hasClassifier) {
+      throw new TypeError('session must configure exactly one command adapter');
+    }
     this.tickTimeoutPolicy = undefined;
     if (options.timeoutPolicy !== undefined) {
       if (!isObjectRecord(options.timeoutPolicy)) {
@@ -1410,6 +1542,8 @@ class SessionKernelImpl<
       nextCommitmentIds: new Map(),
       seenSalts: new Map(),
       interestScopes,
+      controls: new Map(),
+      intentActions: new Map(),
     };
     if (checkpoint !== undefined) this.restoreCheckpoint(checkpoint);
     if (transcript !== undefined) this.rehydrate(transcript);
@@ -1589,6 +1723,8 @@ class SessionKernelImpl<
       nextCommitmentIds: new Map(this.live.nextCommitmentIds),
       seenSalts: new Map(this.live.seenSalts),
       interestScopes: forkInterestScopes(this.live.interestScopes),
+      controls: cloneMapValues(this.live.controls),
+      intentActions: cloneMapValues(this.live.intentActions),
     };
     this.draftForks.set(draft, reducerState);
     return draft;
@@ -1696,7 +1832,163 @@ class SessionKernelImpl<
     return value;
   }
 
+  prepareCommand(
+    submission: CommandSubmission<TCommand>,
+  ): Prepared<CommandReceipt, TView> {
+    if (this.options.classifyCommand === undefined) {
+      const prepared = this.prepareIntent(submission);
+      return {
+        ...prepared,
+        result: { ...prepared.result, effect: 'intent' },
+      };
+    }
+    if (submission === null || typeof submission !== 'object' || Array.isArray(submission)) {
+      throw new IntentCollectionError('invalid_submission', 'submission must be an object');
+    }
+    if (submission.protocol !== PROTOCOL_ID || submission.protocolVersion !== PROTOCOL_VERSION) {
+      throw new IntentCollectionError(
+        'invalid_protocol',
+        `expected ${PROTOCOL_ID} ${PROTOCOL_VERSION}`,
+      );
+    }
+    if (submission.sessionId !== this.options.sessionId) {
+      throw new IntentCollectionError('wrong_session', 'submission session does not match endpoint');
+    }
+    let canonicalCommand: string;
+    try {
+      canonicalCommand = canonicalJson(submission.command);
+    } catch (error) {
+      throw new IntentCollectionError(
+        'invalid_submission',
+        error instanceof Error ? error.message : 'submission command must contain plain JSON',
+      );
+    }
+    if (this.header.signaturePolicy !== undefined) {
+      const hasClientTime = submission.clientTime !== undefined;
+      const hasPrevious = submission.prevChainHash !== undefined;
+      if (hasClientTime !== hasPrevious || (submission.sig !== undefined && !hasClientTime)) {
+        throw new IntentCollectionError(
+          'invalid_submission',
+          'signed sessions require both clientTime and prevChainHash, with sig optional',
+        );
+      }
+      if (hasClientTime) {
+        if (!Number.isSafeInteger(submission.clientTime) || submission.clientTime! < 0) {
+          throw new IntentCollectionError(
+            'invalid_submission',
+            'clientTime must be a non-negative safe integer',
+          );
+        }
+        try {
+          signatureBytesFromBase64(submission.prevChainHash!, 'prevChainHash', 32);
+          if (submission.sig !== undefined) {
+            signatureBytesFromBase64(submission.sig, 'sig', 64);
+          }
+        } catch (error) {
+          throw new IntentCollectionError(
+            'invalid_submission',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      }
+    }
+    const key = receiptKey(submission.participantId, submission.submissionId);
+    if (this.live.controls.has(key)
+      || this.historyLookup?.controlTransition?.(
+        submission.participantId,
+        submission.submissionId,
+      ) !== undefined) {
+      throw new SessionConflictError(
+        'submission id was previously used by a control transition',
+      );
+    }
+    const existing = this.live.receipts.get(key);
+    if (existing !== undefined) {
+      if (existing.canonicalCommand !== canonicalCommand
+        || existing.tickId !== submission.tickId
+        || existing.cursor !== submission.revision) {
+        throw new SessionConflictError('submission id was reused with different content or cursor');
+      }
+      const draft = this.forkLive();
+      try {
+        return this.makePrepared(draft, [], [], {
+          ...existing.receipt,
+          status: 'duplicate',
+          ...(existing.receipt.effect === 'intent'
+            ? { resolved: existing.cursor < this.live.cursor }
+            : {}),
+        }, true);
+      } catch (error) {
+        this.discardDraft(draft);
+        throw error;
+      }
+    }
+    validateIntentSubmission(this.live.window, submission);
+    if (this.live.expiredReceiptKeys.has(key)
+      || this.historicalSubmissionKeys.has(key)
+      || this.historicalInterestCommands.has(key)
+      || this.live.controls.has(key)
+      || this.historyLookup?.gameplaySubmission(
+        submission.participantId,
+        submission.submissionId,
+      )
+      || this.historyLookup?.interestCommand(
+        submission.participantId,
+        submission.submissionId,
+      ) !== undefined
+      || this.historyLookup?.controlTransition?.(
+        submission.participantId,
+        submission.submissionId,
+      ) !== undefined) {
+      throw new SessionConflictError('unknown_submission', 'receipt retention has expired');
+    }
+    if (this.options.reducer.view(this.live.reducerState).status !== 'playing') {
+      throw new SessionAdvanceError('terminal', 'session is already terminal');
+    }
+    const classificationDraft = this.isolation.fork(this.live.reducerState);
+    let effect: CommandEffect<TState>;
+    try {
+      effect = this.options.classifyCommand(
+        classificationDraft,
+        structuredClone(submission.command),
+        {
+          sessionId: this.options.sessionId,
+          participantId: submission.participantId,
+          submissionId: submission.submissionId,
+          cursor: this.live.cursor,
+          tick: this.live.tick,
+        },
+      );
+      if (!effect || (effect.kind !== 'interaction' && effect.kind !== 'intent')) {
+        throw new TypeError('classifyCommand must return an interaction or intent effect');
+      }
+      if (effect.kind === 'intent') {
+        this.isolation.discard?.(classificationDraft);
+        const prepared = this.prepareIntent(submission, effect.action);
+        return {
+          ...prepared,
+          result: { ...prepared.result, effect: 'intent' },
+        };
+      }
+      if (effect.state !== classificationDraft) {
+        this.isolation.discard?.(classificationDraft);
+      }
+      return this.prepareInteraction(submission, canonicalCommand, effect.state);
+    } catch (error) {
+      if (effect!?.kind !== 'interaction') this.isolation.discard?.(classificationDraft);
+      throw error;
+    }
+  }
+
   prepareIngest(submission: CommandSubmission<TCommand>): Prepared<IngestReceipt, TView> {
+    const prepared = this.prepareIntent(submission);
+    return prepared;
+  }
+
+  private prepareIntent(
+    submission: CommandSubmission<TCommand>,
+    classifiedAction?: SubmittedAction,
+  ): Prepared<IngestReceipt, TView> {
     if (submission === null || typeof submission !== 'object' || Array.isArray(submission)) {
       throw new IntentCollectionError('invalid_submission', 'submission must be an object');
     }
@@ -1758,17 +2050,28 @@ class SessionKernelImpl<
         || existing.cursor !== submission.revision) {
         throw new SessionConflictError('submission id was reused with different content or cursor');
       }
+      if (existing.receipt.effect !== 'intent') {
+        throw new SessionConflictError(
+          'submission id was previously accepted as an interaction',
+        );
+      }
       const draft = this.forkLive();
       try {
+        const duplicate: IngestReceipt = {
+          status: 'duplicate',
+          participantId: existing.receipt.participantId,
+          submissionId: existing.receipt.submissionId,
+          cursor: existing.receipt.cursor,
+          tick: existing.receipt.tick,
+          submittedParticipants: existing.receipt.submittedParticipants,
+          awaitingParticipants: existing.receipt.awaitingParticipants,
+          resolved: existing.cursor < this.live.cursor,
+        };
         return this.makePrepared(
           draft,
           [],
           [],
-          {
-            ...existing.receipt,
-            status: 'duplicate',
-            resolved: existing.cursor < this.live.cursor,
-          },
+          duplicate,
           true,
         );
       } catch (error) {
@@ -1796,7 +2099,7 @@ class SessionKernelImpl<
         'receipt retention has expired',
       );
     }
-    const preview = actionCopy(this.options.commandToAction(submission.command, {
+    const preview = actionCopy(classifiedAction ?? this.options.commandToAction!(submission.command, {
       sessionId: this.options.sessionId,
       participantId: submission.participantId,
       submissionId: submission.submissionId,
@@ -1903,9 +2206,10 @@ class SessionKernelImpl<
     draft.receipts.set(key, {
       canonicalCommand,
       tickId: submission.tickId,
-      receipt,
+      receipt: { ...receipt, effect: 'intent' },
       cursor: draft.cursor,
     });
+    draft.intentActions.set(key, structuredClone(preview));
     try {
       return this.makePrepared(draft, [{
         kind: 'intent-accepted',
@@ -1915,6 +2219,7 @@ class SessionKernelImpl<
         submissionId: submission.submissionId,
         command: structuredClone(submission.command),
         canonicalCommand,
+        action: structuredClone(preview),
         ...(submission.clientTime === undefined ? {} : { clientTime: submission.clientTime }),
         ...(submission.prevChainHash === undefined
           ? {}
@@ -1948,7 +2253,17 @@ class SessionKernelImpl<
         cursor: draft.cursor,
         tick: draft.tick,
       };
-      const action = actionCopy(this.options.commandToAction(intent.command, context));
+      const frozen = draft.intentActions.get(
+        receiptKey(intent.participantId, intent.submissionId),
+      );
+      if (frozen === undefined && this.options.commandToAction === undefined) {
+        throw new SessionConflictError(
+          'historical pending command has no frozen canonical action',
+        );
+      }
+      const action = actionCopy(
+        frozen ?? this.options.commandToAction!(intent.command, context),
+      );
       if (action.seat !== undefined && action.seat !== intent.participantId) {
         throw new SessionConflictError('a participant command cannot impersonate another seat');
       }
@@ -2561,6 +2876,247 @@ class SessionKernelImpl<
     }
   }
 
+  prepareControlTransition(
+    input: ControlTransitionInput,
+  ): Prepared<ControlTransitionReceipt, TView> {
+    if (this.options.applyControlTransition === undefined) {
+      throw new SessionConflictError('session has no control-transition reducer');
+    }
+    if (!isObjectRecord(input)) throw new TypeError('control transition must be an object');
+    if (!this.options.seats.includes(input.participantId)) {
+      throw new SessionConflictError('control transition names an unknown participant');
+    }
+    if (typeof input.controlId !== 'string' || !input.controlId.trim()) {
+      throw new TypeError('controlId must be a non-empty string');
+    }
+    let canonicalControl: string;
+    try {
+      canonicalControl = canonicalJson(input.control);
+    } catch (error) {
+      throw new TypeError(
+        error instanceof Error ? error.message : 'control must contain plain JSON',
+      );
+    }
+    const key = receiptKey(input.participantId, input.controlId);
+    if (this.live.receipts.has(key)
+      || this.historicalSubmissionKeys.has(key)
+      || this.historyLookup?.gameplaySubmission(input.participantId, input.controlId)) {
+      throw new SessionConflictError(
+        'controlId was previously used by a command submission',
+      );
+    }
+    const existing = this.live.controls.get(key);
+    const durableCanonical = existing?.canonicalControl
+      ?? this.historyLookup?.controlTransition?.(input.participantId, input.controlId);
+    if (durableCanonical !== undefined) {
+      if (durableCanonical !== canonicalControl) {
+        throw new SessionConflictError(
+          'controlId was reused with different canonical content',
+        );
+      }
+      const receipt: ControlTransitionReceipt = existing
+        ? { ...existing.receipt, status: 'duplicate' }
+        : {
+          status: 'duplicate',
+          participantId: input.participantId,
+          controlId: input.controlId,
+          transitionRevision: this.live.transitionRevision,
+          cursor: this.live.cursor,
+          tick: this.live.tick,
+        };
+      const draft = this.forkLive();
+      try {
+        return this.makePrepared(draft, [], [], receipt, true);
+      } catch (error) {
+        this.discardDraft(draft);
+        throw error;
+      }
+    }
+    if (this.options.reducer.view(this.live.reducerState).status !== 'playing') {
+      throw new SessionAdvanceError('terminal', 'session is already terminal');
+    }
+    const draft = this.forkLive();
+    try {
+      draft.reducerState = this.options.applyControlTransition(
+        draft.reducerState,
+        structuredClone(input.control),
+        {
+          sessionId: this.options.sessionId,
+          participantId: input.participantId,
+          controlId: input.controlId,
+          cursor: draft.cursor,
+          tick: draft.tick,
+        },
+      );
+      const fullView = this.options.reducer.view(draft.reducerState);
+      this.validatedParticipantsForView(fullView);
+      const deltas: ObservationDelta<TView>[] = [];
+      for (const seat of this.options.seats) {
+        const next = this.viewFor(draft.reducerState, seat);
+        const revision = (draft.viewRevisions.get(seat) ?? 0) + 1;
+        const canonicalNext = canonicalSessionView(next);
+        const nextSnapshot = structuredClone(next);
+        draft.views.set(seat, nextSnapshot);
+        draft.viewCanonical.set(seat, canonicalNext);
+        draft.viewRevisions.set(seat, revision);
+        for (const scope of draft.interestScopes.values()) {
+          if (scope.participantId !== seat) continue;
+          const scoped = this.scopedView(nextSnapshot, scope, draft.cursor, draft.tick);
+          const encoded = this.encodedObservation(
+            scope.view,
+            scoped.view,
+            scoped.canonical,
+            scope.canonical === scoped.canonical,
+            scope.patchBackoffRemaining,
+            scope.patchBackoffWindow,
+          );
+          deltas.push({
+            seat,
+            scopeId: scope.scopeId,
+            ...(scope.declared
+              ? { interest: { declaration: structuredClone(scope.declaration) } }
+              : {}),
+            transitionRevision: draft.transitionRevision + 1,
+            viewRevision: revision,
+            tick: draft.tick,
+            codec: encoded.codec,
+            origin: 'control',
+            acknowledgements: [],
+            rejections: [],
+            body: encoded.body,
+            viewDigest: fnv1a(scoped.canonical),
+          });
+          scope.view = scoped.view;
+          scope.canonical = scoped.canonical;
+          scope.patchBackoffRemaining = encoded.patchBackoffRemaining;
+          scope.patchBackoffWindow = encoded.patchBackoffWindow;
+        }
+      }
+      const receipt: ControlTransitionReceipt = {
+        status: 'accepted',
+        participantId: input.participantId,
+        controlId: input.controlId,
+        transitionRevision: draft.transitionRevision + 1,
+        cursor: draft.cursor,
+        tick: draft.tick,
+      };
+      draft.controls.set(key, {
+        canonicalControl,
+        receipt: structuredClone(receipt),
+      });
+      return this.makePrepared(draft, [{
+        kind: 'control-transition',
+        tick: draft.tick,
+        cursor: draft.cursor,
+        participantId: input.participantId,
+        controlId: input.controlId,
+        control: structuredClone(input.control),
+        canonicalControl,
+      }], deltas, receipt);
+    } catch (error) {
+      this.discardDraft(draft);
+      throw error;
+    }
+  }
+
+  private prepareInteraction(
+    submission: CommandSubmission<TCommand>,
+    canonicalCommand: string,
+    nextState: TState,
+  ): Prepared<CommandReceipt, TView> {
+    const draft = this.forkLive();
+    const priorDraft = draft.reducerState;
+    try {
+      draft.reducerState = nextState;
+      this.draftForks.set(draft, nextState);
+      if (priorDraft !== nextState) this.isolation.discard?.(priorDraft);
+      const fullView = this.options.reducer.view(draft.reducerState);
+      const participants = this.validatedParticipantsForView(fullView);
+      if (canonicalJson(participants) !== canonicalJson(draft.window.participants)) {
+        throw new SessionConflictError(
+          'interaction cannot change the participant set of the open window',
+        );
+      }
+      const deltas: ObservationDelta<TView>[] = [];
+      for (const seat of this.options.seats) {
+        const next = this.viewFor(draft.reducerState, seat);
+        const revision = (draft.viewRevisions.get(seat) ?? 0) + 1;
+        const canonicalNext = canonicalSessionView(next);
+        const nextSnapshot = structuredClone(next);
+        draft.views.set(seat, nextSnapshot);
+        draft.viewCanonical.set(seat, canonicalNext);
+        draft.viewRevisions.set(seat, revision);
+        for (const scope of draft.interestScopes.values()) {
+          if (scope.participantId !== seat) continue;
+          const scoped = this.scopedView(nextSnapshot, scope, draft.cursor, draft.tick);
+          const encoded = this.encodedObservation(
+            scope.view,
+            scoped.view,
+            scoped.canonical,
+            scope.canonical === scoped.canonical,
+            scope.patchBackoffRemaining,
+            scope.patchBackoffWindow,
+          );
+          deltas.push({
+            seat,
+            scopeId: scope.scopeId,
+            ...(scope.declared
+              ? { interest: { declaration: structuredClone(scope.declaration) } }
+              : {}),
+            transitionRevision: draft.transitionRevision + 1,
+            viewRevision: revision,
+            tick: draft.tick,
+            codec: encoded.codec,
+            origin: 'interaction',
+            acknowledgements: [{
+              participantId: submission.participantId,
+              submissionId: submission.submissionId,
+            }],
+            rejections: [],
+            body: encoded.body,
+            viewDigest: fnv1a(scoped.canonical),
+          });
+          scope.view = scoped.view;
+          scope.canonical = scoped.canonical;
+          scope.patchBackoffRemaining = encoded.patchBackoffRemaining;
+          scope.patchBackoffWindow = encoded.patchBackoffWindow;
+        }
+      }
+      const receipt: CommandReceipt = {
+        status: 'accepted',
+        effect: 'interaction',
+        participantId: submission.participantId,
+        submissionId: submission.submissionId,
+        transitionRevision: draft.transitionRevision + 1,
+        cursor: draft.cursor,
+        tick: draft.tick,
+      };
+      draft.receipts.set(receiptKey(submission.participantId, submission.submissionId), {
+        canonicalCommand,
+        tickId: submission.tickId,
+        receipt: structuredClone(receipt),
+        cursor: draft.cursor,
+      });
+      return this.makePrepared(draft, [{
+        kind: 'interaction',
+        tick: draft.tick,
+        cursor: draft.cursor,
+        participantId: submission.participantId,
+        submissionId: submission.submissionId,
+        command: structuredClone(submission.command),
+        canonicalCommand,
+        ...(submission.clientTime === undefined ? {} : { clientTime: submission.clientTime }),
+        ...(submission.prevChainHash === undefined
+          ? {}
+          : { prevChainHash: submission.prevChainHash }),
+        ...(submission.sig === undefined ? {} : { sig: submission.sig }),
+      }], deltas, receipt);
+    } catch (error) {
+      this.discardDraft(draft);
+      throw error;
+    }
+  }
+
   prepareInterest(submission: InterestSubmission): Prepared<InterestReceipt, TView> {
     if (this.options.interest === undefined) {
       throw new SessionConflictError('session has no interest policy');
@@ -2952,6 +3508,15 @@ class SessionKernelImpl<
           patchBackoffRemaining: scope.patchBackoffRemaining,
           patchBackoffWindow: scope.patchBackoffWindow,
         })),
+        controls: sortedEntries(this.live.controls).map(([key, control]) => ({
+          key,
+          canonicalControl: control.canonicalControl,
+          receipt: structuredClone(control.receipt),
+        })),
+        intentActions: sortedEntries(this.live.intentActions).map(([key, action]) => [
+          key,
+          structuredClone(action),
+        ]),
         rejections: structuredClone(this.live.rejectionHistory),
         historicalSubmissionKeys: [...this.historicalSubmissionKeys]
           .sort(compareUnicodeCodePoints),
@@ -2987,11 +3552,18 @@ class SessionKernelImpl<
     if (this.historyLookup === undefined) {
       throw new TypeError('compaction requires a host-backed historyLookup');
     }
+    if (this.live.controls.size > 0
+      && this.historyLookup.controlTransition === undefined) {
+      throw new TypeError(
+        'compaction after control transitions requires historyLookup.controlTransition',
+      );
+    }
     this.live.events = [];
     this.live.rejectionHistory = [];
     this.live.expiredReceiptKeys.clear();
     this.historicalSubmissionKeys.clear();
     this.historicalInterestCommands.clear();
+    this.live.controls.clear();
     this.live.seenSalts.clear();
     for (const [key, commitment] of this.live.commitments) {
       if (commitment.revealed) this.live.commitments.delete(key);
@@ -3079,10 +3651,42 @@ class SessionKernelImpl<
       || !Array.isArray(protocol.nextCommitmentIds)
       || !Array.isArray(protocol.seenSalts)
       || !Array.isArray(protocol.interests)
+      || (protocol.controls !== undefined && !Array.isArray(protocol.controls))
+      || (protocol.intentActions !== undefined && !Array.isArray(protocol.intentActions))
       || !Array.isArray(protocol.rejections)
       || !Array.isArray(protocol.historicalSubmissionKeys)
       || !Array.isArray(protocol.historicalInterestCommands)) {
       throw new TypeError('checkpoint protocol payload is invalid');
+    }
+    for (const control of protocol.controls ?? []) {
+      const receipt = control?.receipt;
+      let canonical = '';
+      try {
+        canonical = canonicalJson(JSON.parse(control.canonicalControl));
+      } catch {
+        // Report one stable checkpoint error below.
+      }
+      if (!isObjectRecord(control)
+        || typeof control.key !== 'string'
+        || typeof control.canonicalControl !== 'string'
+        || canonical !== control.canonicalControl
+        || !isObjectRecord(receipt)
+        || receipt.status !== 'accepted'
+        || !this.options.seats.includes(receipt.participantId)
+        || typeof receipt.controlId !== 'string'
+        || !receipt.controlId
+        || control.key !== receiptKey(receipt.participantId, receipt.controlId)
+        || !Number.isSafeInteger(receipt.transitionRevision)
+        || receipt.transitionRevision < 1
+        || receipt.transitionRevision > watermark.transitionRevision
+        || !Number.isSafeInteger(receipt.cursor)
+        || receipt.cursor < 0
+        || receipt.cursor > watermark.cursor
+        || !Number.isSafeInteger(receipt.tick)
+        || receipt.tick < 0
+        || receipt.tick > watermark.tick) {
+        throw new TypeError('checkpoint control-transition history is invalid');
+      }
     }
     let previousRejectionRevision = checkpoint.retentionFloor;
     for (const rejection of protocol.rejections) {
@@ -3163,6 +3767,19 @@ class SessionKernelImpl<
         patchBackoffWindow: scope.patchBackoffWindow,
       },
     ]));
+    const controls = new Map((protocol.controls ?? []).map((control) => [
+      control.key,
+      {
+        canonicalControl: control.canonicalControl,
+        receipt: structuredClone(control.receipt),
+      },
+    ]));
+    const intentActions = new Map(
+      (protocol.intentActions ?? []).map(([key, action]) => [
+        key,
+        structuredClone(action),
+      ]),
+    );
     this.live = {
       reducerState,
       window: structuredClone(checkpoint.window),
@@ -3181,6 +3798,8 @@ class SessionKernelImpl<
       nextCommitmentIds,
       seenSalts,
       interestScopes,
+      controls,
+      intentActions,
     };
     this.historicalSubmissionKeys.clear();
     for (const key of protocol.historicalSubmissionKeys) {
@@ -3259,8 +3878,119 @@ class SessionKernelImpl<
         this.live.receipts.set(receiptKey(event.participantId, event.submissionId), {
           canonicalCommand: event.canonicalCommand,
           tickId: submission.tickId,
-          receipt,
+          receipt: { ...receipt, effect: 'intent' },
           cursor: event.revision,
+        });
+        const context: CommandContext = {
+          sessionId: this.options.sessionId,
+          participantId: event.participantId,
+          submissionId: event.submissionId,
+          cursor: event.revision,
+          tick: event.tick,
+        };
+        let action: SubmittedAction;
+        if (this.options.classifyCommand !== undefined) {
+          const classificationState = this.isolation.fork(this.live.reducerState);
+          try {
+            const effect = this.options.classifyCommand(
+              classificationState,
+              structuredClone(event.command as TCommand),
+              context,
+            );
+            if (effect.kind !== 'intent') {
+              throw new TypeError(
+                'recorded intent no longer classifies as an intent',
+              );
+            }
+            action = actionCopy(effect.action);
+          } finally {
+            this.isolation.discard?.(classificationState);
+          }
+        } else {
+          action = actionCopy(this.options.commandToAction!(
+            structuredClone(event.command as TCommand),
+            context,
+          ));
+        }
+        if (event.action !== undefined
+          && canonicalJson(event.action as unknown as JsonValue)
+            !== canonicalJson(action as unknown as JsonValue)) {
+          throw new TypeError('intent event action contradicts its canonical command');
+        }
+        this.live.intentActions.set(
+          receiptKey(event.participantId, event.submissionId),
+          action,
+        );
+      } else if (event.kind === 'interaction') {
+        if (this.options.classifyCommand === undefined) {
+          throw new TypeError(
+            'transcript contains an interaction but options have no command classifier',
+          );
+        }
+        if (!this.options.seats.includes(event.participantId)
+          || event.cursor !== this.live.cursor
+          || event.tick !== this.live.tick
+          || canonicalJson(event.command) !== event.canonicalCommand) {
+          throw new TypeError('transcript contains an invalid interaction');
+        }
+        const key = receiptKey(event.participantId, event.submissionId);
+        if (this.historicalSubmissionKeys.has(key) || this.live.receipts.has(key)) {
+          throw new TypeError('transcript reuses a command submission id');
+        }
+        const effect = this.options.classifyCommand(
+          this.live.reducerState,
+          structuredClone(event.command as TCommand),
+          {
+            sessionId: this.options.sessionId,
+            participantId: event.participantId,
+            submissionId: event.submissionId,
+            cursor: event.cursor,
+            tick: event.tick,
+          },
+        );
+        if (effect.kind !== 'interaction') {
+          throw new TypeError('recorded interaction no longer classifies as an interaction');
+        }
+        this.live.reducerState = effect.state;
+        const fullView = this.options.reducer.view(this.live.reducerState);
+        const participants = this.validatedParticipantsForView(fullView);
+        if (canonicalJson(participants) !== canonicalJson(this.live.window.participants)) {
+          throw new TypeError('interaction changed the open-window participant set');
+        }
+        for (const seat of this.options.seats) {
+          const seatView = this.viewFor(this.live.reducerState, seat);
+          this.live.views.set(seat, seatView);
+          this.live.viewCanonical.set(seat, canonicalSessionView(seatView));
+          this.live.viewRevisions.set(
+            seat,
+            (this.live.viewRevisions.get(seat) ?? 0) + 1,
+          );
+          for (const scope of this.live.interestScopes.values()) {
+            if (scope.participantId !== seat) continue;
+            const scoped = this.scopedView(
+              seatView,
+              scope,
+              this.live.cursor,
+              this.live.tick,
+            );
+            scope.view = scoped.view;
+            scope.canonical = scoped.canonical;
+          }
+        }
+        this.historicalSubmissionKeys.add(key);
+        this.live.receipts.set(key, {
+          canonicalCommand: event.canonicalCommand,
+          tickId: makeTickId(this.options.sessionId, event.cursor),
+          receipt: {
+            status: 'accepted',
+            effect: 'interaction',
+            participantId: event.participantId,
+            submissionId: event.submissionId,
+            transitionRevision: event.transitionRevision,
+            cursor: event.cursor,
+            tick: event.tick,
+          },
+          cursor: event.cursor,
         });
       } else if (event.kind === 'interest') {
         if (this.options.interest === undefined) {
@@ -3305,6 +4035,69 @@ class SessionKernelImpl<
             patchBackoffWindow: this.observationCodec.patchBackoffTicks,
           },
         );
+      } else if (event.kind === 'control-transition') {
+        if (this.options.applyControlTransition === undefined) {
+          throw new TypeError(
+            'transcript contains a control transition but options have no control reducer',
+          );
+        }
+        if (!this.options.seats.includes(event.participantId)
+          || typeof event.controlId !== 'string'
+          || !event.controlId
+          || event.cursor !== this.live.cursor
+          || event.tick !== this.live.tick
+          || canonicalJson(event.control) !== event.canonicalControl) {
+          throw new TypeError('transcript contains an invalid control transition');
+        }
+        const key = receiptKey(event.participantId, event.controlId);
+        if (this.live.controls.has(key)) {
+          throw new TypeError('transcript reuses a control transition id');
+        }
+        this.live.reducerState = this.options.applyControlTransition(
+          this.live.reducerState,
+          structuredClone(event.control),
+          {
+            sessionId: this.options.sessionId,
+            participantId: event.participantId,
+            controlId: event.controlId,
+            cursor: event.cursor,
+            tick: event.tick,
+          },
+        );
+        const fullView = this.options.reducer.view(this.live.reducerState);
+        this.validatedParticipantsForView(fullView);
+        for (const seat of this.options.seats) {
+          const seatView = this.viewFor(this.live.reducerState, seat);
+          this.live.views.set(seat, seatView);
+          const canonical = canonicalSessionView(seatView);
+          this.live.viewCanonical.set(seat, canonical);
+          this.live.viewRevisions.set(
+            seat,
+            (this.live.viewRevisions.get(seat) ?? 0) + 1,
+          );
+          for (const scope of this.live.interestScopes.values()) {
+            if (scope.participantId !== seat) continue;
+            const scoped = this.scopedView(
+              seatView,
+              scope,
+              this.live.cursor,
+              this.live.tick,
+            );
+            scope.view = scoped.view;
+            scope.canonical = scoped.canonical;
+          }
+        }
+        this.live.controls.set(key, {
+          canonicalControl: event.canonicalControl,
+          receipt: {
+            status: 'accepted',
+            participantId: event.participantId,
+            controlId: event.controlId,
+            transitionRevision: event.transitionRevision,
+            cursor: event.cursor,
+            tick: event.tick,
+          },
+        });
       } else if (event.kind === 'resolution') {
         for (const { participantId, action } of event.inputs) {
           if (!participantId) continue;
@@ -3697,6 +4490,26 @@ export function finalizeReplay<TLevel>(
         submissionId: event.submissionId,
         scopeId: event.scopeId,
         declaration: structuredClone(event.declaration),
+        canonicalCommand: event.canonicalCommand,
+        ...(event.clientTime === undefined ? {} : { clientTime: event.clientTime }),
+        ...(event.prevChainHash === undefined
+          ? {}
+          : { prevChainHash: event.prevChainHash }),
+        ...(event.sig === undefined ? {} : { sig: event.sig }),
+        ...(options.includeHostTime && event.hostTime !== undefined
+          ? { hostTime: event.hostTime }
+          : {}),
+      });
+    } else if (event.kind === 'interaction') {
+      records.push({
+        kind: 'interaction',
+        n: records.length,
+        levelIndex: 0,
+        tick: event.tick,
+        cursor: event.cursor,
+        participantId: event.participantId,
+        submissionId: event.submissionId,
+        command: structuredClone(event.command),
         canonicalCommand: event.canonicalCommand,
         ...(event.clientTime === undefined ? {} : { clientTime: event.clientTime }),
         ...(event.prevChainHash === undefined

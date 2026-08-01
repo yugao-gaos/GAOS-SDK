@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  enumerateGridActions,
-  recheckGridTranscript,
+  enumerateActions,
+  recheckTranscript,
   runLevelSeed,
-  solveGridLevel,
+  solveLevel,
   type ActionReducer,
   type TickView,
 } from '../src/engine/index.js';
@@ -33,9 +33,9 @@ const reducer: ActionReducer<Level, State> = {
   }),
 };
 
-describe('generic grid solver', () => {
+describe('generic solver', () => {
   it('finds a shortest reducer-valid action sequence', () => {
-    expect(solveGridLevel(reducer, { goal: 3 }, { maxActions: 4 })).toEqual({
+    expect(solveLevel(reducer, { goal: 3 }, { maxActions: 4 })).toEqual({
       min: 2,
       capped: false,
       explored: 3,
@@ -47,7 +47,7 @@ describe('generic grid solver', () => {
   });
 
   it('reports an exhausted search bound', () => {
-    const result = solveGridLevel(reducer, { goal: 3 }, { maxActions: 1 });
+    const result = solveLevel(reducer, { goal: 3 }, { maxActions: 1 });
     expect(result).toMatchObject({ min: null, capped: false });
   });
 
@@ -56,7 +56,7 @@ describe('generic grid solver', () => {
       ...reducer,
       init: () => ({ at: 3, actionsUsed: 0 }),
     };
-    expect(solveGridLevel(won, { goal: 3 }, { maxActions: 0 })).toEqual({
+    expect(solveLevel(won, { goal: 3 }, { maxActions: 0 })).toEqual({
       min: 0, capped: false, explored: 1, actions: [],
     });
   });
@@ -70,14 +70,14 @@ describe('generic grid solver', () => {
         status: 'ended',
       }),
     };
-    expect(solveGridLevel(ended, { goal: 3 }, { maxActions: 4 })).toEqual({
+    expect(solveLevel(ended, { goal: 3 }, { maxActions: 4 })).toEqual({
       min: null, capped: false, explored: 1, actions: null,
     });
   });
 
   it('rejects invalid search bounds', () => {
-    expect(() => solveGridLevel(reducer, { goal: 3 }, { maxActions: -1 })).toThrow(RangeError);
-    expect(() => solveGridLevel(reducer, { goal: 3 }, { maxActions: 1, maxNodes: 0 }))
+    expect(() => solveLevel(reducer, { goal: 3 }, { maxActions: -1 })).toThrow(RangeError);
+    expect(() => solveLevel(reducer, { goal: 3 }, { maxActions: 1, maxNodes: 0 }))
       .toThrow(RangeError);
   });
 
@@ -92,9 +92,9 @@ describe('generic grid solver', () => {
         ],
       }),
     };
-    expect(enumerateGridActions(withRestart.view({ at: 0, actionsUsed: 0 })))
+    expect(enumerateActions(withRestart.view({ at: 0, actionsUsed: 0 })))
       .toContainEqual({ id: 'Action 9' });
-    expect(solveGridLevel(withRestart, { goal: 3 }, {
+    expect(solveLevel(withRestart, { goal: 3 }, {
       maxActions: 4,
       includeAction: (action) => action.id !== 'Action 9',
     }).min).toBe(2);
@@ -113,21 +113,21 @@ describe('generic transcript rechecking', () => {
   };
 
   it('replays canonical actions and verifies the result', () => {
-    expect(recheckGridTranscript(reducer, header, [
+    expect(recheckTranscript(reducer, header, [
       { n: 1, wireId: 'Action 1', canonicalId: 'Action 1' },
       { n: 2, wireId: 'Action 2', canonicalId: 'Action 2', index: 2 },
     ])).toMatchObject({ ok: true, problems: [] });
   });
 
   it('accepts contiguous zero-based production numbering', () => {
-    expect(recheckGridTranscript(reducer, header, [
+    expect(recheckTranscript(reducer, header, [
       { n: 0, wireId: 'Action 1', canonicalId: 'Action 1' },
       { n: 1, wireId: 'Action 2', canonicalId: 'Action 2', index: 2 },
     ])).toMatchObject({ ok: true, problems: [] });
   });
 
   it('rejects malformed replay metadata without throwing', () => {
-    const result = recheckGridTranscript(reducer, { ...header, perm: [0, 0] }, [
+    const result = recheckTranscript(reducer, { ...header, perm: [0, 0] }, [
       { n: 99, wireId: 'Action 0', canonicalId: 'Action 1', x: Number.NaN },
       { n: 3, wireId: 'Action 2', canonicalId: 'Action 3', index: 2 },
     ]);
@@ -143,18 +143,18 @@ describe('generic transcript rechecking', () => {
       ...header,
       perm: null,
     } as unknown as typeof header;
-    expect(() => recheckGridTranscript(reducer, malformed, [
+    expect(() => recheckTranscript(reducer, malformed, [
       { n: 0, wireId: 'Action 1', canonicalId: 'Action 1' },
     ])).not.toThrow();
-    expect(recheckGridTranscript(reducer, malformed, [
+    expect(recheckTranscript(reducer, malformed, [
       { n: 0, wireId: 'Action 1', canonicalId: 'Action 1' },
     ])).toMatchObject({ ok: false });
-    expect(recheckGridTranscript(reducer, malformed, []).problems.join('\n')).toMatch(/bijection/);
+    expect(recheckTranscript(reducer, malformed, []).problems.join('\n')).toMatch(/bijection/);
   });
 
   it('reports non-array actions and malformed entries instead of throwing', () => {
     for (const malformed of [null, {}, 'actions']) {
-      const result = recheckGridTranscript(
+      const result = recheckTranscript(
         reducer,
         header,
         malformed as unknown as [],
@@ -165,7 +165,7 @@ describe('generic transcript rechecking', () => {
     const malformedEntries = [
       null, [], 7, {}, { n: 0, wireId: null, canonicalId: 'Action 1' },
     ] as unknown as [];
-    const result = recheckGridTranscript(
+    const result = recheckTranscript(
       reducer,
       header,
       malformedEntries,
@@ -175,7 +175,7 @@ describe('generic transcript rechecking', () => {
   });
 
   it('rejects gaps and actions after terminal state', () => {
-    const gap = recheckGridTranscript(reducer, { ...header, actionsUsed: 3 }, [
+    const gap = recheckTranscript(reducer, { ...header, actionsUsed: 3 }, [
       { n: 0, wireId: 'Action 1', canonicalId: 'Action 1' },
       { n: 2, wireId: 'Action 1', canonicalId: 'Action 1' },
       { n: 3, wireId: 'Action 1', canonicalId: 'Action 1' },
@@ -187,7 +187,7 @@ describe('generic transcript rechecking', () => {
   });
 
   it('detects permutation and outcome discrepancies', () => {
-    const result = recheckGridTranscript(reducer, { ...header, actionsUsed: 9 }, [
+    const result = recheckTranscript(reducer, { ...header, actionsUsed: 9 }, [
       { n: 1, wireId: 'Action 2', canonicalId: 'Action 1' },
       { n: 2, wireId: 'Action 2', canonicalId: 'Action 2', index: 2 },
     ]);

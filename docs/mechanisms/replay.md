@@ -15,6 +15,8 @@ It also records signed tier-2 `interest` declarations. Product actions may
 carry an opaque JSON `payload`, which survives projection and recheck.
 A v1.3 stream retains those semantics and adds the terminal level result
 `ended` for sessions that complete without claiming a win or loss.
+A v1.4 stream additionally records reducer-backed `interaction` commands in
+their original order relative to resolutions and audit records.
 
 ```jsonl
 {"format":"gaos.replay","formatVersion":"1.0","game":{"adapter":{"id":"creator/demo/reducer","version":"commit:abc123"},"id":"creator/demo","version":"1.0.0"},"kind":"header","levels":[{"id":"intro","index":0,"level":{"goal":3},"result":{"actionsUsed":2,"stars":3,"status":"won"},"seed":2654435731}],"perm":[0,1],"seed":42,"seedPolicy":"gaos.run-level-seed.v1","sessionId":"run-42","totals":{"totalActionsUsed":2,"totalStars":3}}
@@ -33,9 +35,9 @@ artifact is suitable for hashing, signing, and object storage.
 
 The header pins everything shared tooling needs before reducer execution:
 
-- `format` and `formatVersion`: current producers emit `gaos.replay` / `1.3`
-  whether signed or unsigned; validators continue to accept v1.0, v1.1, and
-  v1.2 under their original rules;
+- `format` and `formatVersion`: producers emit `1.3` for action/intent-only
+  sessions and `1.4` when ordered interactions are present; validators
+  continue to accept v1.0–v1.3 under their original rules;
 - a stable game id/version and historical adapter id/version;
 - the run seed and either explicit seeds or
   `gaos.run-level-seed.v1` derivation;
@@ -62,7 +64,7 @@ Every level stores its seed even when the run uses
 `gaos.run-level-seed.v1`. This makes a segment independently inspectable while
 letting validation detect a seed that disagrees with the declared derivation.
 
-Level results use `playing`, `won`, `lost`, or, in v1.3 only, `ended`.
+Level results use `playing`, `won`, `lost`, or, in v1.3 and later, `ended`.
 `ended` means the deterministic session lifecycle finished without a
 win/loss classification and requires `stars: null`. `totalStars` remains
 defined only for a won run. Older format versions reject `ended`; no existing

@@ -76,9 +76,10 @@ print(created["tick"])
 `parse_tick_result()` and `get_tick_envelope()` deliberately preserve the
 unchanged v1 `tickId`/`tick` JSON fields without interpreting product payloads.
 Each command carries the session cursor, participant, and a deterministic
-`submissionId`: stable for an exact retry, new for each logical control
-step. Use `submit_intent()` and `get_tick_envelope()` with opaque command and
+`submissionId`: stable for an exact retry, new for each logical command
+step. Use `submit_command()` and `get_tick_envelope()` with opaque command and
 observation shapes.
+`submit_intent()` remains as a compatibility wrapper for intent-only clients.
 
 Attachable sessions resume at their current durable head:
 
@@ -102,7 +103,7 @@ authoritative.
 For an exact retry after a restart, persist
 `client.get_session_binding(session_id)`, restore it with
 `restore_session_binding(binding)`, and reuse the original `submission_id`.
-`submit_intent(..., cursor=original_cursor)` also accepts an explicit original
+`submit_command(..., cursor=original_cursor)` also accepts an explicit original
 cursor. A fresh client rejects an explicit retry key if it would otherwise
 have to fetch and silently pair it with a newer cursor.
 
@@ -112,6 +113,26 @@ methods. It delegates blocking standard-library HTTP work through
 Calls on one async client are serialized because the underlying cursor bindings
 are mutable. Cancelling an awaiting task cannot stop an already-running
 standard-library HTTP thread; configure `timeout` to bound that work.
+
+Product adapters can reuse the same transport for small host-specific JSON
+routes without reaching into private client methods:
+
+```python
+room = client.request_json("GET", f"/v1/arena/rooms/{room_id}")
+await async_client.request_json(
+    "POST",
+    f"/v1/arena/rooms/{room_id}/presence",
+    {"connected": True},
+)
+```
+
+`request_json()` accepts only uppercase `GET`, `POST`, and `DELETE`, requires a
+same-origin `/...` path without traversal or fragments, and permits request
+bodies only for `POST`. Responses remain product-owned JSON, while bearer
+authentication, timeout, response-size limits, JSON safety checks,
+`GaosAPIError`, and `IllegalActionRejected` are identical to the standard
+session methods. Build path segments with `urllib.parse.quote(value, safe="")`;
+do not pass absolute URLs.
 
 Product repositories own typed observations, matchmaking, convenience
 methods, rewards, and Gymnasium-style environments. Run the product-neutral

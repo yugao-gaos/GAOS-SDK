@@ -4,28 +4,18 @@ import {
   createHexAxialLayout,
   createSquareLayout,
   enumerateActions,
-  enumerateGridActions,
   fieldCells,
   lineOfSight,
   locationKey,
   nearestReachablePath,
-  recheckGridTranscript,
   recheckTranscript,
   rectFootprint,
   resolveKeyedMoves,
   resolveMoves,
   shortestPath,
-  solveGridLevel,
   solveLevel,
   type Cell,
   type ActionDefinition,
-  type GridActionDefinition,
-  type GridRecheckResult,
-  type GridSolveResult,
-  type GridSolverOptions,
-  type GridSubmittedAction,
-  type GridTranscriptAction,
-  type GridTranscriptHeader,
   type KeyedMover,
   type Mover,
   type RecheckResult,
@@ -38,19 +28,7 @@ import {
   type TickView,
 } from '../src/engine/index.js';
 
-type Equal<Left, Right> =
-  (<T>() => T extends Left ? 1 : 2) extends
-  (<T>() => T extends Right ? 1 : 2) ? true : false;
-type Assert<T extends true> = T;
-type _ActionAlias = Assert<Equal<GridActionDefinition, ActionDefinition>>;
-type _SubmittedAlias = Assert<Equal<GridSubmittedAction, SubmittedAction>>;
-type _SolveResultAlias = Assert<Equal<GridSolveResult, SolveResult>>;
-type _SolverOptionsAlias = Assert<Equal<GridSolverOptions<{ at: number }>, SolverOptions<{ at: number }>>>;
-type _RecheckAlias = Assert<Equal<GridRecheckResult, RecheckResult>>;
-type _TranscriptActionAlias = Assert<Equal<GridTranscriptAction, TranscriptAction>>;
-type _TranscriptHeaderAlias = Assert<Equal<GridTranscriptHeader<null>, TranscriptHeader<null>>>;
-
-describe('v0.13 neutral core', () => {
+describe('v1 neutral core', () => {
   interface State {
     at: number;
     actionsUsed: number;
@@ -76,23 +54,6 @@ describe('v0.13 neutral core', () => {
       explored: 2,
       actions: [{ id: 'advance' }, { id: 'advance' }],
     });
-  });
-
-  it('keeps legacy solver names behaviorally and structurally compatible', () => {
-    interface LegacyProductView extends TickView<{ tiles: string[] }> {}
-    const legacy: ActionReducer<{ goal: number }, State, LegacyProductView> = {
-      init: reducer.init,
-      apply: reducer.apply,
-      view: (state): LegacyProductView => ({
-        ...reducer.view(state),
-        hud: { actionsUsed: state.actionsUsed },
-        grid: { tiles: ['floor'] },
-      }),
-    };
-    expect(solveGridLevel(legacy, { goal: 2 }, { maxActions: 3 }))
-      .toEqual(solveLevel(legacy, { goal: 2 }, { maxActions: 3 }));
-    expect(enumerateGridActions(legacy.view({ at: 0, actionsUsed: 0 })))
-      .toEqual(enumerateActions(legacy.view({ at: 0, actionsUsed: 0 })));
   });
 
   it('enumerates neutral and per-board action targets', () => {
@@ -125,7 +86,7 @@ describe('v0.13 neutral core', () => {
     ]);
   });
 
-  it('replays board-addressed transcripts through old and new names', () => {
+  it('replays board-addressed transcripts through the neutral API', () => {
     const boardReducer: ActionReducer<null, State> = {
       init: () => ({ at: 0, actionsUsed: 0 }),
       apply: (state, action) => {
@@ -159,8 +120,6 @@ describe('v0.13 neutral core', () => {
       diagnostics: [],
       replayed: { status: 'won', stars: null, actionsUsed: 1 },
     });
-    expect(recheckGridTranscript(boardReducer as ActionReducer<null, State>, header, actions))
-      .toEqual(recheckTranscript(boardReducer, header, actions));
   });
 });
 

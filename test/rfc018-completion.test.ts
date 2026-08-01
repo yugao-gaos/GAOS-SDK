@@ -258,6 +258,187 @@ describe('RFC-018 unified session lifecycle', () => {
     });
   });
 
+  it('adopts an existing durable head and consumes its initial tick without a request', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(
+      tick('existing', 5, {
+        legalActions: [],
+        status: 'won',
+        value: 5,
+      }),
+    )));
+    const client = new SessionClient('https://host.test', undefined, { fetch: request });
+    const initialTick = tick('existing', 4, {
+      legalActions: [{ id: 'move' }],
+      status: 'playing',
+      value: 4,
+    });
+    const attachReceipt = createSessionAttachReceipt({
+      sessionId: 'existing',
+      requestId: 'custom-attach',
+      sequence: 0,
+      revision: 4,
+      transcriptDigest: 'transcript-4',
+      stateDigest: 'state-4',
+    });
+    const handle = client.createSessionHandleFromExisting<
+      { id: string },
+      Observation
+    >({
+      sessionId: 'existing',
+      binding: {
+        protocol: 'gaos.ticks',
+        protocolVersion: '1.0',
+        sessionId: 'existing',
+        tickId: 'existing:4',
+        revision: 4,
+        participantId: 'north',
+      },
+      initialTick,
+      attachReceipt,
+    }, policy);
+    initialTick.tick.value = 99;
+
+    expect(request).not.toHaveBeenCalled();
+    expect(handle.participantId).toBe('north');
+    expect(handle.attachReceipt).toEqual(attachReceipt);
+    await expect(handle.observe()).resolves.toMatchObject({
+      revision: 4,
+      tick: { value: 4 },
+    });
+    expect(request).not.toHaveBeenCalled();
+
+    await expect(handle.act({ id: 'move' })).resolves.toMatchObject({
+      revision: 5,
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(request.mock.calls[0]![1]?.body))).toMatchObject({
+      revision: 4,
+      participantId: 'north',
+      command: { id: 'move' },
+    });
+  });
+
+  it('validates adopted identity and initializes terminal status from the tick', async () => {
+    const client = new SessionClient('https://host.test', undefined, {
+      fetch: vi.fn<typeof fetch>(),
+    });
+    const binding = {
+      protocol: 'gaos.ticks' as const,
+      protocolVersion: '1.0' as const,
+      sessionId: 'terminal',
+      tickId: 'terminal:2',
+      revision: 2,
+      participantId: 'player',
+    };
+    expect(() => client.createSessionHandleFromExisting({
+      sessionId: 'other',
+      binding,
+      initialTick: tick('terminal', 2, {
+        legalActions: [],
+        status: 'won',
+        value: 2,
+      }),
+    }, policy)).toThrow(/identities do not match/);
+    expect(client.getSessionBinding('terminal')).toBeUndefined();
+
+    const terminalTick = tick('terminal', 2, {
+      legalActions: [],
+      status: 'won',
+      value: 2,
+    });
+    terminalTick.extensions = {
+      ...terminalTick.extensions,
+      'gaos.session.finalization': { status: 'terminal' },
+    };
+    const terminal = client.createSessionHandleFromExisting({
+      sessionId: 'terminal',
+      binding,
+      initialTick: terminalTick,
+    }, policy);
+    expect(terminal.status).toBe('terminal');
+    await expect(terminal.observe()).resolves.toEqual(terminalTick);
+    await expect(terminal.act({ id: 'late' })).rejects.toThrow(
+      'cannot act while session handle is terminal',
+    );
+  });
+
+  it('adopts create and attach projections as resolved durable heads', async () => {
+    const request = vi.fn<typeof fetch>();
+    const client = new SessionClient('https://host.test', undefined, { fetch: request });
+    const start = client.createSessionHandleFromExisting({
+      sessionId: 'projected-start',
+      binding: {
+        protocol: 'gaos.ticks',
+        protocolVersion: '1.0',
+        sessionId: 'projected-start',
+        tickId: 'projected-start:0',
+        revision: 0,
+        participantId: 'starter',
+      },
+      tick: {
+        legalActions: [{ id: 'move' }],
+        status: 'playing' as const,
+        value: 0,
+      },
+    }, policy);
+
+    await expect(start.observe()).resolves.toEqual({
+      kind: 'tick',
+      protocol: 'gaos.ticks',
+      protocolVersion: '1.0',
+      sessionId: 'projected-start',
+      tickId: 'projected-start:0',
+      revision: 0,
+      tick: {
+        legalActions: [{ id: 'move' }],
+        status: 'playing',
+        value: 0,
+      },
+    });
+
+    const receipt = createSessionAttachReceipt({
+      sessionId: 'projected-attach',
+      requestId: 'attach-projection',
+      sequence: 0,
+      revision: 3,
+      transcriptDigest: 'transcript-3',
+      stateDigest: 'state-3',
+    });
+    const attachment = client.createSessionHandleFromExisting({
+      sessionId: 'projected-attach',
+      binding: {
+        protocol: 'gaos.ticks',
+        protocolVersion: '1.0',
+        sessionId: 'projected-attach',
+        tickId: 'projected-attach:3',
+        revision: 3,
+        participantId: 'attached',
+      },
+      tick: {
+        legalActions: [],
+        status: 'won' as const,
+        value: 3,
+      },
+      receipt,
+      extensions: {
+        'gaos.session.finalization': { status: 'terminal' },
+      },
+    }, policy);
+
+    expect(attachment.attachReceipt).toEqual(receipt);
+    expect(attachment.status).toBe('terminal');
+    await expect(attachment.observe()).resolves.toMatchObject({
+      kind: 'tick',
+      sessionId: 'projected-attach',
+      tickId: 'projected-attach:3',
+      revision: 3,
+      extensions: {
+        'gaos.session.finalization': { status: 'terminal' },
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it('keeps pacing presentation-only and resets context at episode transitions', async () => {
     const paced = new MemoryHandle('paced', true);
     const unpaced = new MemoryHandle('unpaced', true);

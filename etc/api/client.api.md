@@ -23,6 +23,17 @@ interface EnvelopeBase extends TickCursor {
 }
 
 // @public (undocumented)
+export interface ExistingSessionHandle<TObservation = unknown> {
+    // (undocumented)
+    attachReceipt?: SessionAttachReceipt;
+    // (undocumented)
+    binding: SessionBinding;
+    initialTick: TickResult<TObservation>;
+    // (undocumented)
+    sessionId: string;
+}
+
+// @public (undocumented)
 export class GaosApiError extends Error {
     constructor(status: number, error: string, code?: string | undefined, details?: Readonly<Record<string, unknown>> | undefined, responseBody?: string | undefined);
     // (undocumented)
@@ -195,6 +206,9 @@ export class SessionClient {
     createSession<TRequest = unknown, TObservation = unknown>(request: TRequest, participantId?: string, callOptions?: SessionCallOptions): Promise<SessionStart<TObservation>>;
     // (undocumented)
     createSessionHandle<TRequest = unknown, TCommand = unknown, TObservation = unknown, TOutcome = JsonValue>(request: TRequest, policy: SessionPolicy, participantId?: string, callOptions?: SessionCallOptions): Promise<SessionHandle<TCommand, TObservation, TOutcome>>;
+    createSessionHandleFromExisting<TCommand = unknown, TObservation = unknown, TOutcome = JsonValue>(existing: ExistingSessionHandle<TObservation>, policy: SessionPolicy): SessionHandle<TCommand, TObservation, TOutcome>;
+    // (undocumented)
+    createSessionHandleFromExisting<TCommand = unknown, TObservation = unknown, TOutcome = JsonValue>(existing: SessionStart<TObservation> | SessionAttach<TObservation>, policy: SessionPolicy): SessionHandle<TCommand, TObservation, TOutcome>;
     // (undocumented)
     finalizeSession<TOutcome = JsonValue>(sessionId: string, request: SessionFinalizeRequest, callOptions?: SessionCallOptions): Promise<SessionResult<TOutcome>>;
     // (undocumented)
@@ -204,6 +218,8 @@ export class SessionClient {
     // (undocumented)
     restoreSessionBinding(value: unknown): SessionBinding;
     // (undocumented)
+    submitCommand<TCommand = unknown, TObservation = unknown>(sessionId: string, command: TCommand, options?: SubmitCommandOptions): Promise<TickResult<TObservation>>;
+    // @deprecated (undocumented)
     submitIntent<TCommand = unknown, TObservation = unknown>(sessionId: string, command: TCommand, options?: SubmitIntentOptions): Promise<TickResult<TObservation>>;
 }
 
@@ -340,7 +356,7 @@ export interface SessionStart<TObservation = unknown> {
 }
 
 // @public (undocumented)
-export interface SubmitIntentOptions {
+export interface SubmitCommandOptions {
     // (undocumented)
     cursor?: TickCursor;
     // (undocumented)
@@ -350,6 +366,9 @@ export interface SubmitIntentOptions {
     // (undocumented)
     submissionId?: string;
 }
+
+// @public @deprecated (undocumented)
+export type SubmitIntentOptions = SubmitCommandOptions;
 
 // @public (undocumented)
 interface TickCursor {

@@ -1,32 +1,37 @@
 # Version history
 
-GAOS uses the v0.x line to refine its contracts before v1.0. Products should
-review the migration notes when updating across minor versions.
+GAOS used the v0.x line to refine its contracts before v1.0. Products should
+review the migration notes before adopting the stable surface.
 
-::: tip Next release: v0.27.0
-RFC-017 portal-aware paths and RFC-018's unified live-session lifecycle are
-implemented. RFC-019 unified actor control sources are also implemented on
-`main` for the planned v0.29 target; they are not part of v0.27. Replay
-v1.0–v1.3 compatibility is unchanged.
+::: tip Next release: v1.0.0
+The complete implemented SDK—including RFC-017 through RFC-020—is prepared as
+one stable release. Replay v1.0–v1.3 compatibility is unchanged; unified
+command sessions emit replay v1.4.
 :::
 
-## Planned v0.29: unified actor control sources
+## v1.0.0: stable complete SDK
 
-RFC-019 is implemented on `main` for its planned v0.29 release. Behavior-tree,
-human-input, and agent-input decisions share one validated submitted-action
-path without conflating product actors with logical seats or controller
-authority.
+Prepared August 1, 2026. v1.0 includes the previously planned v0.27 and v0.29
+scope without publishing intermediate packages. It freezes the neutral API,
+removes the scheduled `Grid*`/grid-named aliases, and ships unified sessions,
+portal-aware paths, unified actor control sources, self-reported benchmark
+resource observations, unified command effects, historical verifier kits, and
+the full quality gate. Historical replay, signature, schema, and verifier
+semantics remain compatible.
 
-[Unified actor control sources →](/rfcs/rfc-019-unified-actor-control-sources)
+[Migration and release notes →](/releases#v100)
 
-## v0.27.0: portal-aware paths and unified sessions
+## Unpublished v0.27 scope: portal-aware paths and unified sessions
 
-Prepared July 31, 2026 as an additive release.
+Prepared July 31, 2026 as an additive scope and incorporated into v1.0.0.
 
 - Portal-aware layout neighbors reuse ordinary breadth-first pathfinding while
   preserving the separate authoritative transit plan/commit boundary.
 - Create and attach produce the same live-session handle at the durable head;
   close remains local-only.
+- Product-owned create and attach routes can synchronously adopt an existing
+  binding with either a full initial tick or the standard resolved-head
+  projection into that same handle without another request.
 - Generic attachment receipts are canonically digested and independently
   chain-verifiable.
 - Normal and evaluated play share one immutable finalization operation.

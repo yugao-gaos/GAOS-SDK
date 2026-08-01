@@ -6,7 +6,7 @@ import {
   type JsonValue,
 } from '../src/protocol.js';
 import type { SessionView, TickReducer } from '../src/engine/index.js';
-import { createSessionKernel } from '../src/session.js';
+import { createSessionKernel, rehydrateKernel } from '../src/session.js';
 import {
   InMemorySessionEventStore,
   SessionKernelHost,
@@ -16,6 +16,7 @@ import {
 
 interface State {
   actionsUsed: number;
+  modal: number;
 }
 
 interface Command {
@@ -24,15 +25,16 @@ interface Command {
 }
 
 const reducer: TickReducer<null, State, SessionView> = {
-  init: () => ({ actionsUsed: 0 }),
-  advance: (state) => ({ actionsUsed: state.actionsUsed + 1 }),
+  init: () => ({ actionsUsed: 0, modal: 0 }),
+  advance: (state) => ({ ...state, actionsUsed: state.actionsUsed + 1 }),
   view: (state) => ({
     status: state.actionsUsed > 0 ? 'ended' : 'playing',
+    hud: { modal: state.modal },
   }),
   replayMetrics: (state) => ({ actionsUsed: state.actionsUsed }),
 };
 
-function kernel() {
+function kernel(seats: readonly string[] = ['solo']) {
   return createSessionKernel({
     sessionId: 'host-test',
     game: {
@@ -45,12 +47,16 @@ function kernel() {
     level: null,
     seed: 1,
     seedPolicy: 'explicit',
-    seats: ['solo'],
+    seats,
     cadence: { mode: 'turns' },
     hostTime: 'none',
     commandToAction: (_command, context) => ({
       id: 'Action 1',
       seat: context.participantId,
+    }),
+    applyControlTransition: (state, control) => ({
+      ...state,
+      modal: (control as { modal: number }).modal,
     }),
   });
 }
@@ -167,5 +173,87 @@ describe('reference session host and conformance kit', () => {
     expect(receipt.status).toBe('accepted');
     expect(advance.resolutions).toBe(1);
     expect(live.cursor()).toBe(1);
+  });
+
+  it('durably applies idempotent controls without disturbing a partial intent window', async () => {
+    const store = new InMemorySessionEventStore();
+    const live = kernel(['alpha', 'beta']);
+    const host = new SessionKernelHost(live, store, async () => undefined);
+    const alpha = {
+      ...submission,
+      participantId: 'alpha',
+      submissionId: 'alpha-1',
+    };
+
+    await host.ingest(alpha);
+    expect(live.awaitingSeats()).toEqual(['beta']);
+    await expect(host.control({
+      participantId: 'beta',
+      controlId: 'modal-1',
+      control: { modal: 2 },
+    })).resolves.toMatchObject({
+      status: 'accepted',
+      transitionRevision: 2,
+      cursor: 0,
+      tick: 0,
+    });
+    expect(live.awaitingSeats()).toEqual(['beta']);
+    expect(live.cursor()).toBe(0);
+    expect(live.tick()).toBe(0);
+    expect(live.observe('alpha')).toMatchObject({ hud: { modal: 2 } });
+
+    const durableCount = (await store.load()).length;
+    await expect(host.control({
+      participantId: 'beta',
+      controlId: 'modal-1',
+      control: { modal: 2 },
+    })).resolves.toMatchObject({ status: 'duplicate' });
+    expect(await store.load()).toHaveLength(durableCount);
+    await expect(host.control({
+      participantId: 'beta',
+      controlId: 'modal-1',
+      control: { modal: 3 },
+    })).rejects.toThrow(/different canonical content/);
+
+    const recovered = rehydrateKernel({
+      sessionId: 'host-test',
+      game: {
+        id: 'tests/session-host',
+        version: '1',
+        adapter: { id: 'tests/session-host/reducer', version: '1' },
+      },
+      levelId: 'room',
+      reducer,
+      level: null,
+      seed: 1,
+      seedPolicy: 'explicit',
+      seats: ['alpha', 'beta'],
+      cadence: { mode: 'turns' },
+      hostTime: 'none',
+      commandToAction: (_command, context) => ({
+        id: 'Action 1',
+        seat: context.participantId,
+      }),
+      applyControlTransition: (state, control) => ({
+        ...state,
+        modal: (control as { modal: number }).modal,
+      }),
+    }, await store.load());
+    expect(recovered.awaitingSeats()).toEqual(['beta']);
+    expect(recovered.cursor()).toBe(0);
+    expect(recovered.tick()).toBe(0);
+    expect(recovered.observe('beta')).toMatchObject({ hud: { modal: 2 } });
+    recovered.commit(recovered.prepareIngest({
+      ...submission,
+      participantId: 'beta',
+      submissionId: 'beta-1',
+    }));
+    expect(recovered.awaitingSeats()).toEqual([]);
+    recovered.commit(recovered.prepareAdvance());
+    expect(recovered.cursor()).toBe(1);
+    expect(recovered.observe('alpha')).toMatchObject({
+      status: 'ended',
+      hud: { modal: 2 },
+    });
   });
 });

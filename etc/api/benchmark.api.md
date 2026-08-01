@@ -175,6 +175,7 @@ export interface BenchmarkBundleEpisode {
     replayDigest: string;
     // (undocumented)
     score: number;
+    selfReportedObservations?: BenchmarkResourceObservations;
     // (undocumented)
     terminalOutcome: JsonValue;
 }
@@ -312,7 +313,6 @@ export interface BenchmarkResourceObservations {
     cost?: number;
     // (undocumented)
     provider?: string;
-    // (undocumented)
     steps: number;
     // (undocumented)
     tokens?: number;
@@ -901,7 +901,7 @@ export interface SubmissionVerificationFacts {
 }
 
 // @public (undocumented)
-interface SubmitIntentOptions {
+interface SubmitCommandOptions {
     // (undocumented)
     cursor?: TickCursor;
     // (undocumented)
@@ -911,6 +911,9 @@ interface SubmitIntentOptions {
     // (undocumented)
     submissionId?: string;
 }
+
+// @public @deprecated (undocumented)
+type SubmitIntentOptions = SubmitCommandOptions;
 
 // @public (undocumented)
 interface SubmittedAction {

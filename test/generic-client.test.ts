@@ -60,4 +60,32 @@ describe('product-neutral SessionClient', () => {
       command: { traverse: 'b' },
     });
   });
+
+  it('assigns distinct command ids to repeated same-cursor interactions', async () => {
+    const pending = {
+      ...tickEnvelope('graph-2', 0, { modal: 'open' }),
+      kind: 'pending',
+      submittedParticipants: [],
+      awaitingParticipants: ['player'],
+    };
+    const request = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify(
+        tickEnvelope('graph-2', 0, { modal: 'closed' }),
+      ), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(pending), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(pending), { status: 200 }));
+    const client = new SessionClient('https://host.example', undefined, { fetch: request });
+    await client.createSession({ game: 'graph' });
+
+    await client.submitCommand('graph-2', { kind: 'open' });
+    await client.submitCommand('graph-2', { kind: 'select', value: 2 });
+
+    const ids = request.mock.calls.slice(1).map((call) => JSON.parse(
+      (call[1] as RequestInit).body as string,
+    ) as { submissionId: string });
+    expect(ids.map(({ submissionId }) => submissionId)).toEqual([
+      'player:graph-2:0:0',
+      'player:graph-2:0:1',
+    ]);
+  });
 });

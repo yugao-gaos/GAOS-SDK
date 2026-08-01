@@ -60,6 +60,16 @@ interface CollectedIntent<TCommand = unknown> extends SubmissionIntegrityReserva
     submissionId: string;
 }
 
+// @public (undocumented)
+type CommandReceipt = ({
+    effect: 'interaction';
+    transitionRevision: number;
+} & Pick<ControlTransitionReceipt, 'status' | 'participantId' | 'cursor' | 'tick'> & {
+    submissionId: string;
+}) | ({
+    effect: 'intent';
+} & IngestReceipt);
+
 // @public
 interface CommandSubmission<TCommand = unknown> extends TickCursor, SubmissionIntegrityReservation {
     // (undocumented)
@@ -98,6 +108,31 @@ interface CompactionConfirmation {
     checkpointDurablyCommitted: true;
     // (undocumented)
     historyDurablyCommitted: true;
+}
+
+// @public (undocumented)
+interface ControlTransitionInput {
+    // (undocumented)
+    control: JsonValue;
+    controlId: string;
+    // (undocumented)
+    participantId: string;
+}
+
+// @public (undocumented)
+interface ControlTransitionReceipt {
+    // (undocumented)
+    controlId: string;
+    // (undocumented)
+    cursor: number;
+    // (undocumented)
+    participantId: string;
+    // (undocumented)
+    status: 'accepted' | 'duplicate';
+    // (undocumented)
+    tick: number;
+    // (undocumented)
+    transitionRevision: number;
 }
 
 // @public
@@ -252,6 +287,8 @@ interface KernelCheckpoint<TLevel = unknown, TCommand extends JsonValue = JsonVa
         nextCommitmentIds: Array<[string, number]>;
         seenSalts: Array<[string, string]>;
         interests: KernelCheckpointInterest[];
+        controls?: KernelCheckpointControl[];
+        intentActions?: Array<[string, SubmittedAction]>;
         rejections: RetainedRejection[];
         historicalSubmissionKeys: string[];
         historicalInterestCommands: Array<[string, string]>;
@@ -271,6 +308,16 @@ interface KernelCheckpoint<TLevel = unknown, TCommand extends JsonValue = JsonVa
     };
     // (undocumented)
     window: IntentWindow<TCommand>;
+}
+
+// @public (undocumented)
+interface KernelCheckpointControl {
+    // (undocumented)
+    canonicalControl: string;
+    // (undocumented)
+    key: string;
+    // (undocumented)
+    receipt: ControlTransitionReceipt;
 }
 
 // @public (undocumented)
@@ -304,7 +351,7 @@ interface KernelCheckpointReceipt {
     // (undocumented)
     key: string;
     // (undocumented)
-    receipt: IngestReceipt;
+    receipt: CommandReceipt;
     // (undocumented)
     tickId: string;
 }
@@ -358,7 +405,7 @@ interface ObservationDelta<TView = TickView<unknown, unknown>> {
     interest?: {
         declaration: JsonValue;
     };
-    origin?: 'resolution' | 'snapshot' | 'interest';
+    origin?: 'resolution' | 'snapshot' | 'interest' | 'control' | 'interaction';
     rejections: readonly ObservationRejectionNotice[];
     scopeId?: string;
     // (undocumented)
@@ -503,6 +550,17 @@ interface SeatSignatureInput {
 
 // @public (undocumented)
 type SessionEvent = (SessionEventBase & {
+    kind: 'interaction';
+    tick: number;
+    cursor: number;
+    participantId: string;
+    submissionId: string;
+    command: JsonValue;
+    canonicalCommand: string;
+    clientTime?: number;
+    prevChainHash?: string;
+    sig?: string;
+}) | (SessionEventBase & {
     kind: 'intent-accepted';
     tick: number;
     revision: number;
@@ -510,6 +568,7 @@ type SessionEvent = (SessionEventBase & {
     submissionId: string;
     command: JsonValue;
     canonicalCommand: string;
+    action?: SubmittedAction;
     clientTime?: number;
     prevChainHash?: string;
     sig?: string;
@@ -542,6 +601,14 @@ type SessionEvent = (SessionEventBase & {
     tick: number;
     lane: string;
     record: JsonObject;
+}) | (SessionEventBase & {
+    kind: 'control-transition';
+    tick: number;
+    cursor: number;
+    participantId: string;
+    controlId: string;
+    control: JsonValue;
+    canonicalControl: string;
 }) | (SessionEventBase & {
     kind: 'interest';
     tick: number;
@@ -665,6 +732,10 @@ interface SessionKernel<TCommand extends JsonValue, TView, TLevel = unknown> {
     // (undocumented)
     prepareAdvance(target?: number): Prepared<AdvanceSummary<TView>, TView>;
     // (undocumented)
+    prepareCommand(submission: CommandSubmission<TCommand>): Prepared<CommandReceipt, TView>;
+    // (undocumented)
+    prepareControlTransition(input: ControlTransitionInput): Prepared<ControlTransitionReceipt, TView>;
+    // (undocumented)
     prepareExtension(lane: string, record: JsonObject): Prepared<void, TView>;
     // (undocumented)
     prepareIngest(submission: CommandSubmission<TCommand>): Prepared<IngestReceipt, TView>;
@@ -695,6 +766,10 @@ export class SessionKernelHost<TCommand extends JsonValue, TView, TLevel = unkno
     constructor(kernel: SessionKernel<TCommand, TView, TLevel>, store: SessionEventStore, publish: SessionObservationPublisher<TView>);
     // (undocumented)
     advance(target?: number): Promise<AdvanceSummary<TView>>;
+    // (undocumented)
+    command(submission: Parameters<SessionKernel<TCommand, TView>['prepareCommand']>[0]): Promise<CommandReceipt>;
+    // (undocumented)
+    control(input: ControlTransitionInput): Promise<ControlTransitionReceipt>;
     // (undocumented)
     extension(lane: string, record: JsonObject): Promise<void>;
     // (undocumented)

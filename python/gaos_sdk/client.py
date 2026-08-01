@@ -20,10 +20,40 @@ PARTICIPANT_ID_PATTERN = r"^[A-Za-z0-9_.:@-]{1,128}$"
 _PARTICIPANT_ID_RE = re.compile(PARTICIPANT_ID_PATTERN)
 _MAX_SAFE_INTEGER = 9_007_199_254_740_991
 _MAX_FINITE_NUMBER = float.fromhex("0x1.fffffffffffffp+1023")
+_JSON_ROUTE_METHODS = frozenset(("GET", "POST", "DELETE"))
 
 
 def _quote(value: str) -> str:
     return urllib.parse.quote(value, safe="")
+
+
+def _validate_json_route(method: str, path: str, body: Any | None) -> None:
+    if method not in _JSON_ROUTE_METHODS:
+        raise ValueError("JSON route method must be GET, POST, or DELETE")
+    if (
+        not isinstance(path, str)
+        or not path.startswith("/")
+        or path.startswith("//")
+    ):
+        raise ValueError("JSON route path must be a same-origin absolute path")
+    if "\\" in path or any(ord(character) < 0x20 or ord(character) == 0x7F
+                           for character in path):
+        raise ValueError("JSON route path contains unsafe characters")
+    parsed = urllib.parse.urlsplit(path)
+    if parsed.scheme or parsed.netloc or parsed.fragment:
+        raise ValueError(
+            "JSON route path must not change origin or contain a fragment"
+        )
+    try:
+        decoded_path = urllib.parse.unquote(parsed.path, errors="strict")
+    except UnicodeDecodeError as error:
+        raise ValueError("JSON route path contains invalid UTF-8 escapes") from error
+    if "\\" in decoded_path or any(
+        segment in (".", "..") for segment in decoded_path.split("/")
+    ):
+        raise ValueError("JSON route path must not contain traversal segments")
+    if method != "POST" and body is not None:
+        raise ValueError("only POST JSON routes accept a request body")
 
 
 class GaosAPIError(Exception):
@@ -387,6 +417,7 @@ class SessionClient:
         self.timeout = timeout
         self.max_response_bytes = max_response_bytes
         self._bindings: dict[str, dict[str, Any]] = {}
+        self._command_sequences: dict[tuple[str, str, str], int] = {}
 
     def _remember(
         self,
@@ -425,11 +456,9 @@ class SessionClient:
         self,
         method: str,
         path: str,
-        body: dict[str, Any] | None = None,
+        body: Any | None = None,
     ) -> Any:
         headers = {"content-type": "application/json"}
-        if self.api_key:
-            headers["authorization"] = f"Bearer {self.api_key}"
         request = urllib.request.Request(
             self.base_url + path,
             method=method,
@@ -440,6 +469,13 @@ class SessionClient:
             ),
             headers=headers,
         )
+        if self.api_key:
+            # urllib copies ordinary headers to redirected requests, including
+            # across origins. Keep bearer credentials on the original request.
+            request.add_unredirected_header(
+                "authorization",
+                f"Bearer {self.api_key}",
+            )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 return _json_loads(
@@ -481,6 +517,22 @@ class SessionClient:
                 code,
                 raw_body,
             ) from None
+
+    def request_json(
+        self,
+        method: str,
+        path: str,
+        body: Any | None = None,
+    ) -> Any:
+        """
+        Call a product-owned same-origin JSON route.
+
+        This intentionally exposes only GET, POST, and DELETE relative routes.
+        It shares this client's bearer authentication, timeout, response-size
+        bound, JSON validation, and HTTP error mapping.
+        """
+        _validate_json_route(method, path, body)
+        return self._call(method, path, body)
 
     def create_session(
         self,
@@ -564,7 +616,7 @@ class SessionClient:
             session_id,
         )
 
-    def submit_intent(
+    def submit_command(
         self,
         session_id: str,
         command: Any,
@@ -600,6 +652,10 @@ class SessionClient:
             "player",
         )
         _validate_json(command, "command")
+        sequence_key = (session_id, participant, tick_id)
+        sequence = self._command_sequences.get(sequence_key, 0)
+        if submission_id is None:
+            self._command_sequences[sequence_key] = sequence + 1
         body = {
             "protocol": PROTOCOL_ID,
             "protocolVersion": PROTOCOL_VERSION,
@@ -607,7 +663,7 @@ class SessionClient:
             "tickId": tick_id,
             "revision": revision,
             "participantId": participant,
-            "submissionId": submission_id or f"{participant}:{tick_id}",
+            "submissionId": submission_id or f"{participant}:{tick_id}:{sequence}",
             "command": command,
         }
         result = parse_tick_result(
@@ -621,6 +677,37 @@ class SessionClient:
             raise ProtocolMismatchError("response session does not match request")
         self._remember(result, participant)
         return result
+
+    def submit_intent(
+        self,
+        session_id: str,
+        command: Any,
+        participant_id: str | None = None,
+        submission_id: str | None = None,
+        cursor: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Deprecated compatibility wrapper for one intent per tick."""
+        binding = self._bindings.get(session_id)
+        if binding is None and cursor is None and submission_id is None:
+            self.get_tick_envelope(session_id)
+            binding = self._bindings[session_id]
+        selected = cursor or binding
+        participant = participant_id or (binding or {}).get(
+            "participantId",
+            "player",
+        )
+        legacy_id = submission_id
+        if legacy_id is None and isinstance(selected, dict):
+            tick_id = selected.get("tickId")
+            if isinstance(tick_id, str) and tick_id:
+                legacy_id = f"{participant}:{tick_id}"
+        return self.submit_command(
+            session_id,
+            command,
+            participant,
+            legacy_id,
+            cursor,
+        )
 
 
 class AsyncSessionClient:
@@ -662,6 +749,9 @@ class AsyncSessionClient:
     async def create_session(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return await self._run("create_session", *args, **kwargs)
 
+    async def request_json(self, *args: Any, **kwargs: Any) -> Any:
+        return await self._run("request_json", *args, **kwargs)
+
     async def get_tick_envelope(
         self,
         *args: Any,
@@ -677,3 +767,6 @@ class AsyncSessionClient:
 
     async def submit_intent(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return await self._run("submit_intent", *args, **kwargs)
+
+    async def submit_command(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return await self._run("submit_command", *args, **kwargs)

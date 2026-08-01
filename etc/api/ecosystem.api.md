@@ -185,7 +185,7 @@ interface ObservationDelta<TView = TickView<unknown, unknown>> {
     interest?: {
         declaration: JsonValue;
     };
-    origin?: 'resolution' | 'snapshot' | 'interest';
+    origin?: 'resolution' | 'snapshot' | 'interest' | 'control' | 'interaction';
     rejections: readonly ObservationRejectionNotice[];
     scopeId?: string;
     // (undocumented)

@@ -262,15 +262,3 @@ export function solveLevel<TLevel, TState, TView extends TickView<unknown, unkno
   }
   return { min: null, capped: false, explored, actions: null };
 }
-
-/** @deprecated Renamed to `SolveResult`; this alias will be removed in v1.0. */
-export type GridSolveResult = SolveResult;
-
-/** @deprecated Renamed to `SolverOptions`; this alias will be removed in v1.0. */
-export type GridSolverOptions<TState> = SolverOptions<TState>;
-
-/** @deprecated Renamed to `enumerateActions`; this alias will be removed in v1.0. */
-export const enumerateGridActions = enumerateActions;
-
-/** @deprecated Renamed to `solveLevel`; this alias will be removed in v1.0. */
-export const solveGridLevel = solveLevel;

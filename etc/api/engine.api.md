@@ -851,9 +851,6 @@ export function elapsedMillisecondsAtTick(tick: number, rate: TickRate): number;
 // @public
 export function enumerateActions(view: TickView<unknown, unknown>): SubmittedAction[];
 
-// @public @deprecated (undocumented)
-export const enumerateGridActions: typeof enumerateActions;
-
 // @public
 export function enumerateTargetChoices<TCandidate, TView extends TickView<unknown, unknown>>(spec: TargetSpec<TCandidate, TView>, view: TView, options?: TargetEnumerationOptions): TargetChoiceEnumeration<TCandidate>;
 
@@ -966,13 +963,16 @@ export type GameTransform = 'simultaneous-to-sequential' | 'repeated-game' | 'st
 export const GAOS_REPLAY_DERIVED_SEEDS: "gaos.run-level-seed.v1";
 
 // @public
+const GAOS_REPLAY_ENDED_FORMAT_VERSION: "1.3";
+
+// @public
 export const GAOS_REPLAY_EXTENSION: "gaos-replay.jsonl";
 
 // @public
 export const GAOS_REPLAY_FORMAT_ID: "gaos.replay";
 
 // @public
-export const GAOS_REPLAY_FORMAT_VERSION: "1.3";
+export const GAOS_REPLAY_FORMAT_VERSION: "1.4";
 
 // @public
 export const GAOS_REPLAY_LEGACY_FORMAT_VERSION: "1.0";
@@ -1035,9 +1035,6 @@ export interface GraphLayoutOptions {
     nodes: readonly string[];
 }
 
-// @public @deprecated (undocumented)
-export type GridActionDefinition = ActionDefinition;
-
 // @public (undocumented)
 export type GridRayDirective<TStop> = {
     action: 'continue';
@@ -1057,26 +1054,8 @@ export type GridRayResult<TCell, TStop> = {
     steps: number;
 };
 
-// @public @deprecated (undocumented)
-export type GridRecheckResult = RecheckResult;
-
-// @public @deprecated (undocumented)
-export type GridSolveResult = SolveResult;
-
-// @public @deprecated (undocumented)
-export type GridSolverOptions<TState> = SolverOptions<TState>;
-
-// @public @deprecated (undocumented)
-export type GridSubmittedAction = SubmittedAction;
-
 // @public
 export type GridTargetingView = GridViewNamespace | Readonly<Record<string, GridViewNamespace>>;
-
-// @public @deprecated (undocumented)
-export type GridTranscriptAction = TranscriptAction;
-
-// @public @deprecated (undocumented)
-export type GridTranscriptHeader<TLevel> = TranscriptHeader<TLevel>;
 
 // @public (undocumented)
 export interface GridViewNamespace {
@@ -1899,9 +1878,6 @@ export interface ReachableCellPath<TCell = Cell> {
     path: TCell[];
 }
 
-// @public @deprecated (undocumented)
-export const recheckGridTranscript: typeof recheckTranscript;
-
 // @public (undocumented)
 export interface RecheckOptions<TState> {
     applyEmptyTick?: (state: TState, tick: number) => TState;
@@ -2011,7 +1987,7 @@ export interface ReplayArtifact<TLevel> {
 export interface ReplayArtifactRecheckOptions<TLevel, TState> {
     // (undocumented)
     optionsForLevel?: (context: ReplayReducerContext<TLevel>) => RecheckOptions<TState> | undefined;
-    semanticAdapterForLevel?: (context: ReplayReducerContext<TLevel>) => ReplaySemanticAdapter<TLevel> | undefined;
+    semanticAdapterForLevel?: (context: ReplayReducerContext<TLevel>) => ReplaySemanticAdapter<TLevel, TState> | undefined;
 }
 
 // @public (undocumented)
@@ -2106,7 +2082,7 @@ export class ReplayFormatError extends Error {
 }
 
 // @public (undocumented)
-export type ReplayFormatVersion = typeof GAOS_REPLAY_LEGACY_FORMAT_VERSION | typeof GAOS_REPLAY_UNSIGNED_FORMAT_VERSION | typeof GAOS_REPLAY_SIGNED_FORMAT_VERSION | typeof GAOS_REPLAY_FORMAT_VERSION;
+export type ReplayFormatVersion = typeof GAOS_REPLAY_LEGACY_FORMAT_VERSION | typeof GAOS_REPLAY_UNSIGNED_FORMAT_VERSION | typeof GAOS_REPLAY_SIGNED_FORMAT_VERSION | typeof GAOS_REPLAY_ENDED_FORMAT_VERSION | typeof GAOS_REPLAY_FORMAT_VERSION;
 
 // @public
 export interface ReplayGameRef {
@@ -2147,6 +2123,36 @@ export interface ReplayHeader<TLevel> {
     totals: ReplayTotals;
     // (undocumented)
     visibility?: TranscriptVisibility;
+}
+
+// @public (undocumented)
+interface ReplayInteraction {
+    // (undocumented)
+    canonicalCommand: string;
+    // (undocumented)
+    clientTime?: number;
+    // (undocumented)
+    command: JsonValue;
+    // (undocumented)
+    cursor: number;
+    // (undocumented)
+    hostTime?: number;
+    // (undocumented)
+    kind: 'interaction';
+    // (undocumented)
+    levelIndex: number;
+    // (undocumented)
+    n: number;
+    // (undocumented)
+    participantId: string;
+    // (undocumented)
+    prevChainHash?: string;
+    // (undocumented)
+    sig?: string;
+    // (undocumented)
+    submissionId: string;
+    // (undocumented)
+    tick: number;
 }
 
 // @public (undocumented)
@@ -2244,7 +2250,7 @@ export interface ReplayMetrics {
 export function replayMetricsFor<TLevel, TState, TView extends SessionView>(reducer: Reducer<TLevel, TState, TView>, state: TState, view?: TView): ReplayMetrics;
 
 // @public (undocumented)
-export type ReplayRecord = ReplayAction | ReplayResolution | ReplayTimeout | ReplayExtension | ReplayInterest | ReplayCheckpoint | ReplayCommitMismatchAudit | ReplaySeatSignatureReservation;
+export type ReplayRecord = ReplayAction | ReplayResolution | ReplayTimeout | ReplayExtension | ReplayInterest | ReplayInteraction | ReplayCheckpoint | ReplayCommitMismatchAudit | ReplaySeatSignatureReservation;
 
 // @public (undocumented)
 export interface ReplayReducerContext<TLevel> {
@@ -2335,7 +2341,15 @@ export interface ReplaySeatSignatureReservation {
 export type ReplaySeedPolicy = 'explicit' | typeof GAOS_REPLAY_DERIVED_SEEDS;
 
 // @public (undocumented)
-export interface ReplaySemanticAdapter<TLevel> {
+export interface ReplaySemanticAdapter<TLevel, TState = unknown> {
+    // (undocumented)
+    classifyCommand?: (state: TState, command: JsonValue, context: ReplaySubmissionContext) => {
+        kind: 'interaction';
+        state: TState;
+    } | {
+        kind: 'intent';
+        action: SubmittedAction;
+    };
     // (undocumented)
     commandToAction?: (command: JsonValue, context: ReplaySubmissionContext) => SubmittedAction;
     // (undocumented)
@@ -2852,9 +2866,6 @@ export function signSubmissionV1(privateKey: CryptoKey, envelope: SubmissionSign
 
 // @public
 export function slotRow(keys: readonly string[], id?: string): ZoneConfig;
-
-// @public @deprecated (undocumented)
-export const solveGridLevel: typeof solveLevel;
 
 // @public
 export function solveLevel<TLevel, TState, TView extends TickView<unknown, unknown>>(reducer: Reducer<TLevel, TState, TView>, level: TLevel, options: SolverOptions<TState>): SolveResult;

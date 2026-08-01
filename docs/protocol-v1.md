@@ -38,7 +38,13 @@ Every command submission binds the command to the current `sessionId`,
 - a game-owned `command` value.
 
 Reuse the same `submissionId` for an exact retry. Use a new ID for a new
-logical control step. A host rejects stale cursors and conflicting retries.
+logical command step. A host rejects stale cursors and conflicting retries.
+
+With RFC-020, the product's authoritative classifier maps a command to either
+an `interaction` or an `intent`. An interaction updates deterministic state
+and observations without occupying an intent slot or advancing the cursor. An
+intent freezes its canonical action in the current simultaneous window. A
+client-provided effect label is never authoritative.
 
 A session using RFC-010 may also carry `clientTime`, `prevChainHash`, and
 `sig`. These fields authenticate the canonical command plus the existing

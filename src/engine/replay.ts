@@ -257,15 +257,3 @@ export function recheckTranscript<TLevel, TState, TView extends SessionView>(
 export function runLevelSeed(sessionSeed: number, levelIndex: number): number {
   return (sessionSeed ^ (0x9e3779b9 * (levelIndex + 1))) >>> 0;
 }
-
-/** @deprecated Renamed to `TranscriptHeader`; this alias will be removed in v1.0. */
-export type GridTranscriptHeader<TLevel> = TranscriptHeader<TLevel>;
-
-/** @deprecated Renamed to `TranscriptAction`; this alias will be removed in v1.0. */
-export type GridTranscriptAction = TranscriptAction;
-
-/** @deprecated Renamed to `RecheckResult`; this alias will be removed in v1.0. */
-export type GridRecheckResult = RecheckResult;
-
-/** @deprecated Renamed to `recheckTranscript`; this alias will be removed in v1.0. */
-export const recheckGridTranscript = recheckTranscript;

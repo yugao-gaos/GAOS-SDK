@@ -19,7 +19,8 @@ from .signatures import (
 )
 
 GAOS_REPLAY_FORMAT_ID = "gaos.replay"
-GAOS_REPLAY_FORMAT_VERSION = "1.3"
+GAOS_REPLAY_FORMAT_VERSION = "1.4"
+GAOS_REPLAY_ENDED_FORMAT_VERSION = "1.3"
 GAOS_REPLAY_SIGNED_FORMAT_VERSION = "1.2"
 GAOS_REPLAY_UNSIGNED_FORMAT_VERSION = "1.1"
 GAOS_REPLAY_LEGACY_FORMAT_VERSION = "1.0"
@@ -84,12 +85,14 @@ def _is_grouped_version(value: Any) -> bool:
     return value in (
         GAOS_REPLAY_UNSIGNED_FORMAT_VERSION,
         GAOS_REPLAY_SIGNED_FORMAT_VERSION,
+        GAOS_REPLAY_ENDED_FORMAT_VERSION,
         GAOS_REPLAY_FORMAT_VERSION,
     )
 
 def _has_v12_integrity_semantics(value: Any) -> bool:
     return value in (
         GAOS_REPLAY_SIGNED_FORMAT_VERSION,
+        GAOS_REPLAY_ENDED_FORMAT_VERSION,
         GAOS_REPLAY_FORMAT_VERSION,
     )
 
@@ -483,13 +486,15 @@ def validate_replay_artifact(value: Any) -> list[str]:
         GAOS_REPLAY_LEGACY_FORMAT_VERSION,
         GAOS_REPLAY_UNSIGNED_FORMAT_VERSION,
         GAOS_REPLAY_SIGNED_FORMAT_VERSION,
+        GAOS_REPLAY_ENDED_FORMAT_VERSION,
         GAOS_REPLAY_FORMAT_VERSION,
     ):
         problems.append(
             "header.formatVersion must be "
             f"{GAOS_REPLAY_LEGACY_FORMAT_VERSION}, "
             f"{GAOS_REPLAY_UNSIGNED_FORMAT_VERSION}, "
-            f"{GAOS_REPLAY_SIGNED_FORMAT_VERSION}, or "
+            f"{GAOS_REPLAY_SIGNED_FORMAT_VERSION}, "
+            f"{GAOS_REPLAY_ENDED_FORMAT_VERSION}, or "
             f"{GAOS_REPLAY_FORMAT_VERSION}"
         )
     if (
@@ -668,7 +673,10 @@ def validate_replay_artifact(value: Any) -> list[str]:
                 ))
                 allowed_statuses = (
                     ("won", "failed", "ended")
-                    if header.get("formatVersion") == GAOS_REPLAY_FORMAT_VERSION
+                    if header.get("formatVersion") in (
+                        GAOS_REPLAY_ENDED_FORMAT_VERSION,
+                        GAOS_REPLAY_FORMAT_VERSION,
+                    )
                     else ("won", "failed")
                 )
                 if result.get("status") not in allowed_statuses:
@@ -934,12 +942,34 @@ def validate_replay_artifact(value: Any) -> list[str]:
         else:
             previous_level_index = -1
             record_ticks: dict[int, int] = {}
+            submission_identities: set[tuple[str, str, str]] = set()
+            def register_submission_identity(
+                level_index: Any,
+                participant_id: Any,
+                submission_id: Any,
+                label: str,
+            ) -> None:
+                if (
+                    not _valid_non_negative_integer(level_index)
+                    or not isinstance(participant_id, str)
+                    or not isinstance(submission_id, str)
+                ):
+                    return
+                key = (str(level_index), participant_id, submission_id)
+                if key in submission_identities:
+                    problems.append(
+                        f"{label} reuses submissionId "
+                        f"{participant_id}/{submission_id}"
+                    )
+                else:
+                    submission_identities.add(key)
             allowed_kinds = {
                 "action",
                 "resolution",
                 "timeout",
                 "extension",
                 "interest",
+                "interaction",
                 "checkpoint",
                 "commit-mismatch",
                 "seat-signature",
@@ -986,6 +1016,17 @@ def validate_replay_artifact(value: Any) -> list[str]:
                     "submissionId",
                     "scopeId",
                     "declaration",
+                    "canonicalCommand",
+                    "clientTime",
+                    "prevChainHash",
+                    "sig",
+                },
+                "interaction": common | {
+                    "tick",
+                    "cursor",
+                    "participantId",
+                    "submissionId",
+                    "command",
                     "canonicalCommand",
                     "clientTime",
                     "prevChainHash",
@@ -1051,6 +1092,12 @@ def validate_replay_artifact(value: Any) -> list[str]:
                     f"record {index}",
                 ))
                 if kind == "action":
+                    register_submission_identity(
+                        record.get("levelIndex"),
+                        record.get("seat"),
+                        record.get("submissionId"),
+                        f"action {index}",
+                    )
                     problems.extend(_validate_resolution_input(
                         record,
                         f"record {index} action",
@@ -1071,6 +1118,13 @@ def validate_replay_artifact(value: Any) -> list[str]:
                         problems.append(f"resolution {index} inputs must be an array")
                     else:
                         for input_index, replay_input in enumerate(record["inputs"]):
+                            if isinstance(replay_input, dict):
+                                register_submission_identity(
+                                    record.get("levelIndex"),
+                                    replay_input.get("seat"),
+                                    replay_input.get("submissionId"),
+                                    f"resolution {index} input {input_index}",
+                                )
                             problems.extend(_validate_resolution_input(
                                 replay_input,
                                 f"resolution {index} input {input_index}",
@@ -1216,7 +1270,55 @@ def validate_replay_artifact(value: Any) -> list[str]:
                         )
                     if not isinstance(record.get("record"), dict):
                         problems.append(f"extension {index} record must be an object")
+                elif kind == "interaction":
+                    register_submission_identity(
+                        record.get("levelIndex"),
+                        record.get("participantId"),
+                        record.get("submissionId"),
+                        f"interaction {index}",
+                    )
+                    if header.get("formatVersion") != GAOS_REPLAY_FORMAT_VERSION:
+                        problems.append(
+                            f"interaction {index} requires formatVersion "
+                            f"{GAOS_REPLAY_FORMAT_VERSION}"
+                        )
+                    for field in ("tick", "cursor"):
+                        if not _valid_non_negative_integer(record.get(field)):
+                            problems.append(
+                                f"interaction {index} {field} must be a "
+                                "non-negative safe integer"
+                            )
+                    for field in ("participantId", "submissionId"):
+                        if not isinstance(record.get(field), str) or not record[field]:
+                            problems.append(
+                                f"interaction {index} {field} must be a non-empty string"
+                            )
+                    if "command" not in record:
+                        problems.append(f"interaction {index} command is required")
+                    else:
+                        try:
+                            canonical = canonical_json(record["command"])
+                            if record.get("canonicalCommand") != canonical:
+                                problems.append(
+                                    f"interaction {index} canonicalCommand does not "
+                                    "match command"
+                                )
+                        except (TypeError, ValueError):
+                            problems.append(
+                                f"interaction {index} command must contain plain JSON"
+                            )
+                    if _has_v12_integrity_semantics(header.get("formatVersion")):
+                        problems.extend(_validate_v12_integrity_fields(
+                            record,
+                            f"interaction {index}",
+                        ))
                 elif kind == "interest":
+                    register_submission_identity(
+                        record.get("levelIndex"),
+                        record.get("participantId"),
+                        record.get("submissionId"),
+                        f"interest {index}",
+                    )
                     if not _has_v12_integrity_semantics(
                         header.get("formatVersion")
                     ):
@@ -1276,6 +1378,12 @@ def validate_replay_artifact(value: Any) -> list[str]:
                             f"checkpoint {index} digest must be an unsigned 32-bit integer"
                         )
                 elif kind == "commit-mismatch":
+                    register_submission_identity(
+                        record.get("levelIndex"),
+                        record.get("participantId"),
+                        record.get("submissionId"),
+                        f"commit-mismatch {index}",
+                    )
                     if _has_v12_integrity_semantics(header.get("formatVersion")):
                         problems.extend(_validate_v12_integrity_fields(
                             record,
@@ -1589,6 +1697,15 @@ def recheck_replay_signatures(artifact: dict[str, Any]) -> dict[str, Any]:
                 f"interest {record['n']}",
                 2,
             ))
+        elif kind == "interaction":
+            items.append((
+                "submission",
+                record,
+                record["levelIndex"],
+                record["tick"],
+                f"interaction {record['n']}",
+                None,
+            ))
         elif kind == "seat-signature":
             items.append((
                 "periodic",
@@ -1610,7 +1727,7 @@ def recheck_replay_signatures(artifact: dict[str, Any]) -> dict[str, Any]:
         seat = (
             value.get("participantId")
             if kind == "periodic"
-            or value.get("kind") in {"commit-mismatch", "interest"}
+            or value.get("kind") in {"commit-mismatch", "interest", "interaction"}
             else value.get("seat")
         )
         check = checks.get(seat)

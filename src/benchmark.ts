@@ -150,6 +150,7 @@ export interface LeaderboardEntryV2 extends LeaderboardEntry {
 export type BenchmarkAgentKind = 'local' | 'provider' | 'cli';
 
 export interface BenchmarkResourceObservations {
+  /** Agent/provider-reported operational data; not independently verified. */
   steps: number;
   wallClockMs?: number;
   tokens?: number;
@@ -220,6 +221,8 @@ export interface BenchmarkBundleEpisode {
   terminalOutcome: JsonValue;
   score: number;
   replayDigest: string;
+  /** Agent/provider-reported operational data; not independently verified. */
+  selfReportedObservations?: BenchmarkResourceObservations;
 }
 
 export interface BenchmarkBundle {
@@ -574,6 +577,7 @@ export function packBenchmarkRun(
         terminalOutcome: structuredClone(result.terminalOutcome),
         score: result.score,
         replayDigest,
+        selfReportedObservations: structuredClone(result.observations),
       };
     });
   const unsignedSubmission = {
@@ -691,6 +695,9 @@ export function benchmarkBundleFiles(
         terminalOutcome: episode.terminalOutcome,
         score: episode.score,
         replayDigest: episode.replayDigest,
+        ...(episode.selfReportedObservations === undefined
+          ? {}
+          : { selfReportedObservations: episode.selfReportedObservations }),
         replayEncoding: typeof episode.replay === 'string' ? 'jsonl' : 'json',
       })),
     } as unknown as JsonValue)}\n`,
