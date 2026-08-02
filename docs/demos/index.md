@@ -8,7 +8,7 @@ pageClass: demo-landing
 <div class="demo-landing-hero">
   <span>GAOS PLAYABLE ARCADE</span>
   <h1>Six real games.<br>One deterministic toolkit.</h1>
-  <p>See the GAOS mechanism library across six genres. Prism Match demonstrates the complete reducer, structured-action, agent, and replay path; every demo can be played directly or handed to its deterministic local policy. No account, server, or API key required.</p>
+  <p>See the GAOS mechanism library across six genres. Prism Match and Midnight House demonstrate the complete reducer, structured-action, agent, and replay path—including seat-redacted hidden information at the blackjack table. Every demo can be played directly or handed to its deterministic local policy. No account, server, or API key required.</p>
 </div>
 
 <div class="demo-arcade-grid">
@@ -24,7 +24,7 @@ pageClass: demo-landing
     <img class="demo-tile-art" src="/images/demo-cards/midnight-house.webp" alt="" aria-hidden="true">
     <span>Cards · hidden information · settlement</span>
     <h2>Midnight House</h2>
-    <p>Manage a bankroll at a complete blackjack table or let a seat-limited strategy agent play the hand.</p>
+    <p>Manage SDK-backed zones, resources, and House Favors at a complete blackjack table, or let the same seat-limited strategy agent play the hand.</p>
     <b>Play Blackjack →</b>
   </a>
 
