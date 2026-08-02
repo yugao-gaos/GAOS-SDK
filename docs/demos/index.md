@@ -8,7 +8,7 @@ pageClass: demo-landing
 <div class="demo-landing-hero">
   <span>GAOS PLAYABLE ARCADE</span>
   <h1>Six real games.<br>One deterministic toolkit.</h1>
-  <p>See the GAOS mechanism library across six genres. Five demos now demonstrate the complete reducer, structured-action, agent, and replay path—from seat-redacted cards to simultaneous plans and fixed-tick graph warfare. Every demo can be played directly or handed to its deterministic local policy. No account, server, or API key required.</p>
+  <p>See the GAOS mechanism library across six genres. All six demos now demonstrate the complete reducer, structured-action, agent, and replay path—from seat-redacted cards and simultaneous plans to fixed-tick graph warfare and real-time defense. Every demo can be played directly or handed to its deterministic local policy. No account, server, or API key required.</p>
 </div>
 
 <div class="demo-arcade-grid">
@@ -56,7 +56,7 @@ pageClass: demo-landing
     <img class="demo-tile-art" src="/images/demo-cards/last-light.webp" alt="" aria-hidden="true">
     <span>Real time · tower defense · zombie horde</span>
     <h2>Last Light</h2>
-    <p>Build survivor defenses around branching roads and hold the safehouse through three escalating waves.</p>
+    <p>Run an SDK-backed fixed-tick defense where indexed build orders, horde movement, tower combat, wave economy, and the builder policy replay deterministically.</p>
     <b>Defend the Safehouse →</b>
   </a>
 </div>
