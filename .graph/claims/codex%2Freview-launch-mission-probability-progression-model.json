@@ -3,7 +3,8 @@
   "git_user": "yugao-gaos <yu.gao@gaos.ca>",
   "session_id": "codex-mcp-41618-934b18cc032aa58c2c4986f673faddb2",
   "branch": "orch/attempt/codex-review-launch-mission-probability-progression-model",
-  "status": "claimed",
+  "status": "done",
   "claimed_at": "2026-08-02T01:14:19.039Z",
-  "lease_until": "2026-08-02T02:14:19.039Z"
+  "lease_until": "2026-08-02T02:14:19.039Z",
+  "completed_at": "2026-08-02T01:19:51.769Z"
 }
