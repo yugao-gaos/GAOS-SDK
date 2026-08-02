@@ -8,7 +8,7 @@ pageClass: demo-landing
 <div class="demo-landing-hero">
   <span>GAOS PLAYABLE ARCADE</span>
   <h1>Six real games.<br>One deterministic toolkit.</h1>
-  <p>See the GAOS mechanism library across six genres. Prism Match, Midnight House, and Ashfall Crossing demonstrate the complete reducer, structured-action, agent, and replay path—from seat-redacted cards to an SDK-enumerated hex timeline. Every demo can be played directly or handed to its deterministic local policy. No account, server, or API key required.</p>
+  <p>See the GAOS mechanism library across six genres. Prism Match, Midnight House, Ashfall Crossing, and Cinder Vault demonstrate the complete reducer, structured-action, agent, and replay path—from seat-redacted cards to simultaneous three-beat programs. Every demo can be played directly or handed to its deterministic local policy. No account, server, or API key required.</p>
 </div>
 
 <div class="demo-arcade-grid">
@@ -40,7 +40,7 @@ pageClass: demo-landing
     <img class="demo-tile-art" src="/images/demo-cards/cinder-vault.webp" alt="" aria-hidden="true">
     <span>Three-beat plans · previews · traps</span>
     <h2>Cinder Vault</h2>
-    <p>Preview three-action paths, resolve every entity simultaneously, and push enemies into spikes, pits, gates, and explosions.</p>
+    <p>Program SDK-enumerated card targets, inspect reducer-owned previews, then replay three simultaneous transition frames through the same environment used by the local planner.</p>
     <b>Play the Roguelike →</b>
   </a>
 
