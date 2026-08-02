@@ -8,7 +8,7 @@ pageClass: demo-landing
 <div class="demo-landing-hero">
   <span>GAOS PLAYABLE ARCADE</span>
   <h1>Six real games.<br>One deterministic toolkit.</h1>
-  <p>See the GAOS mechanism library across six genres. Prism Match and Midnight House demonstrate the complete reducer, structured-action, agent, and replay path—including seat-redacted hidden information at the blackjack table. Every demo can be played directly or handed to its deterministic local policy. No account, server, or API key required.</p>
+  <p>See the GAOS mechanism library across six genres. Prism Match, Midnight House, and Ashfall Crossing demonstrate the complete reducer, structured-action, agent, and replay path—from seat-redacted cards to an SDK-enumerated hex timeline. Every demo can be played directly or handed to its deterministic local policy. No account, server, or API key required.</p>
 </div>
 
 <div class="demo-arcade-grid">
@@ -32,7 +32,7 @@ pageClass: demo-landing
     <img class="demo-tile-art" src="/images/demo-cards/ashfall-crossing.webp" alt="" aria-hidden="true">
     <span>Hexes · speed · cooldown timeline</span>
     <h2>Ashfall Crossing</h2>
-    <p>Command a hex squad where fast units can activate repeatedly before slower units return to the timeline.</p>
+    <p>Command an SDK-backed axial-hex squad where structured movement, attacks, recovery, and cooldowns share one deterministic timeline.</p>
     <b>Play Grid Strategy →</b>
   </a>
 

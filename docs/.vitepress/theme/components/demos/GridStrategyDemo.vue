@@ -1,72 +1,60 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref } from 'vue';
 import { withBase } from 'vitepress';
+import {
+  ASHFALL_CELLS,
+  ashfallHexKey,
+  chooseAshfallAction,
+  createAshfallEnvironment,
+  describeAshfallAction,
+  type AshfallHex,
+  type AshfallOption,
+  type AshfallSide,
+  type AshfallTimelineEntry,
+  type AshfallUnit,
+  type AshfallView,
+} from '../../../../../examples/demos/ashfall-crossing';
 import { wait } from './game-utils';
 
-type Side = 'ember' | 'hollow';
-type Hex = { q: number; r: number };
-type Unit = Hex & {
-  id: string;
-  side: Side;
-  role: 'Ranger' | 'Vanguard' | 'Warden';
-  speed: number;
-  hp: number;
-  maxHp: number;
-  damage: number;
-  range: number;
-  nextAt: number;
-  attackReady: number;
-};
-type Action =
-  | { kind: 'move'; unitId: string; target: Hex; recovery: number; value: number }
-  | { kind: 'attack'; unitId: string; targetId: string; recovery: number; value: number };
 type AttackEffect = {
   id: number;
   attackerId: string;
   targetId: string;
-  from: Hex;
-  to: Hex;
-  side: Side;
+  from: AshfallHex;
+  to: AshfallHex;
+  side: AshfallSide;
 };
 type DamageEffect = {
   id: number;
-  at: Hex;
+  at: AshfallHex;
   amount: number;
   lethal: boolean;
 };
 
-const radius = 2;
-const cells: Hex[] = [];
-for (let q = -radius; q <= radius; q += 1) {
-  const rMin = Math.max(-radius, -q - radius);
-  const rMax = Math.min(radius, -q + radius);
-  for (let r = rMin; r <= rMax; r += 1) cells.push({ q, r });
-}
-
+const cells = ASHFALL_CELLS;
 const seed = ref(903);
-const units = ref<Unit[]>([]);
+const units = ref<AshfallUnit[]>([]);
 const blocked = ref(new Set<string>());
 const locked = ref(false);
 const autoplay = ref(false);
 const message = ref('');
 const decision = ref('Waiting for the first activation');
 const lastAction = ref('Timeline initialized');
-const hoveredCell = ref<Hex | null>(null);
+const hoveredCell = ref<AshfallHex | null>(null);
 const movingUnitId = ref<string | null>(null);
 const attackEffect = ref<AttackEffect | null>(null);
 const damageEffect = ref<DamageEffect | null>(null);
+const active = ref<AshfallUnit | null>(null);
+const activeSide = ref<AshfallSide>('ember');
+const winner = ref<AshfallSide | null>(null);
+const currentActions = ref<AshfallOption[]>([]);
+const timeline = ref<AshfallTimelineEntry[]>([]);
+let environment: ReturnType<typeof createAshfallEnvironment>;
+let observation: AshfallView;
 let runToken = 0;
 let effectId = 0;
 
 const living = computed(() => units.value.filter((unit) => unit.hp > 0));
-const active = computed(() => [...living.value].sort(compareUnits)[0] ?? null);
-const activeSide = computed(() => active.value?.side ?? 'ember');
-const winner = computed<Side | null>(() => {
-  if (!living.value.some((unit) => unit.side === 'ember')) return 'hollow';
-  if (!living.value.some((unit) => unit.side === 'hollow')) return 'ember';
-  return null;
-});
-const currentActions = computed(() => active.value ? legalActions(active.value) : []);
 const hoverPreview = computed(() => {
   const unit = active.value;
   const target = hoveredCell.value;
@@ -91,63 +79,33 @@ const attackVisual = computed(() => {
     },
   };
 });
-const timeline = computed(() => {
-  const forecast = living.value.map((unit) => ({ ...unit }));
-  const result: Array<Unit & { forecastAt: number }> = [];
-  for (let index = 0; index < 8 && forecast.length; index += 1) {
-    forecast.sort(compareUnits);
-    const unit = forecast[0];
-    result.push({ ...unit, forecastAt: unit.nextAt });
-    unit.nextAt += delayFor(unit, 100);
-  }
-  return result;
-});
 
-function key(hex: Hex) {
-  return `${hex.q},${hex.r}`;
+function key(hex: AshfallHex) {
+  return ashfallHexKey(hex);
 }
 
-function compareUnits(a: Unit, b: Unit) {
-  return a.nextAt - b.nextAt || b.speed - a.speed || a.id.localeCompare(b.id);
-}
-
-function distance(a: Hex, b: Hex) {
-  const as = -a.q - a.r;
-  const bs = -b.q - b.r;
-  return Math.max(Math.abs(a.q - b.q), Math.abs(a.r - b.r), Math.abs(as - bs));
-}
-
-function delayFor(unit: Unit, recovery: number) {
-  return Math.ceil((recovery * 100) / unit.speed);
-}
-
-function unitAt(hex: Hex) {
+function unitAt(hex: AshfallHex) {
   return living.value.find((unit) => unit.q === hex.q && unit.r === hex.r);
 }
 
-function inside(hex: Hex) {
-  return distance({ q: 0, r: 0 }, hex) <= radius;
-}
-
-function neighbors(hex: Hex) {
-  return [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]]
-    .map(([dq, dr]) => ({ q: hex.q + dq, r: hex.r + dr }))
-    .filter(inside);
-}
-
-function point(hex: Hex) {
+function point(hex: AshfallHex) {
   return {
     x: 220 + (hex.q + hex.r / 2) * 82,
     y: 174 + hex.r * 71,
   };
 }
 
-function screen(hex: Hex) {
+function screen(hex: AshfallHex) {
   const { x, y } = point(hex);
   return { left: `${x}px`, top: `${y}px` };
 }
 
-function segmentBetween(from: Hex, to: Hex, startInset: number, endInset: number) {
+function segmentBetween(
+  from: AshfallHex,
+  to: AshfallHex,
+  startInset: number,
+  endInset: number,
+) {
   const start = point(from);
   const end = point(to);
   const dx = end.x - start.x;
@@ -164,7 +122,7 @@ function segmentBetween(from: Hex, to: Hex, startInset: number, endInset: number
   };
 }
 
-function unitStyle(unit: Unit) {
+function unitStyle(unit: AshfallUnit) {
   const style: Record<string, string> = screen(unit);
   const effect = attackEffect.value;
   if (effect?.attackerId === unit.id) {
@@ -181,76 +139,29 @@ function damageStyle(effect: DamageEffect) {
   return screen(effect.at);
 }
 
-function initialDelay(speed: number) {
-  return Math.ceil(10000 / speed);
+function syncObservation(next: AshfallView) {
+  observation = next;
+  units.value = next.units.map((unit) => ({ ...unit }));
+  blocked.value = new Set(next.blocked);
+  active.value = next.active ? { ...next.active } : null;
+  activeSide.value = next.activeSide;
+  winner.value = next.winner;
+  currentActions.value = next.legalOptions.map((option) => ({
+    ...option,
+    target: { ...option.target },
+    action: { ...option.action },
+  }));
+  timeline.value = next.timeline.map((entry) => ({ ...entry }));
+  message.value = next.message;
 }
 
-function makeUnit(id: string, side: Side, role: Unit['role'], q: number, r: number): Unit {
-  const stats = {
-    Ranger: { speed: 160, hp: 3, damage: 1, range: 2 },
-    Vanguard: { speed: 100, hp: 5, damage: 2, range: 1 },
-    Warden: { speed: 70, hp: 6, damage: 2, range: 1 },
-  }[role];
-  return { id, side, role, q, r, ...stats, maxHp: stats.hp, nextAt: initialDelay(stats.speed), attackReady: 0 };
+function cellAction(hex: AshfallHex) {
+  return currentActions.value.find(({ target }) => (
+    target.q === hex.q && target.r === hex.r
+  ));
 }
 
-function reset() {
-  runToken += 1;
-  autoplay.value = false;
-  locked.value = false;
-  hoveredCell.value = null;
-  movingUnitId.value = null;
-  attackEffect.value = null;
-  damageEffect.value = null;
-  blocked.value = new Set(['0,-1', '-1,0', '1,0']);
-  units.value = [
-    makeUnit('e-ranger', 'ember', 'Ranger', -1, 2),
-    makeUnit('e-vanguard', 'ember', 'Vanguard', -2, 1),
-    makeUnit('e-warden', 'ember', 'Warden', -2, 0),
-    makeUnit('h-ranger', 'hollow', 'Ranger', 1, -2),
-    makeUnit('h-vanguard', 'hollow', 'Vanguard', 2, -1),
-    makeUnit('h-warden', 'hollow', 'Warden', 2, 0),
-  ];
-  message.value = 'The fastest unit acts first. Choose a highlighted hex or target.';
-  decision.value = 'Waiting for the first activation';
-  lastAction.value = 'Timeline initialized';
-  void maybeRunAgent();
-}
-
-function legalActions(unit: Unit): Action[] {
-  const enemies = living.value.filter((other) => other.side !== unit.side);
-  const actions: Action[] = [];
-  if (unit.nextAt >= unit.attackReady) {
-    for (const target of enemies) {
-      if (distance(unit, target) <= unit.range) {
-        actions.push({
-          kind: 'attack',
-          unitId: unit.id,
-          targetId: target.id,
-          recovery: unit.role === 'Ranger' ? 120 : 135,
-          value: 120 + (target.hp <= unit.damage ? 70 : 0) - target.hp,
-        });
-      }
-    }
-  }
-  for (const target of neighbors(unit)) {
-    if (blocked.value.has(key(target)) || unitAt(target)) continue;
-    const closest = Math.min(...enemies.map((enemy) => distance(target, enemy)));
-    actions.push({ kind: 'move', unitId: unit.id, target, recovery: 100, value: 50 - closest * 8 });
-  }
-  return actions.sort((a, b) => b.value - a.value);
-}
-
-function cellAction(hex: Hex) {
-  const occupant = unitAt(hex);
-  return currentActions.value.find((action) =>
-    action.kind === 'move'
-      ? action.target.q === hex.q && action.target.r === hex.r
-      : action.targetId === occupant?.id,
-  );
-}
-
-function previewCell(hex: Hex) {
+function previewCell(hex: AshfallHex) {
   if (locked.value || autoplay.value || activeSide.value !== 'ember' || winner.value) return;
   hoveredCell.value = cellAction(hex) ? hex : null;
 }
@@ -259,65 +170,66 @@ function clearPreview() {
   hoveredCell.value = null;
 }
 
-async function perform(action: Action, actor: 'human' | 'agent') {
+async function perform(action: AshfallOption, actor: 'human' | 'agent') {
   const unit = active.value;
   if (!unit || unit.id !== action.unitId || locked.value) return;
   locked.value = true;
   hoveredCell.value = null;
-  if (action.kind === 'move') {
-    movingUnitId.value = unit.id;
+  const token = runToken;
+  const result = environment.step(action.action);
+  const transition = result.observation.transition;
+  if (!transition) throw new Error('Ashfall reducer did not publish a transition');
+
+  if (transition.kind === 'move') {
+    movingUnitId.value = transition.unitId;
     await nextTick();
-    units.value = units.value.map((item) => item.id === unit.id ? { ...item, ...action.target } : item);
-    lastAction.value = `${unit.role} moved to hex ${key(action.target)}.`;
+    syncObservation(result.observation);
+    lastAction.value = transition.message;
     await wait(460);
+    if (token !== runToken) return;
     movingUnitId.value = null;
   } else {
-    const target = units.value.find((item) => item.id === action.targetId);
-    if (target) {
-      const id = ++effectId;
-      attackEffect.value = {
-        id,
-        attackerId: unit.id,
-        targetId: target.id,
-        from: { q: unit.q, r: unit.r },
-        to: { q: target.q, r: target.r },
-        side: unit.side,
-      };
-      await nextTick();
-      await wait(340);
-      units.value = units.value.map((item) => item.id === target.id ? { ...item, hp: Math.max(0, item.hp - unit.damage) } : item);
-      damageEffect.value = {
-        id,
-        at: { q: target.q, r: target.r },
-        amount: unit.damage,
-        lethal: target.hp <= unit.damage,
-      };
-      lastAction.value = `${unit.role} hit ${target.role} for ${unit.damage}${target.hp <= unit.damage ? ' — defeated.' : '.'}`;
-      await wait(480);
-      attackEffect.value = null;
-      damageEffect.value = null;
-    }
+    const id = ++effectId;
+    attackEffect.value = {
+      id,
+      attackerId: transition.unitId,
+      targetId: transition.targetId!,
+      from: { ...transition.from },
+      to: { ...transition.to },
+      side: unit.side,
+    };
+    await nextTick();
+    await wait(340);
+    if (token !== runToken) return;
+    syncObservation(result.observation);
+    damageEffect.value = {
+      id,
+      at: { ...transition.to },
+      amount: transition.damage!,
+      lethal: transition.lethal!,
+    };
+    lastAction.value = transition.message;
+    await wait(480);
+    if (token !== runToken) return;
+    attackEffect.value = null;
+    damageEffect.value = null;
   }
-  units.value = units.value.map((item) => item.id === unit.id
-    ? {
-        ...item,
-        nextAt: item.nextAt + delayFor(item, action.recovery),
-        attackReady: action.kind === 'attack' ? item.nextAt + delayFor(item, 180) : item.attackReady,
-      }
-    : item);
-  message.value = lastAction.value;
-  decision.value = `${actor === 'agent' ? 'Agent' : 'Human'} chose ${action.kind} · recovery ${delayFor(unit, action.recovery)} ticks`;
+
+  decision.value = `${actor === 'agent' ? 'Agent' : 'Human'} chose ${transition.kind} · recovery ${transition.recoveryDelay} ticks`;
+  message.value = result.observation.winner
+    ? `${result.observation.winner === 'ember' ? 'Ember Company' : 'Hollow Host'} controls the crossing.`
+    : transition.message;
   await wait(120);
+  if (token !== runToken) return;
   locked.value = false;
   if (winner.value) {
     autoplay.value = false;
-    message.value = `${winner.value === 'ember' ? 'Ember Company' : 'Hollow Host'} controls the crossing.`;
     return;
   }
   await maybeRunAgent();
 }
 
-function chooseHex(hex: Hex) {
+function chooseHex(hex: AshfallHex) {
   if (locked.value || autoplay.value || activeSide.value !== 'ember' || winner.value) return;
   const action = cellAction(hex);
   if (action) void perform(action, 'human');
@@ -325,12 +237,16 @@ function chooseHex(hex: Hex) {
 
 async function agentStep() {
   if (locked.value || winner.value || !active.value) return;
-  const options = legalActions(active.value);
-  const best = options[0];
-  if (!best) return;
-  decision.value = `${active.value.role} evaluated ${options.length} actions · value ${best.value}`;
+  const submitted = chooseAshfallAction(observation);
+  const action = currentActions.value.find((option) => (
+    option.action.id === submitted.id
+    && option.action.x === submitted.x
+    && option.action.y === submitted.y
+  ));
+  if (!action) return;
+  decision.value = describeAshfallAction(observation, submitted);
   await wait(260);
-  await perform(best, 'agent');
+  await perform(action, 'agent');
 }
 
 async function maybeRunAgent() {
@@ -348,7 +264,22 @@ async function toggleAutoplay() {
   if (autoplay.value) await maybeRunAgent();
 }
 
-function portrait(unit: Unit) {
+function reset() {
+  runToken += 1;
+  autoplay.value = false;
+  locked.value = false;
+  hoveredCell.value = null;
+  movingUnitId.value = null;
+  attackEffect.value = null;
+  damageEffect.value = null;
+  environment = createAshfallEnvironment(seed.value >>> 0);
+  syncObservation(environment.reset().observation);
+  decision.value = `${currentActions.value.length} SDK-enumerated actions · waiting for the first activation`;
+  lastAction.value = 'Timeline initialized';
+  void maybeRunAgent();
+}
+
+function portrait(unit: AshfallUnit) {
   return withBase(`/images/units/${unit.side}-${unit.role.toLowerCase()}.jpg`);
 }
 
