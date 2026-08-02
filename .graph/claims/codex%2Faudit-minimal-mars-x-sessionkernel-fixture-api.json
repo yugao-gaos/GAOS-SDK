@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/audit-minimal-mars-x-sessionkernel-fixture-api",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "019fc041-c6b7-7fd1-81c0-cc41668c50f4",
+  "branch": "orch/attempt/codex-audit-minimal-mars-x-sessionkernel-fixture-api",
+  "status": "claimed",
+  "claimed_at": "2026-08-02T04:32:38.126Z",
+  "lease_until": "2026-08-02T05:32:38.126Z"
+}
