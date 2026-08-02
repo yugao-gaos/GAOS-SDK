@@ -113,7 +113,9 @@ function sendFleet(fromId: string, toId: string, owner: Exclude<Owner, 'neutral'
   const strength = Math.max(1, Math.floor(from.strength * ratio));
   from.strength -= strength;
   const to = planet(toId);
-  const distance = Math.hypot(to.x - from.x, to.y - from.y);
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const distance = Math.sqrt(dx * dx + dy * dy);
   fleets.value.push({ id: ++fleetId, owner, from: fromId, to: toId, strength, progress: 0, duration: Math.max(18, Math.round(distance * .75)) });
   eventLog.value = `${owner === 'human' ? 'Aster' : 'Nyx'} launched ${strength} ships from ${from.name} to ${to.name}.`;
 }

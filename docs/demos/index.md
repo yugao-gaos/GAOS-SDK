@@ -7,8 +7,8 @@ pageClass: demo-landing
 
 <div class="demo-landing-hero">
   <span>GAOS PLAYABLE ARCADE</span>
-  <h1>Six real games.<br>One agent-ready contract.</h1>
-  <p>See Game-as-a-Benchmark in action: play every game yourself, hand your position to a deterministic agent, or watch complete agent-vs-environment runs. No account, server, or API key required.</p>
+  <h1>Six real games.<br>One deterministic toolkit.</h1>
+  <p>See the GAOS mechanism library across six genres. Prism Match demonstrates the complete reducer, structured-action, agent, and replay path; every demo can be played directly or handed to its deterministic local policy. No account, server, or API key required.</p>
 </div>
 
 <div class="demo-arcade-grid">
