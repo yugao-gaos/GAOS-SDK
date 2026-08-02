@@ -8,7 +8,7 @@ pageClass: demo-landing
 <div class="demo-landing-hero">
   <span>GAOS PLAYABLE ARCADE</span>
   <h1>Six real games.<br>One deterministic toolkit.</h1>
-  <p>See the GAOS mechanism library across six genres. Prism Match, Midnight House, Ashfall Crossing, and Cinder Vault demonstrate the complete reducer, structured-action, agent, and replay path—from seat-redacted cards to simultaneous three-beat programs. Every demo can be played directly or handed to its deterministic local policy. No account, server, or API key required.</p>
+  <p>See the GAOS mechanism library across six genres. Five demos now demonstrate the complete reducer, structured-action, agent, and replay path—from seat-redacted cards to simultaneous plans and fixed-tick graph warfare. Every demo can be played directly or handed to its deterministic local policy. No account, server, or API key required.</p>
 </div>
 
 <div class="demo-arcade-grid">
@@ -48,7 +48,7 @@ pageClass: demo-landing
     <img class="demo-tile-art" src="/images/demo-cards/starline-dominion.webp" alt="" aria-hidden="true">
     <span>Real time · graph traversal · conquest</span>
     <h2>Starline Dominion</h2>
-    <p>Produce fleets on planets, traverse hyperlanes, and contest a live graph against a rival commander.</p>
+    <p>Drive an SDK-backed fixed-tick graph where structured fleet orders, production, travel, interception, conquest, and both commanders replay deterministically.</p>
     <b>Play Graph RTS →</b>
   </a>
 

@@ -1,26 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { withBase } from 'vitepress';
+import {
+  STARLINE_ACTIONS,
+  STARLINE_EDGES,
+  chooseStarlineAction,
+  createStarlineEnvironment,
+  describeStarlineAction,
+  type StarlineFleet,
+  type StarlineLaunchOption,
+  type StarlineView,
+} from '../../../../../examples/demos/starline-dominion';
 
-type Owner = 'human' | 'agent' | 'neutral';
-type Planet = { id: string; name: string; x: number; y: number; owner: Owner; strength: number; production: number };
-type Fleet = { id: number; owner: Exclude<Owner, 'neutral'>; from: string; to: string; strength: number; progress: number; duration: number };
-type Clash = { id: number; x: number; y: number; ttl: number };
-
-const edges: Array<[string, string]> = [
-  ['home', 'mine'], ['home', 'forge'], ['mine', 'relay'], ['forge', 'relay'],
-  ['relay', 'crown'], ['relay', 'rift'], ['crown', 'enemy'], ['rift', 'enemy'],
-  ['mine', 'crown'], ['forge', 'rift'],
-];
-const initialPlanets: Planet[] = [
-  { id: 'home', name: 'Aster', x: 10, y: 50, owner: 'human', strength: 34, production: 3 },
-  { id: 'mine', name: 'Morrow', x: 29, y: 20, owner: 'neutral', strength: 10, production: 2 },
-  { id: 'forge', name: 'Forge', x: 29, y: 78, owner: 'neutral', strength: 12, production: 3 },
-  { id: 'relay', name: 'Relay', x: 50, y: 50, owner: 'neutral', strength: 15, production: 4 },
-  { id: 'crown', name: 'Crown', x: 69, y: 20, owner: 'neutral', strength: 11, production: 3 },
-  { id: 'rift', name: 'Rift', x: 69, y: 78, owner: 'neutral', strength: 9, production: 2 },
-  { id: 'enemy', name: 'Nyx', x: 90, y: 50, owner: 'agent', strength: 34, production: 3 },
-];
+const edges = STARLINE_EDGES.map(([from, to]) => [from, to] as [string, string]);
 const planetImages: Record<string, string> = {
   home: 'aster',
   mine: 'morrow',
@@ -31,30 +23,31 @@ const planetImages: Record<string, string> = {
   enemy: 'nyx',
 };
 
-const planets = ref<Planet[]>([]);
-const fleets = ref<Fleet[]>([]);
-const tick = ref(0);
+const seed = ref(731);
 const speed = ref(1);
 const paused = ref(false);
 const selected = ref<string | null>(null);
 const autoplayHuman = ref(false);
-const decision = ref('Select an owned planet, then a connected destination.');
-const eventLog = ref('Real-time simulation ready');
-const clashes = ref<Clash[]>([]);
-let fleetId = 0;
-let clashId = 0;
+const pendingAction = ref<StarlineLaunchOption['action'] | null>(null);
+const decisionOverride = ref<string | null>(null);
+let environment = createStarlineEnvironment(seed.value);
+const observation = ref<StarlineView>(environment.reset().observation);
 let timer: ReturnType<typeof setInterval> | undefined;
 
-const winner = computed<Owner | null>(() => {
-  const owners = new Set(planets.value.filter((planet) => planet.owner !== 'neutral').map((planet) => planet.owner));
-  if (!owners.has('human')) return 'agent';
-  if (!owners.has('agent')) return 'human';
-  return null;
-});
-const selectedPlanet = computed(() => planets.value.find((planet) => planet.id === selected.value) ?? null);
-const legalDestinations = computed(() => new Set(selected.value
-  ? edges.filter(([a, b]) => a === selected.value || b === selected.value).map(([a, b]) => a === selected.value ? b : a)
-  : []));
+const planets = computed(() => observation.value.planets);
+const fleets = computed(() => observation.value.fleets);
+const clashes = computed(() => observation.value.clashes);
+const tick = computed(() => observation.value.tick);
+const winner = computed(() => observation.value.winner);
+const eventLog = computed(() => observation.value.eventLog);
+const decision = computed(() => decisionOverride.value ?? observation.value.decision);
+const legalDestinations = computed(() => new Set(
+  selected.value
+    ? observation.value.legalLaunches
+      .filter((option) => option.from === selected.value && option.ratio === 0.5)
+      .map(({ to }) => to)
+    : [],
+));
 
 function planet(id: string) {
   return planets.value.find((item) => item.id === id)!;
@@ -73,13 +66,13 @@ function edgeStyle([fromId, toId]: [string, string]) {
   };
 }
 
-function fleetStyle(fleet: Fleet) {
+function fleetStyle(fleet: StarlineFleet) {
   const from = planet(fleet.from);
   const to = planet(fleet.to);
-  const t = Math.min(1, fleet.progress / fleet.duration);
+  const progress = Math.min(1, fleet.progress / fleet.duration);
   return {
-    left: `${from.x + (to.x - from.x) * t}%`,
-    top: `${from.y + (to.y - from.y) * t}%`,
+    left: `${from.x + (to.x - from.x) * progress}%`,
+    top: `${from.y + (to.y - from.y) * progress}%`,
     '--heading': `${Math.atan2(to.y - from.y, to.x - from.x) * 180 / Math.PI + 90}deg`,
   };
 }
@@ -95,7 +88,7 @@ function garrisonShipCount(strength: number) {
 function orbitStyle(index: number, count: number) {
   return {
     '--angle': `${index * 360 / count}deg`,
-    '--orbit-radius': `${37 + Math.min(5, count) * .7}px`,
+    '--orbit-radius': `${37 + Math.min(5, count) * 0.7}px`,
   };
 }
 
@@ -103,180 +96,102 @@ function planetImage(id: string) {
   return withBase(`/images/starline-dominion/${planetImages[id]}.png`);
 }
 
-function connected(a: string, b: string) {
-  return edges.some(([from, to]) => (from === a && to === b) || (from === b && to === a));
-}
-
-function sendFleet(fromId: string, toId: string, owner: Exclude<Owner, 'neutral'>, ratio = .5) {
-  const from = planet(fromId);
-  if (from.owner !== owner || !connected(fromId, toId) || from.strength < 4) return;
-  const strength = Math.max(1, Math.floor(from.strength * ratio));
-  from.strength -= strength;
-  const to = planet(toId);
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const distance = Math.sqrt(dx * dx + dy * dy);
-  fleets.value.push({ id: ++fleetId, owner, from: fromId, to: toId, strength, progress: 0, duration: Math.max(18, Math.round(distance * .75)) });
-  eventLog.value = `${owner === 'human' ? 'Aster' : 'Nyx'} launched ${strength} ships from ${from.name} to ${to.name}.`;
-}
-
 function choosePlanet(id: string) {
-  if (paused.value || autoplayHuman.value || winner.value) return;
+  if (paused.value || autoplayHuman.value || winner.value || pendingAction.value) return;
   const target = planet(id);
   if (!selected.value) {
     if (target.owner === 'human') {
       selected.value = id;
-      decision.value = `${target.name} selected · ${target.strength} ships available`;
+      decisionOverride.value = `${target.name} selected · ${target.strength} ships available`;
     }
     return;
   }
   if (selected.value === id) {
     selected.value = null;
-    decision.value = 'Selection cleared. Choose a blue planet to issue another order.';
+    decisionOverride.value = 'Selection cleared. Choose a blue planet to issue another order.';
     return;
   }
-  if (legalDestinations.value.has(id)) {
+  const option = observation.value.legalLaunches.find((candidate) => (
+    candidate.from === selected.value
+    && candidate.to === id
+    && candidate.ratio === 0.5
+  ));
+  if (option) {
     const source = planet(selected.value);
-    const reinforcing = target.owner === 'human';
-    sendFleet(selected.value, id, 'human');
-    decision.value = reinforcing
-      ? `Reinforcements launched from ${source.name} to ${target.name}`
-      : `${source.name} fleet committed toward ${target.name}`;
+    pendingAction.value = { ...option.action };
+    decisionOverride.value = target.owner === 'human'
+      ? `Reinforcements queued from ${source.name} to ${target.name}`
+      : `${source.name} fleet queued toward ${target.name}`;
     selected.value = null;
     return;
   }
   if (target.owner === 'human') {
     selected.value = id;
-    decision.value = `${target.name} selected · ${target.strength} ships available`;
-    return;
+    decisionOverride.value = `${target.name} selected · ${target.strength} ships available`;
   }
 }
 
-function resolveArrival(fleet: Fleet) {
-  const target = planet(fleet.to);
-  if (target.owner === fleet.owner) target.strength += fleet.strength;
-  else if (fleet.strength > target.strength) {
-    const remaining = fleet.strength - target.strength;
-    target.owner = fleet.owner;
-    target.strength = remaining;
-    eventLog.value = `${target.name} was captured by ${fleet.owner === 'human' ? 'Aster' : 'Nyx'}.`;
-  } else {
-    target.strength -= fleet.strength;
-    if (target.strength === 0) target.owner = 'neutral';
-  }
-}
-
-function edgeProgress(fleet: Fleet) {
-  const edge = edges.find(([a, b]) => connected(a, b) && (a === fleet.from || b === fleet.from) && (a === fleet.to || b === fleet.to))!;
-  const progress = Math.min(1, fleet.progress / fleet.duration);
-  return fleet.from === edge[0] ? progress : 1 - progress;
-}
-
-function resolveFleetBattles() {
-  const removed = new Set<number>();
-  const ordered = [...fleets.value].sort((a, b) => a.id - b.id);
-
-  for (let i = 0; i < ordered.length; i += 1) {
-    const a = ordered[i];
-    if (removed.has(a.id)) continue;
-    for (let j = i + 1; j < ordered.length; j += 1) {
-      const b = ordered[j];
-      if (
-        removed.has(b.id)
-        || a.owner === b.owner
-        || a.from !== b.to
-        || a.to !== b.from
-      ) continue;
-
-      const collisionWindow = 1 / a.duration + 1 / b.duration + .002;
-      if (Math.abs(edgeProgress(a) - edgeProgress(b)) > collisionWindow) continue;
-
-      const aPosition = fleetStyle(a);
-      const bPosition = fleetStyle(b);
-      clashes.value.push({
-        id: ++clashId,
-        x: (Number.parseFloat(aPosition.left) + Number.parseFloat(bPosition.left)) / 2,
-        y: (Number.parseFloat(aPosition.top) + Number.parseFloat(bPosition.top)) / 2,
-        ttl: 7,
-      });
-
-      const aBefore = a.strength;
-      const bBefore = b.strength;
-      if (a.strength === b.strength) {
-        removed.add(a.id);
-        removed.add(b.id);
-      } else if (a.strength > b.strength) {
-        a.strength -= b.strength;
-        removed.add(b.id);
-      } else {
-        b.strength -= a.strength;
-        removed.add(a.id);
-      }
-
-      const survivor = aBefore === bBefore
-        ? 'Both fleets were destroyed'
-        : `${aBefore > bBefore ? (a.owner === 'human' ? 'Aster' : 'Nyx') : (b.owner === 'human' ? 'Aster' : 'Nyx')} survived with ${Math.abs(aBefore - bBefore)} ships`;
-      eventLog.value = `Fleet clash on the ${planet(a.from).name}–${planet(a.to).name} lane. ${survivor}.`;
-      decision.value = 'Opposing fleets met in transit and resolved combat before either could arrive.';
-      break;
-    }
-  }
-
-  fleets.value = fleets.value.filter((fleet) => !removed.has(fleet.id));
-}
-
-function agentOrder(owner: Exclude<Owner, 'neutral'>) {
-  const owned = planets.value.filter((item) => item.owner === owner && item.strength >= 9)
-    .sort((a, b) => b.strength - a.strength || a.id.localeCompare(b.id));
-  for (const source of owned) {
-    const targets = planets.value
-      .filter((target) => connected(source.id, target.id) && target.owner !== owner)
-      .sort((a, b) => a.strength - b.strength || b.production - a.production);
-    if (targets[0]) {
-      sendFleet(source.id, targets[0].id, owner, targets[0].strength < source.strength / 2 ? .55 : .4);
-      decision.value = `${owner === 'human' ? 'Aster agent' : 'Nyx agent'} sends from ${source.name} toward ${targets[0].name}`;
-      break;
-    }
-  }
+function isStillLegal(action: StarlineLaunchOption['action']) {
+  return observation.value.legalLaunches.some((option) => (
+    option.action.id === action.id && option.action.index === action.index
+  ));
 }
 
 function advance() {
-  if (paused.value || winner.value || (typeof document !== 'undefined' && document.hidden)) return;
-  for (let step = 0; step < speed.value; step += 1) {
-    tick.value += 1;
-    clashes.value = clashes.value.map((clash) => ({ ...clash, ttl: clash.ttl - 1 })).filter((clash) => clash.ttl > 0);
-    if (tick.value % 10 === 0) {
-      for (const node of planets.value) if (node.owner !== 'neutral') node.strength += node.production;
+  if (paused.value || winner.value || (typeof document !== 'undefined' && document.hidden)) {
+    return;
+  }
+  for (let step = 0; step < speed.value && !winner.value; step += 1) {
+    const before = observation.value;
+    let action = { id: STARLINE_ACTIONS.hold } as StarlineLaunchOption['action'];
+    let agentDescription: string | null = null;
+    if (pendingAction.value) {
+      if (isStillLegal(pendingAction.value)) action = pendingAction.value;
+      else decisionOverride.value = 'Queued order expired before the next deterministic tick.';
+      pendingAction.value = null;
+    } else if (autoplayHuman.value && before.tick % 18 === 9) {
+      action = chooseStarlineAction(before);
+      agentDescription = describeStarlineAction(before, action);
     }
-    for (const fleet of fleets.value) fleet.progress += 1;
-    resolveFleetBattles();
-    fleets.value = fleets.value.filter((fleet) => {
-      if (fleet.progress < fleet.duration) return true;
-      resolveArrival(fleet);
-      return false;
-    });
-    if (tick.value % 18 === 0) agentOrder('agent');
-    if (autoplayHuman.value && tick.value % 18 === 9) agentOrder('human');
+    const result = environment.step(action);
+    observation.value = result.observation;
+    if (agentDescription) decisionOverride.value = agentDescription;
+    else if (action.id === STARLINE_ACTIONS.launch) decisionOverride.value = null;
+    if (observation.value.transition?.launches.some(({ fleet }) => fleet.owner === 'agent')) {
+      decisionOverride.value = null;
+    }
+    if (result.done && !winner.value) {
+      paused.value = true;
+      break;
+    }
   }
 }
 
-function reset() {
-  planets.value = initialPlanets.map((item) => ({ ...item }));
-  fleets.value = [];
-  clashes.value = [];
-  tick.value = 0;
+function toggleAutoplay() {
+  autoplayHuman.value = !autoplayHuman.value;
   selected.value = null;
-  paused.value = false;
-  autoplayHuman.value = false;
-  decision.value = 'Select an owned planet, then a connected destination.';
-  eventLog.value = 'Real-time simulation ready';
-  fleetId = 0;
-  clashId = 0;
+  pendingAction.value = null;
+  decisionOverride.value = autoplayHuman.value
+    ? 'Aster agent will issue orders on its next command interval.'
+    : 'Manual command restored. Select a blue planet.';
 }
 
-onMounted(() => { timer = setInterval(advance, 100); });
-onUnmounted(() => { if (timer) clearInterval(timer); });
-reset();
+function reset() {
+  environment = createStarlineEnvironment(seed.value >>> 0);
+  observation.value = environment.reset().observation;
+  selected.value = null;
+  pendingAction.value = null;
+  paused.value = false;
+  autoplayHuman.value = false;
+  decisionOverride.value = null;
+}
+
+onMounted(() => {
+  timer = setInterval(advance, 100);
+});
+onUnmounted(() => {
+  if (timer) clearInterval(timer);
+});
 </script>
 
 <template>
@@ -335,7 +250,7 @@ reset();
         <div class="agent-decision"><span>Latest decision</span><p>{{ decision }}</p></div>
         <div class="agent-metrics"><div><span>Tick</span><strong>{{ tick }}</strong></div><div><span>Fleets</span><strong>{{ fleets.length }}</strong></div><div><span>Speed</span><strong>×{{ speed }}</strong></div></div>
         <div class="game-actions">
-          <button class="primary-action" :disabled="!!winner" @click="autoplayHuman = !autoplayHuman">{{ autoplayHuman ? 'Take command' : 'Watch both factions' }}</button>
+          <button class="primary-action" :disabled="!!winner" @click="toggleAutoplay">{{ autoplayHuman ? 'Take command' : 'Watch both factions' }}</button>
           <button @click="paused = !paused">{{ paused ? 'Resume' : 'Pause' }}</button>
           <button @click="speed = speed === 1 ? 2 : 1">Simulation ×{{ speed === 1 ? 2 : 1 }}</button>
           <button @click="reset">Restart war</button>
