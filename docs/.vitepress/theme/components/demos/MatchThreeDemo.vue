@@ -1,44 +1,18 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref } from 'vue';
-import { createRng, wait } from './game-utils';
+import {
+  PRISM_MATCH_HEIGHT,
+  PRISM_MATCH_LEVELS,
+  PRISM_MATCH_WIDTH,
+  createPrismMatchEnvironment,
+  type PrismMatchCascade,
+  type PrismMatchView,
+} from '../../../../../examples/demos/prism-match';
+import { wait } from './game-utils';
 
-type Swap = { a: number; b: number; value: number };
-type Level = {
-  name: string;
-  subtitle: string;
-  moves: number;
-  locks: number[];
-  relic?: { column: number; row: number };
-  voids: number[];
-};
-
-const width = 7;
-const height = 7;
-const gemNames = ['Ember', 'Tide', 'Bloom', 'Sun', 'Void', 'Frost'];
-const levels: Level[] = [
-  {
-    name: 'Fractured Seal',
-    subtitle: 'Break every crystal lock by matching on or beside it.',
-    moves: 15,
-    locks: [16, 17, 18, 23, 24, 25],
-    voids: [],
-  },
-  {
-    name: 'The Sun Key',
-    subtitle: 'Clear matches beneath the key to lower it into the exit.',
-    moves: 16,
-    locks: [31, 32, 33],
-    relic: { column: 3, row: 0 },
-    voids: [],
-  },
-  {
-    name: 'Void Garden',
-    subtitle: 'Clear every corrupted cell before the void spreads again.',
-    moves: 18,
-    locks: [],
-    voids: [0, 1, 7, 41, 47, 48],
-  },
-];
+const width = PRISM_MATCH_WIDTH;
+const height = PRISM_MATCH_HEIGHT;
+const levels = PRISM_MATCH_LEVELS;
 
 const seed = ref(2407);
 const levelIndex = ref(0);
@@ -60,14 +34,15 @@ const message = ref('');
 const decision = ref('Waiting for your move');
 const combo = ref(0);
 const boardElement = ref<HTMLElement | null>(null);
-let random = createRng(seed.value);
 let runToken = 0;
+let environment: ReturnType<typeof createPrismMatchEnvironment>;
+let observation: PrismMatchView;
 
-const level = computed(() => levels[levelIndex.value]);
+const level = computed(() => levels[levelIndex.value]!);
 const objectiveComplete = computed(() => {
-  if (levelIndex.value === 0) return Object.values(locks.value).every((hp) => hp <= 0);
-  if (levelIndex.value === 1) return relicDelivered.value;
-  return voids.value.size === 0;
+  if (level.value.relic) return relicDelivered.value;
+  if (level.value.voids.length > 0) return voids.value.size === 0;
+  return Object.values(locks.value).every((hp) => hp <= 0);
 });
 const stateLabel = computed(() => {
   if (objectiveComplete.value) return 'Chamber solved';
@@ -75,31 +50,29 @@ const stateLabel = computed(() => {
   return agentPlaying.value ? 'Agent solving' : 'Your move';
 });
 const objectiveProgress = computed(() => {
-  if (levelIndex.value === 0) {
-    const total = level.value.locks.length * 2;
-    const left = Object.values(locks.value).reduce((sum, hp) => sum + Math.max(0, hp), 0);
-    return Math.round(((total - left) / total) * 100);
+  if (level.value.relic) {
+    return relicDelivered.value
+      ? 100
+      : Math.round((relicRow.value / (height - 1)) * 100);
   }
-  if (levelIndex.value === 1) return relicDelivered.value ? 100 : Math.round((relicRow.value / (height - 1)) * 100);
-  const total = level.value.voids.length;
-  return Math.round(((total - Math.min(total, voids.value.size)) / total) * 100);
+  if (level.value.voids.length > 0) {
+    const total = level.value.voids.length;
+    return Math.round(((total - Math.min(total, voids.value.size)) / total) * 100);
+  }
+  const total = level.value.locks.length * 2;
+  if (total === 0) return 100;
+  const left = Object.values(locks.value).reduce((sum, hp) => sum + Math.max(0, hp), 0);
+  return Math.round(((total - left) / total) * 100);
 });
+
+function adjacent(a: number, b: number) {
+  const aRow = Math.floor(a / width);
+  const bRow = Math.floor(b / width);
+  return Math.abs(aRow - bRow) + Math.abs((a % width) - (b % width)) === 1;
+}
 
 function row(index: number) {
   return Math.floor(index / width);
-}
-
-function adjacent(a: number, b: number) {
-  return Math.abs(row(a) - row(b)) + Math.abs((a % width) - (b % width)) === 1;
-}
-
-function neighbors(index: number) {
-  return [index - width, index + width, index - 1, index + 1]
-    .filter((next) => next >= 0 && next < width * height && adjacent(index, next));
-}
-
-function swapCells(values: number[], a: number, b: number) {
-  [values[a], values[b]] = [values[b], values[a]];
 }
 
 function gridStep(direction: number) {
@@ -144,164 +117,33 @@ async function waitForBoardMotion() {
   await Promise.allSettled(animations.map((animation) => animation.finished));
 }
 
-function matches(values: number[]) {
-  const found = new Set<number>();
-  for (let y = 0; y < height; y += 1) {
-    let start = 0;
-    for (let x = 1; x <= width; x += 1) {
-      const changed = x === width || values[y * width + x] !== values[y * width + start];
-      if (changed) {
-        if (x - start >= 3) for (let at = start; at < x; at += 1) found.add(y * width + at);
-        start = x;
-      }
-    }
-  }
-  for (let x = 0; x < width; x += 1) {
-    let start = 0;
-    for (let y = 1; y <= height; y += 1) {
-      const changed = y === height || values[y * width + x] !== values[start * width + x];
-      if (changed) {
-        if (y - start >= 3) for (let at = start; at < y; at += 1) found.add(at * width + x);
-        start = y;
-      }
-    }
-  }
-  return found;
+function legalSwaps() {
+  return observation?.legalSwaps ?? [];
 }
 
-function puzzleValue(found: Set<number>) {
-  const affected = new Set([...found, ...[...found].flatMap(neighbors)]);
-  const lockBonus = [...affected].reduce((sum, cell) => sum + ((locks.value[cell] ?? 0) > 0 ? 35 : 0), 0);
-  const voidBonus = [...affected].reduce((sum, cell) => sum + (voids.value.has(cell) ? 30 : 0), 0);
-  const relicBonus = level.value.relic && [...found].some((cell) => cell % width === level.value.relic!.column && row(cell) > relicRow.value) ? 55 : 0;
-  return lockBonus + voidBonus + relicBonus;
+function syncObservation(next: PrismMatchView) {
+  observation = next;
+  board.value = [...next.board];
+  score.value = next.score;
+  moves.value = next.moves;
+  locks.value = { ...next.locks };
+  voids.value = new Set(next.voids);
+  relicRow.value = next.relicRow;
+  relicDelivered.value = next.relicDelivered;
 }
 
-function legalSwaps(values = board.value): Swap[] {
-  const options: Swap[] = [];
-  for (let index = 0; index < values.length; index += 1) {
-    if ((locks.value[index] ?? 0) > 0) continue;
-    for (const next of [index + 1, index + width]) {
-      if (next >= values.length || (next === index + 1 && row(next) !== row(index)) || (locks.value[next] ?? 0) > 0) continue;
-      const copy = [...values];
-      swapCells(copy, index, next);
-      const made = matches(copy);
-      if (made.size) options.push({ a: index, b: next, value: made.size * 10 + puzzleValue(made) });
-    }
-  }
-  return options.sort((a, b) => b.value - a.value || a.a - b.a);
-}
-
-function makeBoard() {
-  const values: number[] = [];
-  for (let index = 0; index < width * height; index += 1) {
-    let gem = Math.floor(random() * gemNames.length);
-    const x = index % width;
-    const y = row(index);
-    while (
-      (x >= 2 && values[index - 1] === gem && values[index - 2] === gem)
-      || (y >= 2 && values[index - width] === gem && values[index - width * 2] === gem)
-    ) gem = (gem + 1) % gemNames.length;
-    values.push(gem);
-  }
-  if (!legalSwaps(values).length) {
-    values[0] = 0;
-    values[1] = 1;
-    values[2] = 0;
-    values[width + 1] = 0;
-  }
-  return values;
-}
-
-function reset() {
-  runToken += 1;
-  agentPlaying.value = false;
-  random = createRng(seed.value + levelIndex.value * 997);
-  locks.value = Object.fromEntries(level.value.locks.map((cell) => [cell, 2]));
-  voids.value = new Set(level.value.voids);
-  relicRow.value = level.value.relic?.row ?? -1;
-  relicDelivered.value = false;
-  board.value = makeBoard();
-  score.value = 0;
-  moves.value = level.value.moves;
-  selected.value = null;
-  clearing.value = new Set();
-  swapMotions.value = {};
-  swapRejected.value = false;
-  falling.value = {};
-  combo.value = 0;
-  locked.value = false;
-  message.value = level.value.subtitle;
-  decision.value = 'Waiting for your move';
-}
-
-function applyPuzzleEffects(found: Set<number>) {
-  const affected = new Set([...found, ...[...found].flatMap(neighbors)]);
-  const nextLocks = { ...locks.value };
-  for (const cell of affected) if ((nextLocks[cell] ?? 0) > 0) nextLocks[cell] -= 1;
-  locks.value = nextLocks;
-
-  const nextVoids = new Set(voids.value);
-  for (const cell of affected) nextVoids.delete(cell);
-  voids.value = nextVoids;
-
-  if (level.value.relic && !relicDelivered.value) {
-    const clearsBelow = [...found].some((cell) => cell % width === level.value.relic!.column && row(cell) > relicRow.value);
-    if (clearsBelow) {
-      relicRow.value += 1;
-      if (relicRow.value >= height - 1) relicDelivered.value = true;
-    }
-  }
-}
-
-function spreadVoid() {
-  if (levelIndex.value !== 2 || voids.value.size === 0) return;
-  const frontier = [...voids.value].sort((a, b) => a - b).flatMap(neighbors)
-    .filter((cell) => !voids.value.has(cell));
-  if (frontier.length) voids.value = new Set([...voids.value, frontier[Math.floor(random() * frontier.length)]]);
-}
-
-async function resolveBoard(token: number) {
-  combo.value = 0;
-  let found = matches(board.value);
-  while (found.size && token === runToken) {
-    combo.value += 1;
-    clearing.value = found;
-    applyPuzzleEffects(found);
-    const gained = found.size * 10 * combo.value;
-    score.value += gained;
-    message.value = combo.value > 1 ? `Cascade ×${combo.value} · puzzle state updated` : `Match · +${gained}`;
-    await waitForBoardMotion();
-    if (token !== runToken) return;
-    const next = Array<number>(width * height).fill(-1);
-    const fallDistances: Record<number, number> = {};
-    for (let x = 0; x < width; x += 1) {
-      let destinationRow = height - 1;
-      for (let sourceRow = height - 1; sourceRow >= 0; sourceRow -= 1) {
-        const source = sourceRow * width + x;
-        if (found.has(source)) continue;
-        const destination = destinationRow * width + x;
-        next[destination] = board.value[source]!;
-        const distance = destinationRow - sourceRow;
-        if (distance > 0) fallDistances[destination] = distance;
-        destinationRow -= 1;
-      }
-      const refillCount = destinationRow + 1;
-      while (destinationRow >= 0) {
-        const destination = destinationRow * width + x;
-        next[destination] = Math.floor(random() * gemNames.length);
-        fallDistances[destination] = refillCount;
-        destinationRow -= 1;
-      }
-    }
-    board.value = next;
-    clearing.value = new Set();
-    falling.value = fallDistances;
-    await waitForBoardMotion();
-    falling.value = {};
-    await nextTick();
-    found = matches(board.value);
-  }
+function applyCascadeFrame(frame: PrismMatchCascade) {
+  board.value = [...frame.boardBefore];
+  clearing.value = new Set(frame.matched);
+  score.value = frame.score;
+  locks.value = { ...frame.locks };
+  voids.value = new Set(frame.voids);
+  relicRow.value = frame.relicRow;
+  relicDelivered.value = frame.relicDelivered;
+  combo.value = frame.combo;
+  message.value = frame.combo > 1
+    ? `Cascade ×${frame.combo} · puzzle state updated`
+    : `Match · +${frame.gained}`;
 }
 
 async function playSwap(a: number, b: number, actor: 'human' | 'agent') {
@@ -309,9 +151,10 @@ async function playSwap(a: number, b: number, actor: 'human' | 'agent') {
   locked.value = true;
   selected.value = null;
   const token = runToken;
-  const next = [...board.value];
-  swapCells(next, a, b);
-  const valid = matches(next).size > 0;
+  const option = legalSwaps().find((swap) => (
+    (swap.a === a && swap.b === b) || (swap.a === b && swap.b === a)
+  ));
+  const valid = option !== undefined;
   startSwapMotion(a, b, !valid);
   await waitForBoardMotion();
   if (token !== runToken) return;
@@ -323,14 +166,33 @@ async function playSwap(a: number, b: number, actor: 'human' | 'agent') {
     locked.value = false;
     return;
   }
-  board.value = next;
+  const result = environment.step(option.action);
+  const transition = result.observation.transition;
+  if (!transition) throw new Error('Prism Match reducer did not publish a transition');
   swapMotions.value = {};
   swapRejected.value = false;
-  moves.value -= 1;
-  await resolveBoard(token);
-  if (token !== runToken) return;
-  if (!objectiveComplete.value) spreadVoid();
-  message.value = objectiveComplete.value ? `${level.value.name} solved!` : moves.value ? level.value.subtitle : 'The chamber seals. Restart the level.';
+  moves.value = result.observation.moves;
+  combo.value = 0;
+  for (const frame of transition.cascades) {
+    applyCascadeFrame(frame);
+    await waitForBoardMotion();
+    if (token !== runToken) return;
+    clearing.value = new Set();
+    board.value = [...frame.boardAfter];
+    falling.value = { ...frame.fallDistances };
+    await waitForBoardMotion();
+    if (token !== runToken) return;
+    falling.value = {};
+    await nextTick();
+  }
+  syncObservation(result.observation);
+  message.value = result.observation.objectiveComplete
+    ? `${level.value.name} solved!`
+    : result.observation.moves <= 0
+      ? 'The chamber seals. Restart the level.'
+      : transition.reshuffled
+        ? 'No legal swaps remained, so the chamber reshuffled deterministically.'
+        : level.value.subtitle;
   locked.value = false;
 }
 
@@ -348,8 +210,6 @@ async function agentStep() {
   if (locked.value || moves.value <= 0 || objectiveComplete.value) return;
   const options = legalSwaps();
   if (!options.length) {
-    seed.value += 1;
-    reset();
     return;
   }
   const best = options[0];
@@ -367,6 +227,25 @@ async function toggleAgent() {
     await wait(360);
   }
   if (token === runToken) agentPlaying.value = false;
+}
+
+function reset() {
+  runToken += 1;
+  agentPlaying.value = false;
+  environment = createPrismMatchEnvironment(
+    level.value,
+    (seed.value + levelIndex.value * 997) >>> 0,
+  );
+  syncObservation(environment.reset().observation);
+  selected.value = null;
+  clearing.value = new Set();
+  swapMotions.value = {};
+  swapRejected.value = false;
+  falling.value = {};
+  combo.value = 0;
+  locked.value = false;
+  message.value = level.value.subtitle;
+  decision.value = 'Waiting for your move';
 }
 
 function takeControl() {

@@ -158,12 +158,22 @@ function towerAimAngle(tower: Tower) {
   return Math.atan2(target.point.y - from.y, target.point.x - from.x) * 180 / Math.PI - 180;
 }
 
+function distanceSquared(a: MapPoint, b: MapPoint) {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return dx * dx + dy * dy;
+}
+
+function withinRange(a: MapPoint, b: MapPoint, range: number) {
+  return distanceSquared(a, b) <= range * range;
+}
+
 function isZombieSlowed(zombie: Zombie) {
   const point = zombiePoint(zombie);
   return towers.value.some((tower) => {
     if (tower.kind !== 'floodlight') return false;
     const socket = sockets[tower.socket];
-    return Math.hypot(point.x - socket.x, point.y - socket.y) <= towerInfo.floodlight.range;
+    return withinRange(point, socket, towerInfo.floodlight.range);
   });
 }
 
@@ -196,7 +206,7 @@ function nearestTargets(socket: MapPoint, range: number) {
   return zombies.value
     .filter((zombie) => zombie.hp > 0)
     .map((zombie) => ({ zombie, point: zombiePoint(zombie) }))
-    .filter(({ point }) => Math.hypot(point.x - socket.x, point.y - socket.y) <= range)
+    .filter(({ point }) => withinRange(point, socket, range))
     .sort((a, b) => {
       const progressA = a.zombie.segment * 100 + a.zombie.progress;
       const progressB = b.zombie.segment * 100 + b.zombie.progress;
@@ -241,7 +251,11 @@ function moveZombies() {
   for (const zombie of zombies.value) {
     const point = zombiePoint(zombie);
     const slowed = isZombieSlowed(zombie);
-    const screamerBoost = zombies.value.some((other) => other.type === 'Screamer' && other.id !== zombie.id && Math.hypot(zombiePoint(other).x - point.x, zombiePoint(other).y - point.y) < 12);
+    const screamerBoost = zombies.value.some((other) => (
+      other.type === 'Screamer'
+      && other.id !== zombie.id
+      && distanceSquared(zombiePoint(other), point) < 12 * 12
+    ));
     zombie.progress += zombie.speed * (slowed ? .55 : 1) * (screamerBoost ? 1.25 : 1);
     if (zombie.progress >= 100) {
       zombie.segment += 1;
