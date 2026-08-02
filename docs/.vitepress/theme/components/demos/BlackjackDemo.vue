@@ -1,378 +1,178 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from 'vue';
-import { createRng, wait } from './game-utils';
-
-type Suit = '♠' | '♥' | '♦' | '♣';
-type Card = { rank: string; suit: Suit; value: number };
-type Phase = 'player' | 'dealer' | 'settled';
-type FavorKind = 'peek' | 'cut' | 'twist' | 'ace' | 'breath' | 'crown';
-type FavorCard = { kind: FavorKind; name: string; cost: number; glyph: string; text: string };
-
-const favorLibrary: FavorCard[] = [
-  { kind: 'peek', name: 'Candle Peek', cost: 1, glyph: '◉', text: 'Reveal the dealer hole card.' },
-  { kind: 'cut', name: 'Cut the Deck', cost: 1, glyph: '✂', text: 'Burn the next card before hitting.' },
-  { kind: 'twist', name: 'Twist of Fate', cost: 2, glyph: '⑵', text: 'Draw two cards and choose one.' },
-  { kind: 'ace', name: 'Glass Ace', cost: 2, glyph: 'A', text: 'Treat one selected card as an Ace.' },
-  { kind: 'breath', name: 'Last Breath', cost: 2, glyph: '↶', text: 'Cancel the next card that would bust.' },
-  { kind: 'crown', name: 'Crowned Hand', cost: 1, glyph: '♛', text: 'A three-card 21 receives a premium payout.' },
-];
+import type { SubmittedAction } from '../../../../../src/engine/index';
+import {
+  MIDNIGHT_HOUSE_ACTIONS,
+  chooseMidnightHouseAction,
+  createMidnightHouseEnvironment,
+  describeMidnightHouseAction,
+  type MidnightHouseCard,
+  type MidnightHouseFavorCard,
+  type MidnightHouseFavorKind,
+  type MidnightHouseFrame,
+  type MidnightHousePhase,
+  type MidnightHouseView,
+} from '../../../../../examples/demos/midnight-house';
+import { wait } from './game-utils';
 
 const seed = ref(1701);
-const chips = ref(250);
 const bet = ref(25);
+const chips = ref(250);
 const wager = ref(25);
-const player = ref<Card[]>([]);
-const dealer = ref<Card[]>([]);
-const deck = ref<Card[]>([]);
-const phase = ref<Phase>('settled');
+const player = ref<MidnightHouseCard[]>([]);
+const dealer = ref<(MidnightHouseCard | null)[]>([]);
+const phase = ref<MidnightHousePhase>('settled');
 const revealDealer = ref(false);
 const message = ref('Place your bet.');
 const decision = ref('Waiting for the deal');
 const agentPlaying = ref(false);
-const handsPlayed = ref(0);
+const animating = ref(false);
 const wins = ref(0);
 const favor = ref(3);
-const favorDeck = ref<FavorCard[]>([]);
-const favorHand = ref<FavorCard[]>([]);
-const favorDiscard = ref<FavorCard[]>([]);
+const favorHand = ref<MidnightHouseFavorCard[]>([]);
 const favorUsed = ref(false);
 const glassAceIndex = ref<number | null>(null);
 const targetingAce = ref(false);
-const lastBreathArmed = ref(false);
-const crownedHand = ref(false);
-const twistChoices = ref<Card[]>([]);
-let random = createRng(seed.value);
+const twistChoices = ref<MidnightHouseCard[]>([]);
+const playerValue = ref(0);
+const dealerValue = ref<number | null>(null);
+const legalActionCount = ref(0);
+let environment: ReturnType<typeof createMidnightHouseEnvironment>;
+let observation: MidnightHouseView;
+let legalActionList: SubmittedAction[] = [];
 let runToken = 0;
 
-const playerValue = computed(() => handValue(player.value, glassAceIndex.value));
-const dealerValue = computed(() => handValue(dealer.value));
-const dealerUpValue = computed(() => dealer.value[0]?.value ?? 0);
-const canAct = computed(() => phase.value === 'player' && !agentPlaying.value && twistChoices.value.length === 0 && !targetingAce.value);
-const blackjack = computed(() => player.value.length === 2 && playerValue.value === 21);
-const favorPips = computed(() => Array.from({ length: 5 }, (_, index) => index < favor.value));
+const canAct = computed(() => (
+  phase.value === 'player'
+  && !agentPlaying.value
+  && !animating.value
+  && twistChoices.value.length === 0
+  && !targetingAce.value
+));
+const favorPips = computed(() => Array.from(
+  { length: 5 },
+  (_value, index) => index < favor.value,
+));
 
-function handValue(hand: Card[], forcedAceIndex: number | null = null) {
-  let value = hand.reduce((sum, card, index) => sum + (index === forcedAceIndex ? 11 : card.value), 0);
-  let aces = hand.filter((card, index) => card.rank === 'A' || index === forcedAceIndex).length;
-  while (value > 21 && aces > 0) {
-    value -= 10;
-    aces -= 1;
+const FAVOR_ACTIONS: Record<MidnightHouseFavorKind, string> = {
+  peek: MIDNIGHT_HOUSE_ACTIONS.peek,
+  cut: MIDNIGHT_HOUSE_ACTIONS.cut,
+  twist: MIDNIGHT_HOUSE_ACTIONS.twist,
+  ace: MIDNIGHT_HOUSE_ACTIONS.ace,
+  breath: MIDNIGHT_HOUSE_ACTIONS.breath,
+  crown: MIDNIGHT_HOUSE_ACTIONS.crown,
+};
+
+function syncPresentation(next: MidnightHouseView | MidnightHouseFrame) {
+  chips.value = next.resources.chips ?? 0;
+  favor.value = next.resources.favor ?? 0;
+  wager.value = next.wager;
+  player.value = next.player.map((card) => ({ ...card }));
+  dealer.value = next.dealer.map((card) => card ? { ...card } : null);
+  phase.value = next.phase;
+  revealDealer.value = next.revealDealer;
+  message.value = next.message;
+  wins.value = next.wins;
+  favorHand.value = next.favorHand.map((card) => ({ ...card }));
+  favorUsed.value = next.favorUsed;
+  glassAceIndex.value = next.glassAceIndex;
+  targetingAce.value = next.targetingAce;
+  twistChoices.value = next.twistChoices.map((card) => ({ ...card }));
+  playerValue.value = next.playerValue;
+  dealerValue.value = next.dealerValue;
+}
+
+function syncObservation(next: MidnightHouseView, actions: SubmittedAction[]) {
+  observation = next;
+  legalActionList = actions.map((action) => ({ ...action }));
+  legalActionCount.value = legalActionList.length;
+  syncPresentation(next);
+}
+
+async function performAction(action: SubmittedAction, actor: 'human' | 'agent') {
+  if (animating.value || (actor === 'human' && agentPlaying.value)) return;
+  animating.value = true;
+  const token = runToken;
+  try {
+    const result = environment.step(action);
+    for (const frame of result.observation.transition?.frames ?? []) {
+      syncPresentation(frame);
+      await wait(frame.phase === 'dealer' ? 420 : 260);
+      if (token !== runToken) return;
+    }
+    syncObservation(result.observation, result.legalActions);
+  } finally {
+    if (token === runToken) animating.value = false;
   }
-  return value;
-}
-
-function isSoft(hand: Card[]) {
-  const raw = hand.reduce((sum, card) => sum + card.value, 0);
-  return hand.some((card) => card.rank === 'A') && raw === handValue(hand);
-}
-
-function shuffle<T>(values: T[]) {
-  const copy = [...values];
-  for (let index = copy.length - 1; index > 0; index -= 1) {
-    const next = Math.floor(random() * (index + 1));
-    [copy[index], copy[next]] = [copy[next], copy[index]];
-  }
-  return copy;
-}
-
-function buildDeck() {
-  const suits: Suit[] = ['♠', '♥', '♦', '♣'];
-  const ranks = [
-    ['A', 11], ['2', 2], ['3', 3], ['4', 4], ['5', 5], ['6', 6], ['7', 7],
-    ['8', 8], ['9', 9], ['10', 10], ['J', 10], ['Q', 10], ['K', 10],
-  ] as const;
-  return shuffle(suits.flatMap((suit) => ranks.map(([rank, value]) => ({ rank, suit, value }))));
-}
-
-function draw() {
-  if (deck.value.length < 12) deck.value = buildDeck();
-  return deck.value.pop()!;
-}
-
-function drawFavor() {
-  if (!favorDeck.value.length) {
-    favorDeck.value = shuffle(favorDiscard.value.length ? favorDiscard.value : favorLibrary);
-    favorDiscard.value = [];
-  }
-  return favorDeck.value.pop();
-}
-
-function refreshFavorHand() {
-  favorDiscard.value.push(...favorHand.value);
-  favorHand.value = [];
-  while (favorHand.value.length < 3) {
-    const card = drawFavor();
-    if (!card) break;
-    favorHand.value.push(card);
-  }
-}
-
-function resetHandAbilities() {
-  favorUsed.value = false;
-  glassAceIndex.value = null;
-  targetingAce.value = false;
-  lastBreathArmed.value = false;
-  crownedHand.value = false;
-  twistChoices.value = [];
-}
-
-function resetTable() {
-  runToken += 1;
-  agentPlaying.value = false;
-  random = createRng(seed.value);
-  deck.value = buildDeck();
-  favorDeck.value = shuffle(favorLibrary);
-  favorHand.value = [];
-  favorDiscard.value = [];
-  chips.value = 250;
-  favor.value = 3;
-  handsPlayed.value = 0;
-  wins.value = 0;
-  phase.value = 'settled';
-  decision.value = 'Waiting for the deal';
-  startRound();
-}
-
-function startRound() {
-  if (agentPlaying.value || phase.value !== 'settled') return;
-  if (chips.value < bet.value) {
-    message.value = 'Not enough chips — reset the table to begin again.';
-    return;
-  }
-  resetHandAbilities();
-  refreshFavorHand();
-  wager.value = bet.value;
-  chips.value -= wager.value;
-  player.value = [draw(), draw()];
-  dealer.value = [draw(), draw()];
-  revealDealer.value = false;
-  phase.value = 'player';
-  message.value = blackjack.value ? 'Natural Blackjack!' : 'Play one House Favor, then hit, stand, or double.';
-  decision.value = `${legalActions().length} legal actions across Blackjack and Favor cards`;
-  if (blackjack.value) void dealerTurn();
-}
-
-function playableFavorCards() {
-  if (phase.value !== 'player' || favorUsed.value) return [];
-  return favorHand.value.filter((card) => card.cost <= favor.value);
 }
 
 function legalActions() {
-  if (phase.value !== 'player') return [];
-  const actions = ['Hit', 'Stand'];
-  if (player.value.length === 2 && chips.value >= wager.value) actions.push('Double');
-  actions.push(...playableFavorCards().map((card) => card.name));
-  return actions;
+  return legalActionList;
 }
 
-function consumeFavor(card: FavorCard) {
-  favor.value -= card.cost;
-  favorUsed.value = true;
-  favorHand.value = favorHand.value.filter((item) => item.kind !== card.kind);
-  favorDiscard.value.push(card);
+function startRound() {
+  if (phase.value !== 'settled' || chips.value < bet.value) return;
+  void performAction({ id: MIDNIGHT_HOUSE_ACTIONS.deal }, 'human');
 }
 
-async function chooseTwistCard(index: number, fromAgent = false) {
-  if (!twistChoices.value[index] || (!fromAgent && agentPlaying.value)) return;
-  const chosen = twistChoices.value[index];
-  const rejected = twistChoices.value[index === 0 ? 1 : 0];
-  player.value.push(chosen);
-  twistChoices.value = [];
-  message.value = `Twist chose ${chosen.rank}${chosen.suit}; ${rejected.rank}${rejected.suit} was discarded.`;
-  if (playerValue.value > 21) settle('bust');
-  else if (playerValue.value === 21) await dealerTurn();
+function hit() {
+  void performAction({ id: MIDNIGHT_HOUSE_ACTIONS.hit }, 'human');
 }
 
-async function playFavor(card: FavorCard, fromAgent = false) {
-  if (phase.value !== 'player' || favorUsed.value || card.cost > favor.value || (!fromAgent && agentPlaying.value)) return;
-  consumeFavor(card);
-  decision.value = `${fromAgent ? 'Agent' : 'Player'} played ${card.name} for ${card.cost} Favor`;
-  if (card.kind === 'peek') {
-    revealDealer.value = true;
-    message.value = `Candle Peek reveals ${dealer.value[1].rank}${dealer.value[1].suit}.`;
-  } else if (card.kind === 'cut') {
-    const burned = draw();
-    message.value = `Cut the Deck burned ${burned.rank}${burned.suit}.`;
-  } else if (card.kind === 'twist') {
-    twistChoices.value = [draw(), draw()];
-    message.value = 'Twist of Fate: choose one of the two drawn cards.';
-    if (fromAgent) {
-      const choiceValues = twistChoices.value.map((choice) => handValue([...player.value, choice], glassAceIndex.value));
-      const safe = choiceValues
-        .map((value, index) => ({ value, index }))
-        .filter(({ value }) => value <= 21)
-        .sort((a, b) => b.value - a.value);
-      await wait(260);
-      await chooseTwistCard(safe[0]?.index ?? choiceValues.indexOf(Math.min(...choiceValues)), true);
-    }
-  } else if (card.kind === 'ace') {
-    if (fromAgent) {
-      const target = player.value
-        .map((playingCard, index) => ({ playingCard, index }))
-        .filter(({ playingCard }) => playingCard.rank !== 'A')
-        .sort((a, b) => b.playingCard.value - a.playingCard.value)[0];
-      glassAceIndex.value = target?.index ?? 0;
-      message.value = `${player.value[glassAceIndex.value].rank}${player.value[glassAceIndex.value].suit} became a Glass Ace.`;
-    } else {
-      targetingAce.value = true;
-      message.value = 'Glass Ace: select one card in your hand.';
-    }
-  } else if (card.kind === 'breath') {
-    lastBreathArmed.value = true;
-    message.value = 'Last Breath is armed for the next draw that would bust.';
-  } else {
-    crownedHand.value = true;
-    message.value = 'Crowned Hand will enhance a three-or-more-card 21.';
-  }
+function stand() {
+  void performAction({ id: MIDNIGHT_HOUSE_ACTIONS.stand }, 'human');
+}
+
+function doubleDown() {
+  void performAction({ id: MIDNIGHT_HOUSE_ACTIONS.double }, 'human');
+}
+
+function playFavor(card: MidnightHouseFavorCard) {
+  decision.value = `Player played ${card.name} for ${card.cost} Favor`;
+  void performAction({ id: FAVOR_ACTIONS[card.kind] }, 'human');
+}
+
+function chooseTwistCard(index: number) {
+  void performAction({
+    id: MIDNIGHT_HOUSE_ACTIONS.chooseTwist,
+    index,
+  }, 'human');
 }
 
 function chooseGlassAce(index: number) {
-  if (!targetingAce.value || agentPlaying.value) return;
-  glassAceIndex.value = index;
-  targetingAce.value = false;
-  message.value = `${player.value[index].rank}${player.value[index].suit} is treated as an Ace this hand.`;
-}
-
-async function resolvePlayerDraw() {
-  if (playerValue.value > 21 && lastBreathArmed.value) {
-    const cancelled = player.value.pop()!;
-    lastBreathArmed.value = false;
-    message.value = `Last Breath cancelled ${cancelled.rank}${cancelled.suit} and forces a stand.`;
-    await wait(320);
-    await dealerTurn();
-  } else if (playerValue.value > 21) settle('bust');
-  else if (playerValue.value === 21) await dealerTurn();
-}
-
-async function hit(fromAgent = false) {
-  if (phase.value !== 'player' || twistChoices.value.length || targetingAce.value || (!fromAgent && agentPlaying.value)) return;
-  player.value.push(draw());
-  message.value = `Drew ${player.value.at(-1)!.rank}${player.value.at(-1)!.suit}.`;
-  await resolvePlayerDraw();
-}
-
-async function stand(fromAgent = false) {
-  if (phase.value !== 'player' || twistChoices.value.length || targetingAce.value || (!fromAgent && agentPlaying.value)) return;
-  await dealerTurn();
-}
-
-async function doubleDown(fromAgent = false) {
-  if (phase.value !== 'player' || player.value.length !== 2 || chips.value < wager.value || twistChoices.value.length || targetingAce.value) return;
-  if (!fromAgent && agentPlaying.value) return;
-  chips.value -= wager.value;
-  wager.value *= 2;
-  player.value.push(draw());
-  message.value = `Doubled to ${wager.value} chips.`;
-  if (playerValue.value > 21 && lastBreathArmed.value) {
-    const cancelled = player.value.pop()!;
-    lastBreathArmed.value = false;
-    message.value = `Last Breath cancelled ${cancelled.rank}${cancelled.suit}; the doubled hand stands.`;
-  } else if (playerValue.value > 21) {
-    settle('bust');
-    return;
-  }
-  await dealerTurn();
-}
-
-async function dealerTurn() {
-  const token = runToken;
-  phase.value = 'dealer';
-  revealDealer.value = true;
-  twistChoices.value = [];
-  targetingAce.value = false;
-  message.value = 'Dealer reveals the hole card.';
-  await wait(420);
-  while (dealerValue.value < 17 && token === runToken) {
-    dealer.value.push(draw());
-    message.value = `Dealer draws ${dealer.value.at(-1)!.rank}${dealer.value.at(-1)!.suit}.`;
-    await wait(420);
-  }
-  if (token !== runToken) return;
-  settle('compare');
-}
-
-function settle(reason: 'bust' | 'compare') {
-  revealDealer.value = true;
-  phase.value = 'settled';
-  handsPlayed.value += 1;
-  const dealerBlackjack = dealer.value.length === 2 && dealerValue.value === 21;
-  let favorEarned = 0;
-  if (reason === 'bust' || playerValue.value > 21) {
-    message.value = `Bust at ${playerValue.value}. Dealer wins.`;
-  } else if (dealerValue.value > 21 || playerValue.value > dealerValue.value) {
-    const crowned = crownedHand.value && player.value.length >= 3 && playerValue.value === 21;
-    const payout = crowned
-      ? wager.value * 3
-      : blackjack.value && !dealerBlackjack ? Math.floor(wager.value * 2.5) : wager.value * 2;
-    chips.value += payout;
-    wins.value += 1;
-    favorEarned = 1 + (dealerValue.value > 21 ? 1 : 0);
-    favor.value = Math.min(5, favor.value + favorEarned);
-    message.value = `${dealerValue.value > 21 ? 'Dealer busts' : crowned ? 'Crowned 21' : 'You win'} · +${payout - wager.value} chips · +${favorEarned} Favor.`;
-  } else if (playerValue.value === dealerValue.value) {
-    chips.value += wager.value;
-    message.value = `Push at ${playerValue.value}. Bet returned.`;
-  } else {
-    message.value = `Dealer wins ${dealerValue.value} to ${playerValue.value}.`;
-  }
-  agentPlaying.value = false;
-}
-
-function agentFavorChoice() {
-  if (favorUsed.value) return undefined;
-  const available = playableFavorCards();
-  const find = (kind: FavorKind) => available.find((card) => card.kind === kind);
-  if (playerValue.value >= 15 && find('breath')) return find('breath');
-  if (playerValue.value >= 14 && playerValue.value <= 17 && find('twist')) return find('twist');
-  if (dealerUpValue.value >= 10 && find('peek')) return find('peek');
-  if (player.value.length >= 3 && playerValue.value >= 18 && find('crown')) return find('crown');
-  if (playerValue.value >= 16 && find('ace')) return find('ace');
-  return undefined;
-}
-
-function agentChoice() {
-  const value = playerValue.value;
-  const up = dealerUpValue.value;
-  const soft = isSoft(player.value);
-  const canDouble = player.value.length === 2 && chips.value >= wager.value;
-  if (revealDealer.value && dealerValue.value < value && value <= 21) return 'Stand';
-  if (canDouble && !soft && (value === 11 || (value === 10 && up <= 9))) return 'Double';
-  if (soft && value <= 17) return 'Hit';
-  if (value >= 17) return 'Stand';
-  if (value <= 11) return 'Hit';
-  if (value >= 12 && value <= 16 && up >= 2 && up <= 6) return 'Stand';
-  return 'Hit';
+  void performAction({
+    id: MIDNIGHT_HOUSE_ACTIONS.chooseAce,
+    index,
+  }, 'human');
 }
 
 async function agentStep() {
-  if (phase.value === 'settled') {
-    startRound();
-    return;
-  }
-  if (phase.value !== 'player') return;
-  const favorCard = agentFavorChoice();
-  if (favorCard) {
-    await playFavor(favorCard, true);
-    return;
-  }
-  const choice = agentChoice();
-  decision.value = `${isSoft(player.value) ? 'Soft' : 'Hard'} ${playerValue.value} vs dealer ${dealerUpValue.value} → ${choice}`;
-  message.value = `Strategy agent chooses ${choice.toLowerCase()}.`;
+  if (phase.value !== 'player' || animating.value) return;
+  const action = chooseMidnightHouseAction(observation);
+  decision.value = describeMidnightHouseAction(observation, action);
   await wait(350);
-  if (choice === 'Hit') await hit(true);
-  else if (choice === 'Double') await doubleDown(true);
-  else await stand(true);
+  await performAction(action, 'agent');
 }
 
 async function watchAgent() {
-  if (phase.value === 'settled') startRound();
-  if (phase.value !== 'player') return;
+  if (phase.value !== 'player' || animating.value) return;
   agentPlaying.value = true;
   const token = runToken;
   while (agentPlaying.value && phase.value === 'player' && token === runToken) {
     await agentStep();
     await wait(420);
   }
+  if (token === runToken) agentPlaying.value = false;
+}
+
+function resetTable() {
+  runToken += 1;
+  agentPlaying.value = false;
+  animating.value = false;
+  environment = createMidnightHouseEnvironment(seed.value >>> 0, { bet: bet.value });
+  const initial = environment.reset();
+  syncObservation(initial.observation, initial.legalActions);
+  decision.value = `${legalActionCount.value} SDK-enumerated actions · waiting for your move`;
 }
 
 onUnmounted(() => { runToken += 1; });
@@ -397,13 +197,13 @@ resetTable();
           <TransitionGroup name="card-deal" tag="div" class="playing-hand" appear>
             <div
               v-for="(card, index) in dealer"
-              :key="`${card.rank}${card.suit}-${index}`"
+              :key="`${card?.rank ?? 'hidden'}${card?.suit ?? ''}-${index}`"
               class="playing-card"
-              :class="{ red: card.suit === '♥' || card.suit === '♦', hidden: index === 1 && !revealDealer }"
+              :class="{ red: card?.suit === '♥' || card?.suit === '♦', hidden: index === 1 && !revealDealer }"
               :style="{ '--deal-index': index }"
             >
               <Transition name="card-reveal" mode="out-in">
-                <div v-if="index !== 1 || revealDealer" :key="`front-${card.rank}${card.suit}`" class="card-face">
+                <div v-if="card && (index !== 1 || revealDealer)" :key="`front-${card.rank}${card.suit}`" class="card-face">
                   <b>{{ card.rank }}</b><span>{{ card.suit }}</span><em>{{ card.suit }}</em>
                 </div>
                 <div v-else key="back" class="card-back">GAOS</div>
@@ -427,7 +227,7 @@ resetTable();
               class="playing-card player-card"
               :class="{ red: card.suit === '♥' || card.suit === '♦', 'glass-ace': glassAceIndex === index, targetable: targetingAce }"
               :style="{ '--deal-index': index }"
-              :disabled="!targetingAce"
+              :disabled="!targetingAce || agentPlaying || animating"
               @click="chooseGlassAce(index)"
             >
               <b>{{ glassAceIndex === index ? 'A' : card.rank }}</b><span>{{ card.suit }}</span><em>{{ card.suit }}</em>
@@ -438,7 +238,7 @@ resetTable();
 
         <div v-if="twistChoices.length" class="twist-choice">
           <span>Choose one card</span>
-          <button v-for="(card, index) in twistChoices" :key="`${card.rank}-${card.suit}`" :class="{ red: card.suit === '♥' || card.suit === '♦' }" @click="chooseTwistCard(index)">
+          <button v-for="(card, index) in twistChoices" :key="`${card.rank}-${card.suit}`" :class="{ red: card.suit === '♥' || card.suit === '♦' }" :disabled="agentPlaying || animating" @click="chooseTwistCard(index)">
             <b>{{ card.rank }}</b><i>{{ card.suit }}</i>
           </button>
         </div>
@@ -455,7 +255,7 @@ resetTable();
               class="favor-card"
               :class="{ exhausted: favorUsed || card.cost > favor }"
               :style="{ '--favor-index': index }"
-              :disabled="phase !== 'player' || agentPlaying || favorUsed || card.cost > favor || twistChoices.length > 0 || targetingAce"
+              :disabled="phase !== 'player' || agentPlaying || animating || favorUsed || card.cost > favor || twistChoices.length > 0 || targetingAce"
               @click="playFavor(card)"
             >
               <span class="favor-cost">{{ card.cost }}</span><b>{{ card.glyph }}</b><strong>{{ card.name }}</strong><small>{{ card.text }}</small>
@@ -472,7 +272,7 @@ resetTable();
             <button :disabled="!canAct" @click="stand()">Stand</button>
             <button :disabled="!canAct || player.length !== 2 || chips < wager" @click="doubleDown()">Double</button>
           </template>
-          <button v-else class="deal-button" :disabled="chips < bet" @click="startRound">Deal next hand</button>
+          <button v-else class="deal-button" :disabled="chips < bet || agentPlaying || animating" @click="startRound">Deal next hand</button>
         </div>
       </div>
 
@@ -483,8 +283,8 @@ resetTable();
           <div><span>Legal actions</span><strong>{{ legalActions().length }}</strong></div><div><span>Favor</span><strong>{{ favor }}</strong></div><div><span>Wins</span><strong>{{ wins }}</strong></div>
         </div>
         <div class="game-actions">
-          <button class="primary-action" :disabled="phase !== 'player' || agentPlaying" @click="watchAgent">Watch agent</button>
-          <button :disabled="phase !== 'player' || agentPlaying" @click="agentStep">Step once</button>
+          <button class="primary-action" :disabled="phase !== 'player' || agentPlaying || animating" @click="watchAgent">Watch agent</button>
+          <button :disabled="phase !== 'player' || agentPlaying || animating" @click="agentStep">Step once</button>
           <button @click="resetTable">Reset table</button>
         </div>
         <label class="seed-control"><span>Seed</span><input v-model.number="seed" type="number" min="1" @change="resetTable"></label>
