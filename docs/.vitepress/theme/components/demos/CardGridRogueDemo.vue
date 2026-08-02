@@ -1,314 +1,129 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref } from 'vue';
 import { withBase } from 'vitepress';
-import { manhattan, wait, type Point } from './game-utils';
+import {
+  CINDER_ACTIONS,
+  CINDER_MAX_ACTIONS,
+  CINDER_SIZE,
+  chooseCinderVaultAction,
+  createCinderVaultEnvironment,
+  describeCinderVaultAction,
+  type CinderCard,
+  type CinderCardKind,
+  type CinderCombatAnimation,
+  type CinderEnemy,
+  type CinderMotion,
+  type CinderPlan,
+  type CinderPoint,
+  type CinderPreview,
+  type CinderSnapshot,
+  type CinderTrajectory,
+  type CinderVaultView,
+} from '../../../../../examples/demos/cinder-vault';
+import { wait } from './game-utils';
 
-type CardKind = 'step' | 'vault' | 'bash' | 'hook' | 'bolt' | 'guard' | 'wait';
-type Card = { kind: CardKind; name: string; text: string; glyph: string };
-type Enemy = Point & { id: string; name: string; hp: number; maxHp: number; damage: number };
-type Plan = { card: Card; target: Point; summary: string };
-type EnemyIntent = { enemy: Enemy; intent: { kind: 'attack' | 'move'; target: Point } };
-type Preview = { kind: 'move' | 'attack' | 'guard'; beat: number; endpoint: boolean; ghost: boolean };
-type ProjectedEnemy = Enemy & { origin: Point; movedAt: number | null };
-type ProjectedState = { hero: Point; enemies: ProjectedEnemy[] };
-type TrajectorySegment = {
-  kind: 'move' | 'attack' | 'displacement';
-  beat: number;
-  from: Point;
-  to: Point;
-  ghost: boolean;
-};
-type Motion = 'move' | 'attack' | 'cast' | 'guard' | 'collision';
-type CombatAnimation = {
-  id: string;
-  kind: 'projectile' | 'melee' | 'tether';
-  sourceId: string;
-  from: Point;
-  to: Point;
-};
-type MovementResolution = {
-  blockHero: boolean;
-  blockedEnemyIds: Set<string>;
-  collisionCells: Set<number>;
-};
-
-const size = 6;
-const maxActions = 3;
-const handSize = 4;
-const cards: Card[] = [
-  { kind: 'step', name: 'Step', text: 'Move one tile.', glyph: '→' },
-  { kind: 'vault', name: 'Vault', text: 'Jump over an obstacle.', glyph: '⌁' },
-  { kind: 'bash', name: 'Bash', text: 'Push an adjacent enemy.', glyph: '»' },
-  { kind: 'hook', name: 'Hook', text: 'Pull a visible enemy closer.', glyph: '↢' },
-  { kind: 'bolt', name: 'Cinder Bolt', text: 'Damage a foe or ignite a barrel.', glyph: '✦' },
-  { kind: 'guard', name: 'Guard', text: 'Gain two shield.', glyph: '◇' },
-];
-const waitCard: Card = { kind: 'wait', name: 'Wait', text: 'Take no action this beat.', glyph: '·' };
-
+const size = CINDER_SIZE;
+const maxActions = CINDER_MAX_ACTIONS;
 const seed = ref(616);
-const room = ref(1);
-const turn = ref(1);
-const hero = ref({ x: 0, y: 5, hp: 8, maxHp: 8, shield: 0 });
-const enemies = ref<Enemy[]>([]);
-const walls = ref(new Set<number>());
-const spikes = ref(new Set<number>());
-const pits = ref(new Set<number>());
-const barrels = ref(new Set<number>());
-const plate = ref<number | null>(null);
-const gate = ref<number | null>(null);
-const gateOpen = ref(false);
-const queue = ref<Plan[]>([]);
-const hand = ref<Card[]>([]);
-const drawPile = ref<Card[]>([]);
-const discardPile = ref<Card[]>([]);
-const selectedKind = ref<CardKind | null>(null);
+const selectedKind = ref<CinderCardKind | null>(null);
 const hoveredIndex = ref<number | null>(null);
 const resolving = ref(false);
 const autoplay = ref(false);
 const activeBeat = ref<number | null>(null);
-const heroMotion = ref<Motion | null>(null);
-const enemyMotions = ref<Record<string, Motion>>({});
-const combatAnimations = ref<CombatAnimation[]>([]);
+const animationPlans = ref<CinderPlan[]>([]);
+const animationFrame = ref<CinderSnapshot | null>(null);
+const heroMotion = ref<CinderMotion | null>(null);
+const enemyMotions = ref<Record<string, CinderMotion>>({});
+const combatAnimations = ref<CinderCombatAnimation[]>([]);
 const hitEnemyIds = ref(new Set<string>());
 const delayedHitEnemyIds = ref(new Set<string>());
 const heroHit = ref(false);
 const collisionCells = ref(new Set<number>());
-const message = ref('Program up to three actions, preview the paths, then commit.');
-const decision = ref('Waiting for a plan');
-const lastEvent = ref('Entered the vault');
+const messageOverride = ref<string | null>(null);
+const decisionOverride = ref<string | null>(null);
+const eventOverride = ref<string | null>(null);
+let environment = createCinderVaultEnvironment(seed.value);
+const observation = ref<CinderVaultView>(environment.reset().observation);
 let runToken = 0;
 
+const room = computed(() => observation.value.room);
+const turn = computed(() => observation.value.turn);
+const hero = computed(() => animationFrame.value?.hero ?? observation.value.hero);
+const enemies = computed(() => animationFrame.value?.enemies ?? observation.value.enemies);
+const walls = computed(() => new Set(observation.value.walls));
+const spikes = computed(() => new Set(observation.value.spikes));
+const pits = computed(() => new Set(observation.value.pits));
+const barrels = computed(() => new Set(
+  animationFrame.value?.barrels ?? observation.value.barrels,
+));
+const plate = computed(() => observation.value.plate);
+const gate = computed(() => observation.value.gate);
+const gateOpen = computed(() => (
+  animationFrame.value?.gateOpen ?? observation.value.gateOpen
+));
+const queue = computed(() => (
+  resolving.value ? animationPlans.value : observation.value.queue
+));
+const hand = computed(() => observation.value.hand);
+const drawPile = computed(() => Array.from({ length: observation.value.drawCount }));
+const discardPile = computed(() => Array.from({ length: observation.value.discardCount }));
 const actionsLeft = computed(() => maxActions - queue.value.length);
-const selectedCard = computed(() => hand.value.find((card) => card.kind === selectedKind.value) ?? null);
-const projectedState = computed(() => simulatePlans(queue.value));
-const virtualHero = computed(() => projectedState.value.hero);
-const projectedEnemies = computed(() => projectedState.value.enemies);
+const virtualHero = computed(() => observation.value.projected.hero);
+const projectedEnemies = computed(() => observation.value.projected.enemies);
 const phantomEnemies = computed(() => resolving.value ? [] : projectedEnemies.value.filter((enemy) => (
   enemy.x !== enemy.origin.x || enemy.y !== enemy.origin.y
 )));
-const won = computed(() => room.value === 3 && enemies.value.length === 0);
-const defeated = computed(() => hero.value.hp <= 0);
-const roomCleared = computed(() => enemies.value.length === 0 && !won.value);
-const targetCells = computed(() => new Set(selectedCard.value ? legalTargets(selectedCard.value).map(indexAt) : []));
+const won = computed(() => observation.value.won);
+const defeated = computed(() => observation.value.defeated);
+const roomCleared = computed(() => observation.value.roomCleared);
+const message = computed(() => messageOverride.value ?? observation.value.message);
+const decision = computed(() => decisionOverride.value ?? observation.value.decision);
+const lastEvent = computed(() => eventOverride.value ?? observation.value.lastEvent);
+const selectedCard = computed(() => (
+  hand.value.find(({ kind }) => kind === selectedKind.value) ?? null
+));
+const selectedPlans = computed(() => observation.value.legalPlans.filter(({ card }) => (
+  card.kind === selectedKind.value
+)));
+const targetCells = computed(() => new Set(selectedPlans.value.map(({ target }) => indexAt(target))));
+const hoveredPlan = computed(() => {
+  if (hoveredIndex.value === null) return null;
+  return selectedPlans.value.find(({ target }) => indexAt(target) === hoveredIndex.value) ?? null;
+});
 const previewCells = computed(() => {
-  const previews = new Map<number, Preview>();
+  const previews = new Map<number, CinderPreview>();
   if (resolving.value) return previews;
-  const state = initialProjectedState();
-  queue.value.forEach((plan, index) => {
-    addPreview(previews, state.hero, plan.card, plan.target, index + 1, false);
-    applyProjectedBeat(state, plan, index + 1);
-  });
-  if (selectedCard.value && hoveredIndex.value !== null && targetCells.value.has(hoveredIndex.value)) {
-    addPreview(previews, state.hero, selectedCard.value, pointAt(hoveredIndex.value), queue.value.length + 1, true);
-  }
+  for (const preview of observation.value.previews) previews.set(indexAt(preview.cell), preview);
+  for (const preview of hoveredPlan.value?.preview ?? []) previews.set(indexAt(preview.cell), preview);
   return previews;
 });
-const trajectorySegments = computed(() => {
-  const segments: TrajectorySegment[] = [];
-  if (resolving.value) return segments;
-  const state = initialProjectedState();
-  queue.value.forEach((plan, index) => {
-    addTrajectory(segments, state, plan, index + 1, false);
-    applyProjectedBeat(state, plan, index + 1);
-  });
-  if (selectedCard.value && hoveredIndex.value !== null && targetCells.value.has(hoveredIndex.value)) {
-    addTrajectory(segments, state, {
-      card: selectedCard.value,
-      target: pointAt(hoveredIndex.value),
-      summary: '',
-    }, queue.value.length + 1, true);
-  }
-  return segments;
-});
-function indexAt(point: Point) {
+const trajectorySegments = computed(() => (
+  resolving.value
+    ? []
+    : [...observation.value.trajectories, ...(hoveredPlan.value?.trajectory ?? [])]
+));
+
+function indexAt(point: CinderPoint) {
   return point.y * size + point.x;
 }
 
-function pointAt(index: number) {
+function pointAt(index: number): CinderPoint {
   return { x: index % size, y: Math.floor(index / size) };
 }
 
-function cellName(point: Point) {
-  return `${String.fromCharCode(65 + point.x)}${point.y + 1}`;
-}
-
-function inside(point: Point) {
-  return point.x >= 0 && point.y >= 0 && point.x < size && point.y < size;
-}
-
-function enemyAt(point: Point) {
+function enemyAt(point: CinderPoint) {
   return enemies.value.find((enemy) => enemy.x === point.x && enemy.y === point.y);
 }
 
-function projectedEnemyAt(point: Point, projected = projectedEnemies.value) {
-  return projected.find((enemy) => enemy.x === point.x && enemy.y === point.y);
-}
-
-function phantomAt(point: Point) {
+function phantomAt(point: CinderPoint) {
   return phantomEnemies.value.find((enemy) => enemy.x === point.x && enemy.y === point.y);
 }
 
-function isBlocked(point: Point, includeHero = true) {
-  const index = indexAt(point);
-  return !inside(point)
-    || walls.value.has(index)
-    || (gate.value === index && !gateOpen.value)
-    || barrels.value.has(index)
-    || !!enemyAt(point)
-    || (includeHero && hero.value.x === point.x && hero.value.y === point.y);
+function previewAt(index: number) {
+  return previewCells.value.get(index);
 }
 
-function terrainBlocked(point: Point) {
-  const index = indexAt(point);
-  return !inside(point)
-    || walls.value.has(index)
-    || (gate.value === index && !gateOpen.value);
-}
-
-function initialProjectedState(): ProjectedState {
-  return {
-    hero: { x: hero.value.x, y: hero.value.y },
-    enemies: enemies.value.map((enemy) => ({
-      ...enemy,
-      origin: { x: enemy.x, y: enemy.y },
-      movedAt: null,
-    })),
-  };
-}
-
-function cloneProjectedState(state: ProjectedState): ProjectedState {
-  return {
-    hero: { ...state.hero },
-    enemies: state.enemies.map((enemy) => ({ ...enemy, origin: { ...enemy.origin } })),
-  };
-}
-
-function isBlockedInProjectedState(point: Point, state: ProjectedState, includeHero = true) {
-  const index = indexAt(point);
-  return terrainBlocked(point)
-    || barrels.value.has(index)
-    || !!projectedEnemyAt(point, state.enemies)
-    || (includeHero && state.hero.x === point.x && state.hero.y === point.y);
-}
-
-function pushProjectedEnemy(state: ProjectedState, enemyId: string, dx: number, dy: number, beat: number): boolean {
-  const enemy = state.enemies.find((item) => item.id === enemyId);
-  if (!enemy) return false;
-  const destination = { x: enemy.x + dx, y: enemy.y + dy };
-  if (terrainBlocked(destination) || (destination.x === state.hero.x && destination.y === state.hero.y)) return false;
-  const chained = projectedEnemyAt(destination, state.enemies);
-  if (chained && !pushProjectedEnemy(state, chained.id, dx, dy, beat)) return false;
-  enemy.x = destination.x;
-  enemy.y = destination.y;
-  enemy.movedAt = beat;
-  const destinationIndex = indexAt(destination);
-  if (pits.value.has(destinationIndex)) {
-    state.enemies = state.enemies.filter((item) => item.id !== enemy.id);
-  } else if (spikes.value.has(destinationIndex)) {
-    enemy.hp -= 2;
-    if (enemy.hp <= 0) state.enemies = state.enemies.filter((item) => item.id !== enemy.id);
-  }
-  return true;
-}
-
-function applyProjectedPlan(state: ProjectedState, plan: Plan, beat: number) {
-  const kind = plan.card.kind;
-  if (kind === 'step' || kind === 'vault') {
-    state.hero = { ...plan.target };
-    return;
-  }
-  if (kind === 'bash' || kind === 'hook') {
-    const enemy = projectedEnemyAt(plan.target, state.enemies);
-    if (!enemy) return;
-    const dx = kind === 'bash' ? Math.sign(enemy.x - state.hero.x) : Math.sign(state.hero.x - enemy.x);
-    const dy = kind === 'bash' ? Math.sign(enemy.y - state.hero.y) : Math.sign(state.hero.y - enemy.y);
-    pushProjectedEnemy(state, enemy.id, dx, dy, beat);
-    return;
-  }
-  if (kind === 'bolt') {
-    const enemy = projectedEnemyAt(plan.target, state.enemies);
-    if (enemy) {
-      enemy.hp -= 2;
-      if (enemy.hp <= 0) state.enemies = state.enemies.filter((item) => item.id !== enemy.id);
-    }
-  }
-}
-
-function applyProjectedBeat(state: ProjectedState, plan: Plan, beat: number) {
-  applyProjectedPlan(state, plan, beat);
-}
-
-function simulatePlans(plans: Plan[]) {
-  const state = initialProjectedState();
-  plans.forEach((plan, index) => applyProjectedBeat(state, plan, index + 1));
-  return state;
-}
-
-function lineDirections() {
-  return [[1, 0], [-1, 0], [0, 1], [0, -1]];
-}
-
-function straightLine(origin: Point, target: Point) {
-  if (origin.x !== target.x && origin.y !== target.y) return [];
-  const dx = Math.sign(target.x - origin.x);
-  const dy = Math.sign(target.y - origin.y);
-  const points: Point[] = [];
-  let point = { ...origin };
-  while (point.x !== target.x || point.y !== target.y) {
-    point = { x: point.x + dx, y: point.y + dy };
-    points.push(point);
-  }
-  return points;
-}
-
-function hasClearLine(origin: Point, target: Point, projected = projectedEnemies.value) {
-  const line = straightLine(origin, target);
-  if (!line.length || line.length > 3) return false;
-  return line.slice(0, -1).every((point) => {
-    const index = indexAt(point);
-    return !walls.value.has(index)
-      && !(gate.value === index && !gateOpen.value)
-      && !barrels.value.has(index)
-      && !projectedEnemyAt(point, projected);
-  });
-}
-
-function predictiveLineTargets(origin: Point, state: ProjectedState, allowBarrelTarget: boolean) {
-  return lineDirections().flatMap(([dx, dy]) => [1, 2, 3]
-    .map((distance) => ({ x: origin.x + dx * distance, y: origin.y + dy * distance }))
-    .filter((target) => inside(target)
-      && !terrainBlocked(target)
-      && (allowBarrelTarget || !barrels.value.has(indexAt(target)))
-      && hasClearLine(origin, target, state.enemies)));
-}
-
-function addTrajectory(segments: TrajectorySegment[], state: ProjectedState, plan: Plan, beat: number, ghost: boolean) {
-  const from = { ...state.hero };
-  const kind = plan.card.kind;
-  if (kind === 'step' || kind === 'vault') {
-    segments.push({ kind: 'move', beat, from, to: { ...plan.target }, ghost });
-    return;
-  }
-  if (kind === 'guard' || kind === 'wait') return;
-  segments.push({ kind: 'attack', beat, from, to: { ...plan.target }, ghost });
-  if (kind !== 'bash' && kind !== 'hook') return;
-  const enemy = projectedEnemyAt(plan.target, state.enemies);
-  if (!enemy) return;
-  const next = cloneProjectedState(state);
-  applyProjectedPlan(next, plan, beat);
-  const moved = next.enemies.find((item) => item.id === enemy.id);
-  if (moved && (moved.x !== enemy.x || moved.y !== enemy.y)) {
-    segments.push({
-      kind: 'displacement',
-      beat,
-      from: { x: enemy.x, y: enemy.y },
-      to: { x: moved.x, y: moved.y },
-      ghost,
-    });
-  }
-}
-
-function segmentCoordinates(segment: TrajectorySegment) {
+function segmentCoordinates(segment: CinderTrajectory) {
   const dx = segment.to.x - segment.from.x;
   const dy = segment.to.y - segment.from.y;
   const length = Math.max(Math.hypot(dx, dy), 1);
@@ -321,407 +136,74 @@ function segmentCoordinates(segment: TrajectorySegment) {
   };
 }
 
-function addPreview(previews: Map<number, Preview>, origin: Point, card: Card, target: Point, beat: number, ghost: boolean) {
-  if (card.kind === 'wait') return;
-  let points: Point[] = [];
-  let kind: Preview['kind'] = 'attack';
-  if (card.kind === 'step') {
-    kind = 'move';
-    points = [target];
-  } else if (card.kind === 'vault') {
-    kind = 'move';
-    points = [
-      { x: (origin.x + target.x) / 2, y: (origin.y + target.y) / 2 },
-      target,
-    ];
-  } else if (card.kind === 'guard') {
-    kind = 'guard';
-    points = [origin];
-  } else {
-    points = straightLine(origin, target);
-    if (!points.length) points = [target];
-    if (card.kind === 'bash') {
-      const dx = Math.sign(target.x - origin.x);
-      const dy = Math.sign(target.y - origin.y);
-      const pushed = { x: target.x + dx, y: target.y + dy };
-      if (inside(pushed)) points.push(pushed);
-    }
-  }
-  points.forEach((point, index) => previews.set(indexAt(point), {
-    kind,
-    beat,
-    endpoint: index === points.length - 1 || (card.kind === 'bash' && index === 0),
-    ghost,
-  }));
-}
-
-function previewAt(index: number) {
-  return previewCells.value.get(index);
-}
-
-function tokenFor(enemy: Enemy) {
+function tokenFor(enemy: CinderEnemy) {
   if (enemy.name === 'Sentinel') return withBase('/images/cinder-vault/sentinel.webp');
   if (enemy.name === 'Vault Heart') return withBase('/images/cinder-vault/vault-heart.webp');
   if (enemy.name === 'Wisp') return withBase('/images/cinder-vault/wisp.webp');
   return withBase('/images/cinder-vault/ashling.webp');
 }
 
-function isElite(enemy: Enemy) {
+function isElite(enemy: CinderEnemy) {
   return enemy.name === 'Sentinel' || enemy.name === 'Vault Heart';
 }
 
-function spawnRoom(number: number) {
-  const layouts = [
-    {
-      enemies: [
-        { id: 'ash-a', name: 'Ashling', x: 3, y: 4, hp: 3, maxHp: 3, damage: 1 },
-        { id: 'ash-b', name: 'Ashling', x: 5, y: 2, hp: 3, maxHp: 3, damage: 1 },
-      ],
-      walls: [14, 20], spikes: [28, 10], pits: [5], barrels: [16], plate: 8, gate: 9,
-    },
-    {
-      enemies: [
-        { id: 'sentinel', name: 'Sentinel', x: 4, y: 4, hp: 5, maxHp: 5, damage: 2 },
-        { id: 'ash-c', name: 'Ashling', x: 2, y: 1, hp: 3, maxHp: 3, damage: 1 },
-      ],
-      walls: [13, 14, 22], spikes: [21, 27], pits: [4, 11], barrels: [17, 29], plate: 18, gate: 19,
-    },
-    {
-      enemies: [
-        { id: 'heart', name: 'Vault Heart', x: 4, y: 1, hp: 7, maxHp: 7, damage: 2 },
-        { id: 'wisp', name: 'Wisp', x: 3, y: 4, hp: 3, maxHp: 3, damage: 1 },
-      ],
-      walls: [8, 14, 20], spikes: [9, 15, 27], pits: [5, 30], barrels: [16, 28], plate: 21, gate: 22,
-    },
-  ][number - 1];
-  enemies.value = layouts.enemies.map((enemy) => ({ ...enemy }));
-  walls.value = new Set(layouts.walls);
-  spikes.value = new Set(layouts.spikes);
-  pits.value = new Set(layouts.pits);
-  barrels.value = new Set(layouts.barrels);
-  plate.value = layouts.plate;
-  gate.value = layouts.gate;
-  gateOpen.value = false;
-}
-
-function nextRandom() {
-  seed.value = (seed.value * 1664525 + 1013904223) >>> 0;
-  return seed.value / 4294967296;
-}
-
-function shuffleCards(source: Card[]) {
-  const shuffled = [...source];
-  for (let index = shuffled.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(nextRandom() * (index + 1));
-    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
-  }
-  return shuffled;
-}
-
-function refillDrawPile() {
-  if (drawPile.value.length || !discardPile.value.length) return;
-  drawPile.value = shuffleCards(discardPile.value);
-  discardPile.value = [];
-}
-
-function drawToHand() {
-  while (hand.value.length < handSize) {
-    refillDrawPile();
-    const card = drawPile.value.shift();
-    if (!card) break;
-    hand.value.push(card);
-  }
-}
-
-function resetDeck() {
-  hand.value = [];
-  discardPile.value = [];
-  drawPile.value = shuffleCards(cards);
-  drawToHand();
-}
-
-function returnPlansToHand(plans: Plan[]) {
-  hand.value.push(...plans.map((plan) => plan.card).filter((card) => card.kind !== 'wait'));
-}
-
-function discardPlans(plans: Plan[]) {
-  discardPile.value.push(...plans.map((plan) => plan.card).filter((card) => card.kind !== 'wait'));
-}
-
-function waitPlan(summary = 'Wait · no card programmed'): Plan {
-  return { card: waitCard, target: { x: hero.value.x, y: hero.value.y }, summary };
-}
-
-function reset() {
-  runToken += 1;
-  room.value = 1;
-  turn.value = 1;
-  hero.value = { x: 0, y: 5, hp: 8, maxHp: 8, shield: 0 };
-  queue.value = [];
+function sync(next: CinderVaultView) {
+  observation.value = next;
   selectedKind.value = null;
   hoveredIndex.value = null;
-  resolving.value = false;
-  autoplay.value = false;
-  activeBeat.value = null;
-  heroMotion.value = null;
-  enemyMotions.value = {};
-  combatAnimations.value = [];
-  hitEnemyIds.value = new Set();
-  delayedHitEnemyIds.value = new Set();
-  heroHit.value = false;
-  collisionCells.value = new Set();
-  resetDeck();
-  spawnRoom(1);
-  message.value = 'Program up to three actions, preview the paths, then commit.';
-  decision.value = 'Waiting for a plan';
-  lastEvent.value = 'Entered the first chamber';
 }
 
-function legalTargets(card: Card): Point[] {
-  if (queue.value.length >= maxActions || resolving.value) return [];
-  const state = projectedState.value;
-  const origin = state.hero;
-  if (card.kind === 'wait') return [];
-  if (card.kind === 'guard') return [{ ...origin }];
-  if (card.kind === 'step') {
-    return lineDirections().map(([dx, dy]) => ({ x: origin.x + dx, y: origin.y + dy }))
-      .filter((point) => inside(point) && !isBlockedInProjectedState(point, state, false));
-  }
-  if (card.kind === 'vault') {
-    return lineDirections().flatMap(([dx, dy]) => {
-      const middle = { x: origin.x + dx, y: origin.y + dy };
-      const landing = { x: origin.x + dx * 2, y: origin.y + dy * 2 };
-      return inside(landing)
-        && isBlockedInProjectedState(middle, state, false)
-        && !isBlockedInProjectedState(landing, state, false) ? [landing] : [];
-    });
-  }
-  if (card.kind === 'bash') {
-    return lineDirections()
-      .map(([dx, dy]) => ({ x: origin.x + dx, y: origin.y + dy }))
-      .filter((target) => inside(target)
-        && !terrainBlocked(target)
-        && !barrels.value.has(indexAt(target)));
-  }
-  if (card.kind === 'hook') return predictiveLineTargets(origin, state, false);
-  return predictiveLineTargets(origin, state, true);
-}
-
-function chooseCard(card: Card) {
-  if (queue.value.length >= maxActions || resolving.value) return;
+function chooseCard(card: CinderCard) {
+  if (queue.value.length >= maxActions || resolving.value || autoplay.value) return;
   selectedKind.value = selectedKind.value === card.kind ? null : card.kind;
   hoveredIndex.value = null;
-  message.value = selectedKind.value ? card.text : 'Choose a card.';
+  messageOverride.value = selectedKind.value ? card.text : 'Choose a card.';
 }
 
-function chooseTile(point: Point) {
-  const card = selectedCard.value;
-  if (!card || !targetCells.value.has(indexAt(point))) return;
-  queue.value.push({ card, target: { ...point }, summary: `${card.name} → ${String.fromCharCode(65 + point.x)}${point.y + 1}` });
-  hand.value = hand.value.filter((item) => item.kind !== card.kind);
-  selectedKind.value = null;
-  hoveredIndex.value = null;
-  message.value = queue.value.length === maxActions
-    ? 'All three actions are ready. Review the paths, then commit.'
-    : `${card.name} added to beat ${queue.value.length}. ${actionsLeft.value} action${actionsLeft.value === 1 ? '' : 's'} left.`;
+function chooseTile(point: CinderPoint) {
+  if (resolving.value || autoplay.value) return;
+  const plan = selectedPlans.value.find(({ target }) => (
+    target.x === point.x && target.y === point.y
+  ));
+  if (!plan) return;
+  sync(environment.step(plan.action).observation);
+  messageOverride.value = null;
+  decisionOverride.value = null;
+  eventOverride.value = null;
 }
 
 function removePlan(index: number) {
-  if (!resolving.value) {
-    const returned = queue.value.splice(index);
-    returnPlansToHand(returned);
-    selectedKind.value = null;
-    hoveredIndex.value = null;
-    message.value = `Beat ${index + 1} and the actions after it were cancelled.`;
+  if (resolving.value || autoplay.value || index < 0 || index >= observation.value.queue.length) {
+    return;
   }
+  sync(environment.step({ id: CINDER_ACTIONS.remove, index }).observation);
+  messageOverride.value = null;
+  decisionOverride.value = null;
+  eventOverride.value = null;
 }
 
 function cancelSelection() {
   if (resolving.value) return;
   selectedKind.value = null;
   hoveredIndex.value = null;
-  message.value = queue.value.length ? 'Selection cancelled. Your queued actions are unchanged.' : 'Choose a card.';
+  messageOverride.value = queue.value.length
+    ? 'Selection cancelled. Your queued actions are unchanged.'
+    : 'Choose a card.';
 }
 
 function clearPlan() {
-  if (resolving.value) return;
-  returnPlansToHand(queue.value);
-  queue.value = [];
-  selectedKind.value = null;
-  hoveredIndex.value = null;
-  message.value = 'Plan cleared. Choose the first action again.';
+  if (resolving.value || autoplay.value || observation.value.queue.length === 0) return;
+  sync(environment.step({ id: CINDER_ACTIONS.clear }).observation);
+  messageOverride.value = null;
+  decisionOverride.value = null;
+  eventOverride.value = null;
 }
 
-function applyHazard(enemy: Enemy) {
-  const index = indexAt(enemy);
-  if (pits.value.has(index)) {
-    enemies.value = enemies.value.filter((item) => item.id !== enemy.id);
-    lastEvent.value = `${enemy.name} fell into the abyss.`;
-    return;
-  }
-  if (spikes.value.has(index)) {
-    enemies.value = enemies.value.map((item) => item.id === enemy.id ? { ...item, hp: item.hp - 2 } : item).filter((item) => item.hp > 0);
-    lastEvent.value = `${enemy.name} landed on spikes for 2 damage.`;
-  }
-  if (plate.value === index) {
-    gateOpen.value = true;
-    lastEvent.value = `${enemy.name} triggered the gate plate.`;
-  }
-}
-
-function explodeBarrel(point: Point) {
-  barrels.value = new Set([...barrels.value].filter((index) => index !== indexAt(point)));
-  enemies.value = enemies.value
-    .map((enemy) => manhattan(point, enemy) <= 1 ? { ...enemy, hp: enemy.hp - 3 } : enemy)
-    .filter((enemy) => enemy.hp > 0);
-  if (manhattan(point, hero.value) <= 1) hero.value = { ...hero.value, hp: Math.max(0, hero.value.hp - 2) };
-  lastEvent.value = 'The cinder barrel exploded in a chain reaction.';
-}
-
-function pushEnemy(enemy: Enemy, dx: number, dy: number): boolean {
-  const destination = { x: enemy.x + dx, y: enemy.y + dy };
-  const chained = enemyAt(destination);
-  if (chained && !pushEnemy(chained, dx, dy)) {
-    enemies.value = enemies.value.map((item) => item.id === enemy.id || item.id === chained.id ? { ...item, hp: item.hp - 1 } : item).filter((item) => item.hp > 0);
-    lastEvent.value = 'The push chain collapsed into collision damage.';
-    return false;
-  }
-  if (!inside(destination) || walls.value.has(indexAt(destination)) || (gate.value === indexAt(destination) && !gateOpen.value)) {
-    enemies.value = enemies.value.map((item) => item.id === enemy.id ? { ...item, hp: item.hp - 1 } : item).filter((item) => item.hp > 0);
-    lastEvent.value = `${enemy.name} slammed into stone.`;
-    return false;
-  }
-  if (barrels.value.has(indexAt(destination))) {
-    explodeBarrel(destination);
-    enemies.value = enemies.value.map((item) => item.id === enemy.id ? { ...item, ...destination } : item);
-    return true;
-  }
-  enemies.value = enemies.value.map((item) => item.id === enemy.id ? { ...item, ...destination } : item);
-  const moved = enemies.value.find((item) => item.id === enemy.id);
-  if (moved) applyHazard(moved);
-  return true;
-}
-
-function executePlayer(plan: Plan, blockedByCollision = false): boolean {
-  const card = plan.card.kind;
-  let resolved = true;
-  if (card === 'step' || card === 'vault') {
-    if (!blockedByCollision && !isBlocked(plan.target, false)) {
-      hero.value = { ...hero.value, ...plan.target };
-      lastEvent.value = `${plan.card.name} reached ${cellName(plan.target)}.`;
-    } else {
-      resolved = false;
-      lastEvent.value = `${plan.card.name} was interrupted before reaching ${cellName(plan.target)}.`;
-    }
-  } else if (card === 'guard') {
-    hero.value = { ...hero.value, shield: hero.value.shield + 2 };
-    lastEvent.value = 'Guard raised two shield.';
-  } else if (card === 'wait') {
-    lastEvent.value = 'The Wayfarer waited.';
-  } else if (card === 'bash') {
-    const enemy = enemyAt(plan.target);
-    if (enemy && manhattan(hero.value, enemy) === 1) pushEnemy(enemy, enemy.x - hero.value.x, enemy.y - hero.value.y);
-    else {
-      resolved = false;
-      lastEvent.value = `Bash found no enemy at ${cellName(plan.target)}.`;
-    }
-  } else if (card === 'hook') {
-    const enemy = enemyAt(plan.target);
-    if (enemy && hasClearLine(hero.value, enemy, enemies.value)) {
-      const dx = Math.sign(hero.value.x - enemy.x);
-      const dy = Math.sign(hero.value.y - enemy.y);
-      if (pushEnemy(enemy, dx, dy)) lastEvent.value = `${enemy.name} was pulled off its line.`;
-    } else {
-      resolved = false;
-      lastEvent.value = `Hook found no enemy at ${cellName(plan.target)}.`;
-    }
-  } else {
-    if (!hasClearLine(hero.value, plan.target, enemies.value)) {
-      resolved = false;
-      lastEvent.value = `Cinder Bolt lost line of sight to ${cellName(plan.target)}.`;
-    } else if (barrels.value.has(indexAt(plan.target))) {
-      explodeBarrel(plan.target);
-    } else {
-      const enemy = enemyAt(plan.target);
-      if (enemy) {
-        enemies.value = enemies.value.map((item) => item.id === enemy.id ? { ...item, hp: item.hp - 2 } : item).filter((item) => item.hp > 0);
-        lastEvent.value = `Cinder Bolt dealt 2 damage to ${enemy.name}.`;
-      } else {
-        resolved = false;
-        lastEvent.value = `Cinder Bolt found no enemy at ${cellName(plan.target)}.`;
-      }
-    }
-  }
-  message.value = lastEvent.value;
-  return resolved;
-}
-
-function enemyIntent(enemy: Enemy) {
-  if (manhattan(enemy, hero.value) === 1) return { kind: 'attack' as const, target: { x: hero.value.x, y: hero.value.y } };
-  const candidates = lineDirections()
-    .map(([dx, dy]) => ({ x: enemy.x + dx, y: enemy.y + dy }))
-    .filter((point) => inside(point) && !isBlocked(point, false));
-  candidates.sort((a, b) => manhattan(a, hero.value) - manhattan(b, hero.value) || indexAt(a) - indexAt(b));
-  return { kind: 'move' as const, target: candidates[0] ?? { x: enemy.x, y: enemy.y } };
-}
-
-function resolveMovementConflicts(plan: Plan, intents: EnemyIntent[]): MovementResolution {
-  const proposals = new Map<number, Array<{ kind: 'hero' | 'enemy'; id: string }>>();
-  const addProposal = (target: Point, proposal: { kind: 'hero' | 'enemy'; id: string }) => {
-    const index = indexAt(target);
-    proposals.set(index, [...(proposals.get(index) ?? []), proposal]);
-  };
-  if ((plan.card.kind === 'step' || plan.card.kind === 'vault') && !isBlocked(plan.target, false)) {
-    addProposal(plan.target, { kind: 'hero', id: 'hero' });
-  }
-  for (const { enemy, intent } of intents) {
-    if (intent.kind !== 'move' || (intent.target.x === enemy.x && intent.target.y === enemy.y)) continue;
-    addProposal(intent.target, { kind: 'enemy', id: enemy.id });
-  }
-  const blockedEnemyIds = new Set<string>();
-  const collisionCells = new Set<number>();
-  let blockHero = false;
-  for (const [index, contenders] of proposals) {
-    if (contenders.length < 2) continue;
-    collisionCells.add(index);
-    for (const contender of contenders) {
-      if (contender.kind === 'hero') blockHero = true;
-      else blockedEnemyIds.add(contender.id);
-    }
-  }
-  return { blockHero, blockedEnemyIds, collisionCells };
-}
-
-function executeEnemies(intents: EnemyIntent[], blockedEnemyIds = new Set<string>()) {
-  for (const { enemy: snapshot, intent } of intents) {
-    const enemy = enemies.value.find((item) => item.id === snapshot.id);
-    if (!enemy || hero.value.hp <= 0) continue;
-    if (enemy.x !== snapshot.x || enemy.y !== snapshot.y) {
-      lastEvent.value = `${enemy.name}'s intent was disrupted by forced movement.`;
-      continue;
-    }
-    if (intent.kind === 'attack' && manhattan(enemy, hero.value) === 1) {
-      const blockedDamage = Math.min(hero.value.shield, enemy.damage);
-      hero.value = {
-        ...hero.value,
-        shield: hero.value.shield - blockedDamage,
-        hp: Math.max(0, hero.value.hp - (enemy.damage - blockedDamage)),
-      };
-      lastEvent.value = `${enemy.name} attacked${blockedDamage ? ` · ${blockedDamage} blocked` : ''}.`;
-    } else if (intent.kind === 'move' && !blockedEnemyIds.has(enemy.id) && !isBlocked(intent.target, false)) {
-      enemies.value = enemies.value.map((item) => item.id === enemy.id ? { ...item, ...intent.target } : item);
-      const moved = enemies.value.find((item) => item.id === enemy.id);
-      if (moved) applyHazard(moved);
-    }
-    message.value = lastEvent.value;
-  }
-}
-
-function animationCenter(point: Point) {
+function animationCenter(point: CinderPoint) {
   return { x: point.x + 0.5, y: point.y + 0.5 };
 }
 
-function meleeSlashCoordinates(animation: CombatAnimation) {
+function meleeSlashCoordinates(animation: CinderCombatAnimation) {
   const target = animationCenter(animation.to);
   const dx = animation.to.x - animation.from.x;
   const dy = animation.to.y - animation.from.y;
@@ -736,59 +218,14 @@ function meleeSlashCoordinates(animation: CombatAnimation) {
 }
 
 function attackLungeStyle(sourceId: string) {
-  const animation = combatAnimations.value.find((item) => item.sourceId === sourceId && item.kind === 'melee');
+  const animation = combatAnimations.value.find((item) => (
+    item.sourceId === sourceId && item.kind === 'melee'
+  ));
   if (!animation) return {};
   return {
     '--strike-x': `${Math.sign(animation.to.x - animation.from.x) * 12}px`,
     '--strike-y': `${Math.sign(animation.to.y - animation.from.y) * 12}px`,
   };
-}
-
-function prepareAnimations(plan: Plan, intents: EnemyIntent[], movement: MovementResolution) {
-  heroMotion.value = plan.card.kind === 'wait'
-    ? null
-    : plan.card.kind === 'step' || plan.card.kind === 'vault'
-    ? movement.blockHero ? 'collision' : 'move'
-    : plan.card.kind === 'guard'
-      ? 'guard'
-      : plan.card.kind === 'bash' ? 'attack' : 'cast';
-  enemyMotions.value = Object.fromEntries(intents.map(({ enemy, intent }) => [
-    enemy.id,
-    intent.kind === 'move' && movement.blockedEnemyIds.has(enemy.id) ? 'collision' : intent.kind,
-  ]));
-  collisionCells.value = new Set(movement.collisionCells);
-  const animations: CombatAnimation[] = [];
-  const hitIds = new Set<string>();
-  const delayedIds = new Set<string>();
-  const playerTarget = enemyAt(plan.target);
-  if (plan.card.kind === 'bash' || plan.card.kind === 'hook' || plan.card.kind === 'bolt') {
-    const kind = plan.card.kind === 'bolt' ? 'projectile' : plan.card.kind === 'hook' ? 'tether' : 'melee';
-    animations.push({
-      id: `${activeBeat.value ?? 0}-player-${plan.card.kind}`,
-      kind,
-      sourceId: 'hero',
-      from: { x: hero.value.x, y: hero.value.y },
-      to: { ...plan.target },
-    });
-    if (playerTarget) {
-      hitIds.add(playerTarget.id);
-      if (kind !== 'melee') delayedIds.add(playerTarget.id);
-    }
-  }
-  for (const { enemy, intent } of intents) {
-    if (intent.kind !== 'attack') continue;
-    animations.push({
-      id: `${activeBeat.value ?? 0}-${enemy.id}-melee`,
-      kind: 'melee',
-      sourceId: enemy.id,
-      from: { x: enemy.x, y: enemy.y },
-      to: { ...intent.target },
-    });
-  }
-  combatAnimations.value = animations;
-  hitEnemyIds.value = hitIds;
-  delayedHitEnemyIds.value = delayedIds;
-  heroHit.value = intents.some(({ intent }) => intent.kind === 'attack');
 }
 
 function clearAnimations() {
@@ -802,143 +239,93 @@ function clearAnimations() {
 }
 
 async function commitTurn() {
-  if (!queue.value.length || resolving.value || defeated.value || roomCleared.value || won.value) return;
+  if (resolving.value || observation.value.queue.length === 0 || defeated.value
+    || roomCleared.value || won.value) {
+    return;
+  }
   resolving.value = true;
   selectedKind.value = null;
   hoveredIndex.value = null;
   const token = runToken;
-  const committedPlans = [...queue.value];
-  const plans = [...committedPlans];
-  while (plans.length < maxActions) plans.push(waitPlan());
-  queue.value = [...plans];
-  const waitCount = maxActions - committedPlans.length;
-  decision.value = `Committed ${committedPlans.length} card${committedPlans.length === 1 ? '' : 's'}${waitCount ? ` and ${waitCount} Wait` : ''}`;
-  let interruptionSummary = '';
-  for (let beat = 0; beat < maxActions && token === runToken; beat += 1) {
-    const plan = plans[beat];
-    const intents: EnemyIntent[] = enemies.value.map((enemy) => ({ enemy: { ...enemy }, intent: enemyIntent(enemy) }));
-    const movement = resolveMovementConflicts(plan, intents);
-    activeBeat.value = beat;
-    clearAnimations();
+  const result = environment.step({ id: CINDER_ACTIONS.commit });
+  const transition = result.observation.transition;
+  if (!transition) throw new Error('Cinder Vault reducer did not publish a transition');
+  observation.value = result.observation;
+  animationPlans.value = transition.plans.map((plan) => ({
+    card: { ...plan.card },
+    target: { ...plan.target },
+    summary: plan.summary,
+  }));
+  decisionOverride.value = `Committed ${transition.committedCount} card${transition.committedCount === 1 ? '' : 's'}${transition.committedCount < maxActions ? ` and ${maxActions - transition.committedCount} Wait` : ''}`;
+
+  for (const beat of transition.beats) {
+    if (token !== runToken) return;
+    activeBeat.value = beat.beat;
+    animationFrame.value = beat.before;
+    heroMotion.value = beat.heroMotion;
+    enemyMotions.value = { ...beat.enemyMotions };
+    combatAnimations.value = beat.combatAnimations.map((animation) => ({
+      ...animation,
+      from: { ...animation.from },
+      to: { ...animation.to },
+    }));
+    hitEnemyIds.value = new Set(beat.hitEnemyIds);
+    delayedHitEnemyIds.value = new Set(
+      beat.combatAnimations.some(({ sourceId, kind }) => sourceId === 'hero' && kind !== 'melee')
+        ? beat.hitEnemyIds
+        : [],
+    );
+    heroHit.value = beat.heroHit;
+    collisionCells.value = new Set(beat.collisionCells);
+    messageOverride.value = `Beat ${beat.beat + 1}: ${beat.plan.card.name} and every enemy response resolve together.`;
     await nextTick();
-    prepareAnimations(plan, intents, movement);
-    message.value = `Beat ${beat + 1}: ${plan.card.name} and every enemy response resolve together.`;
-    const playerResolved = executePlayer(plan, movement.blockHero);
-    const playerEvent = lastEvent.value;
-    executeEnemies(intents, movement.blockedEnemyIds);
-    let collisionEvent = '';
-    if (movement.collisionCells.size) {
-      const cells = [...movement.collisionCells].map((index) => {
-        const point = pointAt(index);
-        return `${String.fromCharCode(65 + point.x)}${point.y + 1}`;
-      });
-      collisionEvent = `Movement collision at ${cells.join(', ')}. Every contender held position.`;
-      lastEvent.value = collisionEvent;
-      message.value = lastEvent.value;
-    }
-    if (!playerResolved && plan.card.kind !== 'wait') {
-      for (let futureBeat = beat + 1; futureBeat < maxActions; futureBeat += 1) {
-        plans[futureBeat] = waitPlan('Wait · program interrupted');
-      }
-      queue.value = [...plans];
-      const reason = movement.blockHero && collisionEvent ? collisionEvent : playerEvent;
-      interruptionSummary = `Program interrupted: ${reason} Later cards became Wait.`;
-      lastEvent.value = interruptionSummary;
-      message.value = lastEvent.value;
-      decision.value = `Program interrupted on beat ${beat + 1}; enemies continue through beat ${maxActions}`;
-    }
-    await nextTick();
+    animationFrame.value = beat.after;
+    eventOverride.value = beat.lastEvent;
     await wait(620);
-    if (hero.value.hp <= 0 || enemies.value.length === 0) break;
   }
   if (token !== runToken) return;
   activeBeat.value = null;
+  animationFrame.value = null;
+  animationPlans.value = [];
   clearAnimations();
-  queue.value = [];
-  discardPlans(committedPlans);
-  drawToHand();
-  if (interruptionSummary) lastEvent.value = `${interruptionSummary} Enemy beats still completed.`;
-  hero.value = { ...hero.value, shield: 0 };
-  turn.value += 1;
   resolving.value = false;
-  if (defeated.value) {
-    autoplay.value = false;
-    message.value = 'The Wayfarer fell in the vault.';
-  } else if (won.value) {
-    autoplay.value = false;
-    message.value = 'The Vault Heart is extinguished. Run complete!';
-  } else if (roomCleared.value) {
-    autoplay.value = false;
-    message.value = `Chamber ${room.value} solved through environmental combat.`;
-  } else {
-    message.value = 'Program the next three actions.';
-    if (autoplay.value) await agentTurn();
-  }
+  messageOverride.value = null;
+  eventOverride.value = null;
+  decisionOverride.value = null;
+  if (defeated.value || won.value || roomCleared.value) autoplay.value = false;
+  else if (autoplay.value) await agentTurn(true);
 }
 
-async function agentTurn() {
+async function agentTurn(fromAutoplay = false) {
   if (resolving.value || defeated.value || roomCleared.value || won.value) return;
-  queue.value = [];
-  const available = [...hand.value];
-  const takeCard = (card: Card, target: Point, summary: string) => {
-    queue.value.push({ card, target: { ...target }, summary });
-    available.splice(available.findIndex((item) => item.kind === card.kind), 1);
-  };
-  while (queue.value.length < maxActions && available.length) {
-    const origin = virtualHero.value;
-    const bash = available.find((card) => card.kind === 'bash');
-    const adjacentEnemy = projectedEnemies.value.find((enemy) => manhattan(origin, enemy) === 1);
-    if (bash && adjacentEnemy) {
-      takeCard(bash, adjacentEnemy, 'Bash toward a hazard');
-      continue;
-    }
-    const bolt = available.find((card) => card.kind === 'bolt');
-    const barrelTarget = bolt
-      ? legalTargets(bolt).find((target) => barrels.value.has(indexAt(target))
-        && !queue.value.some((plan) => plan.card.kind === 'bolt' && indexAt(plan.target) === indexAt(target)))
-      : undefined;
-    if (bolt && barrelTarget) {
-      takeCard(bolt, barrelTarget, 'Ignite environmental chain');
-      continue;
-    }
-    const guard = available.find((card) => card.kind === 'guard');
-    if (guard && hero.value.hp <= 4) {
-      takeCard(guard, origin, 'Protect against incoming attacks');
-      continue;
-    }
-    const step = available.find((card) => card.kind === 'step');
-    const target = step
-      ? legalTargets(step).sort((a, b) => Math.min(...enemies.value.map((enemy) => manhattan(a, enemy))) - Math.min(...enemies.value.map((enemy) => manhattan(b, enemy))))[0]
-      : undefined;
-    if (step && target) {
-      takeCard(step, target, 'Reposition for the next beat');
-      continue;
-    }
-    const fallback = available
-      .map((card) => ({ card, target: legalTargets(card)[0] }))
-      .find(({ target }) => !!target);
-    if (!fallback?.target) break;
-    takeCard(fallback.card, fallback.target, `${fallback.card.name} from shuffled hand`);
+  if (observation.value.queue.length > 0) {
+    sync(environment.step({ id: CINDER_ACTIONS.clear }).observation);
   }
-  hand.value = available;
-  decision.value = `Agent programmed ${queue.value.length} cards from the shuffled hand`;
+  let programmed = 0;
+  while (observation.value.queue.length < maxActions) {
+    const action = chooseCinderVaultAction(observation.value);
+    if (action.id === CINDER_ACTIONS.commit) break;
+    decisionOverride.value = describeCinderVaultAction(observation.value, action);
+    sync(environment.step(action).observation);
+    programmed += 1;
+  }
+  decisionOverride.value = `Agent programmed ${programmed} card${programmed === 1 ? '' : 's'} from the shuffled hand`;
   await wait(350);
+  if (fromAutoplay === true && !autoplay.value) return;
   await commitTurn();
 }
 
 async function toggleAutoplay() {
   autoplay.value = !autoplay.value;
-  if (autoplay.value) await agentTurn();
+  if (autoplay.value) await agentTurn(true);
 }
 
 function nextRoom() {
-  if (!roomCleared.value) return;
-  room.value += 1;
-  hero.value = { x: 0, y: 5, maxHp: hero.value.maxHp + 1, hp: Math.min(hero.value.maxHp + 1, hero.value.hp + 3), shield: 0 };
-  queue.value = [];
-  spawnRoom(room.value);
-  message.value = `Chamber ${room.value}: inspect the new trap layout.`;
-  lastEvent.value = 'Rested and descended.';
+  if (!roomCleared.value || resolving.value) return;
+  sync(environment.step({ id: CINDER_ACTIONS.nextRoom }).observation);
+  messageOverride.value = null;
+  decisionOverride.value = null;
+  eventOverride.value = null;
 }
 
 function tileLabel(index: number) {
@@ -951,8 +338,26 @@ function tileLabel(index: number) {
   return '';
 }
 
-onUnmounted(() => { runToken += 1; });
-reset();
+function reset() {
+  runToken += 1;
+  autoplay.value = false;
+  resolving.value = false;
+  selectedKind.value = null;
+  hoveredIndex.value = null;
+  activeBeat.value = null;
+  animationPlans.value = [];
+  animationFrame.value = null;
+  clearAnimations();
+  messageOverride.value = null;
+  decisionOverride.value = null;
+  eventOverride.value = null;
+  environment = createCinderVaultEnvironment(seed.value >>> 0);
+  observation.value = environment.reset().observation;
+}
+
+onUnmounted(() => {
+  runToken += 1;
+});
 </script>
 
 <template>
@@ -1193,7 +598,7 @@ reset();
         </div>
         <div class="game-actions">
           <button class="primary-action" :disabled="resolving || won || defeated || roomCleared" @click="toggleAutoplay">{{ autoplay ? 'Take control' : 'Watch agent' }}</button>
-          <button :disabled="resolving || autoplay || won || defeated || roomCleared" @click="agentTurn">Agent plan</button>
+          <button :disabled="resolving || autoplay || won || defeated || roomCleared" @click="agentTurn()">Agent plan</button>
           <button @click="reset">Restart run</button>
         </div>
       </aside>
