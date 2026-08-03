@@ -3,7 +3,8 @@
   "git_user": "yugao-gaos <yu.gao@gaos.ca>",
   "session_id": "codex-mcp-53523-6543671c72693ffcc22047d8b222d4be",
   "branch": "orch/attempt/codex-quantitatively-audit-mars-x-doctrine-economy-and-cadence",
-  "status": "claimed",
+  "status": "tested",
   "claimed_at": "2026-08-03T20:47:13.736Z",
-  "lease_until": "2026-08-03T21:47:13.736Z"
+  "lease_until": "2026-08-03T21:47:13.736Z",
+  "completed_at": "2026-08-03T21:03:55.842Z"
 }
