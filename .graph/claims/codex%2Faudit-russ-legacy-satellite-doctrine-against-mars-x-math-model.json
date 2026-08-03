@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/audit-russ-legacy-satellite-doctrine-against-mars-x-math-model",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "codex-mcp-53884-154a63f88a4f3ff634f5ce676ca9e8f1",
+  "branch": "orch/attempt/codex-audit-russ-legacy-satellite-doctrine-against-mars-x-math-model",
+  "status": "claimed",
+  "claimed_at": "2026-08-03T20:54:37.602Z",
+  "lease_until": "2026-08-03T21:54:37.602Z"
+}
