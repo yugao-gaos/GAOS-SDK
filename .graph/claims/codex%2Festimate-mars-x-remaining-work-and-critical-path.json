@@ -3,7 +3,8 @@
   "git_user": "yugao-gaos <yu.gao@gaos.ca>",
   "session_id": "codex-mcp-58331-2ccded1d08be44d5c3e1c161ade7aa00",
   "branch": "orch/attempt/codex-estimate-mars-x-remaining-work-and-critical-path",
-  "status": "claimed",
+  "status": "done",
   "claimed_at": "2026-08-09T16:11:32.719Z",
-  "lease_until": "2026-08-09T17:11:32.719Z"
+  "lease_until": "2026-08-09T17:11:32.719Z",
+  "completed_at": "2026-08-09T16:11:34.658Z"
 }
