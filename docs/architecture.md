@@ -88,6 +88,7 @@ contracts.
 | `./seat-control` | Stable-seat authority and controller epochs |
 | `./control` | Behavior-tree, human-input, and agent-input control sources |
 | `./room-agent` | Multiple conversational room agents, audience input, rules manifests, and optional actor/seat action proposals |
+| `./room-interaction` | Explicit room messages/events, privacy-bounded routing, agent services, committed watchers, and deterministic audience votes |
 | `./benchmark` | Benchmark manifests, session-backed execution, planning, bundles, and aggregation |
 | `./evidence` | Dynamic-control and external-attestation verification |
 | `./presentation-client` | Retry-safe presentation state |

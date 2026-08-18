@@ -13,7 +13,7 @@ product-owned deterministic reducer.
 | Resolution | Settlement waves, movement, claims, arrivals, portals, pushes, projectiles, gates, triggers, and transport | Conditions, effects, mutations, and presentation |
 | Agents | Single- and multi-agent environments, concrete actions, rewards, drivers, and CLI adapters | Prompts, decision policy, objectives, and hosted execution |
 | Control | Unified behavior-tree, human-input, and agent-input sources with replaceable actor or seat bindings | Actor eligibility, possession rules, handoff policy, and fallback actions |
-| Room agents | Multiple conversational agents, audience input, explanatory rule manifests, and optional actor/seat action proposals | Scoped observations, routing, model/voice providers, persistence, and game-specific crowd mechanisms |
+| Room agents | Multiple conversational agents, explanatory manifests, explicit privacy-bounded routing, services, committed watchers, deterministic audience polls, and optional actor/seat action proposals | Scoped observations, persona and wake policy, model/voice providers, durable channel memory, and game-authoritative crowd commands |
 | Sessions | Prepared transitions, canonical inputs, idempotency, reconnect state, and evidence capture | Persistence, transport, matchmaking, and operational policy |
 | Verification | Replay, signatures, chains, semantic recheck, and verifier interfaces | Historical reducer, semantic adapter, publication, and trust policy |
 

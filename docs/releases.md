@@ -24,10 +24,11 @@ agent contracts. No separate v0.27 or v0.29 package was published.
 - One authoritative command classifier distinguishes reducer-backed
   interactions from collected intents; accepted intents freeze their
   canonical action and interactions preserve the open window.
-- The new `./room-agent` surface supports several explicitly addressed room
-  agents, speech-only guides, versioned explanatory rules, audience input, and
-  optional actor/seat-bound action proposals without weakening ordinary
-  command authority.
+- The new `./room-agent` and `./room-interaction` surfaces support several
+  explicitly addressed room agents, speech-only guides, versioned rules and
+  mechanisms, privacy-bounded messages/events, services, committed watchers,
+  deterministic audience polls, and optional actor/seat-bound action proposals
+  without weakening ordinary command authority.
 - `gaos.replay` v1.4 preserves interactions in order for recovery and
   independent verification.
 - Benchmark bundles carry token, cost, timing, and provider data under the

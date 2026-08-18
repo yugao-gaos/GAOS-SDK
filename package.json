@@ -54,6 +54,10 @@
       "types": "./dist/room-agent.d.ts",
       "import": "./dist/room-agent.js"
     },
+    "./room-interaction": {
+      "types": "./dist/room-interaction.d.ts",
+      "import": "./dist/room-interaction.js"
+    },
     "./benchmark": {
       "types": "./dist/benchmark.d.ts",
       "import": "./dist/benchmark.js"

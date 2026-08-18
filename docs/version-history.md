@@ -17,8 +17,9 @@ removes the scheduled `Grid*`/grid-named aliases, and ships unified sessions,
 portal-aware paths, unified actor control sources, self-reported benchmark
 resource observations, unified command effects, historical verifier kits, and
 provider-neutral room-agent contracts for guides, NPCs, referees, and audience
-interaction, plus the full quality gate. Historical replay, signature, schema,
-and verifier semantics remain compatible.
+interaction, including privacy-bounded routing, services, committed watchers,
+and deterministic polls, plus the full quality gate. Historical replay,
+signature, schema, and verifier semantics remain compatible.
 
 [Migration and release notes →](/releases#v100)
 

@@ -82,8 +82,13 @@ the game's terminology, intent, or rationale. A product therefore supplies a
 versioned `GameAgentManifest` alongside its game adapter. It contains authored
 rule sections, an optional glossary, and optional typed knowledge.
 
-The manifest is explanatory input, not authority. If its prose and reducer
-disagree, reducer validation wins.
+The manifest is explanatory input, not authority. Rule sections describe
+player-facing rules; optional mechanism sections describe product-authored
+systems and may reference the canonical action IDs they explain. The product
+exports this data beside the implementing adapter and checks its game ID and
+version when registering the game. The SDK does not inspect bundled client
+source at runtime. If manifest prose and reducer behavior disagree, reducer
+validation wins.
 
 Every invocation also receives a host-supplied observation. The host must
 choose the appropriate projection:
@@ -112,7 +117,55 @@ effect is validated and replayed like any other game consequence.
 Dynamic audience members must not be represented as dynamically created game
 seats. GAOS session rosters remain fixed.
 
-## 6 — Routing and voice ownership
+## 6 — Common room interactions
+
+`RoomInteractionEnvelope` is the common operational message shape around the
+room-agent registry. It carries an authenticated source, explicit targets, a
+room and channel, a typed payload, maximum participant-visible disclosure, and
+root/parent/hop causation. Producers return drafts; the router alone assigns
+IDs and derives causation.
+
+Endpoints are participants, agents, services, or watchers. Payloads are:
+
+- messages for participant-to-agent, agent-to-agent, and generated speech;
+- typed events for committed watcher output and vote results;
+- correlated service requests; and
+- correlated service results.
+
+This supports six v1.0 patterns without making the router a workflow engine:
+
+1. A guide answers rules and mechanism questions from the versioned manifest,
+   its scoped observation, and current legal actions.
+2. Character agents exchange explicitly targeted messages; product persona is
+   resolved privately by each driver from its stable `personaId`.
+3. An agent invokes only services named by its descriptor. Services return
+   data, never reducer mutations or action proposals.
+4. A watcher receives a host-supplied projection after a committed transition
+   and emits typed event drafts once per room revision.
+5. A pure resolver tallies eligible participant ballots, rejects duplicates,
+   and applies an explicit deterministic tie-break before publishing a result
+   event for an agent to narrate.
+6. A participant and agent use a private channel whose response disclosure
+   cannot widen beyond that participant set.
+
+The router uses a FIFO delivery queue, rejects unknown or implicit targets,
+deduplicates envelope IDs, and bounds derived chains to eight hops by default.
+Products should also set a per-root emission budget in the host when fan-out
+is possible. Drivers do not recursively dispatch from inside delivery; they
+return drafts for the host to derive and enqueue.
+
+`channelId` is an isolation boundary, not only a delivery label. Provider
+memory for a public room, a private participant-to-agent thread, and an
+internal agent-to-agent exchange must remain separate. Effective disclosure
+is the intersection of parent disclosure, agent visibility, product policy,
+and requested output audience. An utterance, service result, or watcher event
+may narrow visibility but never widen it. Watchers only receive an explicit
+redacted committed-state projection; they do not wildcard-read room traffic.
+Derived source identity must be one of the parent's delivered targets. A
+non-public chain cannot add a new agent or watcher; the host must start a new
+explicitly authorized root when product policy permits that disclosure.
+
+## 7 — Routing and voice ownership
 
 Core routing is explicit. The host chooses the target agent ID or IDs from
 mentions, UI focus, proximity, phase policy, or a fallback guide. The SDK does
@@ -135,16 +188,20 @@ owns:
 Provider clients, sockets, audio streams, and conversation objects are not
 stored in reducer state.
 
-## 7 — v1.0 package boundary
+## 8 — v1.0 package boundary
 
-The GAOS package exports the provider-neutral contracts and registry from
-`@yugao-gaos/gaos-sdk/room-agent`. It depends only on existing browser-safe
-GAOS control and action contracts.
+The GAOS package exports the agent registry and driver contracts from
+`@yugao-gaos/gaos-sdk/room-agent`, and the operational envelope, router,
+services, watchers, and vote resolver from
+`@yugao-gaos/gaos-sdk/room-interaction`. Both are browser-safe and
+provider-neutral.
 
 Concrete hosting and voice implementations remain optional packages. The
 recommended package family is:
 
 - `@yugao-gaos/gaos-sdk/room-agent` — stable core contract;
+- `@yugao-gaos/gaos-sdk/room-interaction` — stable routing and interaction
+  mechanisms;
 - `@yugao-gaos/room-agent-runtime` — room lifecycle and orchestration; and
 - provider adapters such as STT, TTS, and model integrations behind runtime
   interfaces.
@@ -152,7 +209,7 @@ recommended package family is:
 This is one SDK product with optional packages, not two competing rule or
 session SDKs.
 
-## 8 — Delivery plan
+## 9 — Delivery plan
 
 ### Gate A — v1.0 contract foundation
 
@@ -162,6 +219,11 @@ session SDKs.
 - [x] Speech-only agents and actor/seat-bound optional action proposals.
 - [x] Cancellation and stale-result rejection on replacement/unregistration.
 - [x] Dedicated `./room-agent` export, API report, tests, and documentation.
+- [x] Common explicit interaction envelope with privacy and causation guards.
+- [x] Agent-to-agent messages and private participant channels.
+- [x] Capability-checked agent services and committed-transition watchers.
+- [x] Pure deterministic audience-vote resolution.
+- [x] Dedicated `./room-interaction` export, API report, tests, and docs.
 - [ ] First demo-game adapter declares a manifest and at least two room agents.
 
 ### Gate B — generic room runtime
@@ -169,7 +231,7 @@ session SDKs.
 - [ ] Extract the push-to-talk, STT, interruption, TTS, captions, and reconnect
       pipeline from the prior room implementation without sportsbook policy.
 - [ ] Persist room-agent registrations, transcript boundaries, and per-agent
-      operational memory durably.
+      operational memory durably, partitioned by channel ID.
 - [ ] Implement explicit mention/focus/phase routing and one room speech
       arbiter.
 - [ ] Add structured observability for latency, cancellation, provider errors,
@@ -191,7 +253,7 @@ The v1.0 release candidate may freeze the core API after Gate A. The feature is
 production-ready only for a concrete host after that host also passes Gates B
 and C.
 
-## 9 — Compatibility and security invariants
+## 10 — Compatibility and security invariants
 
 1. `AgentDriver`, `ControlSource`, reducer, session, and replay formats retain
    their current meaning.
@@ -207,8 +269,18 @@ and C.
 9. Replacing or unregistering an agent aborts and discards its in-flight turn.
 10. Runtime voice/provider packages cannot become dependencies of the
     browser-safe SDK root.
+11. Every interaction has explicit targets; there is no implicit all-agent
+    broadcast.
+12. Derived interactions and utterances can only narrow participant-visible
+    disclosure.
+13. Services, watchers, participant roles, and vote results grant no game
+    authority.
+14. Watchers observe committed projections, not draft transitions or arbitrary
+    private traffic.
+15. Provider memory is partitioned by channel so delivery clamping cannot leak
+    facts retained from a more privileged thread.
 
-## 10 — Rejected alternatives
+## 11 — Rejected alternatives
 
 ### Make every room agent an NPC
 
@@ -236,3 +308,15 @@ browser/edge boundary and force games that do not use voice to install them.
 Rejected by default. Speech is presentation and operational state. A game may
 define an explicit deterministic dialogue or crowd command when spoken content
 has authoritative consequences.
+
+### Let a model route, tally votes, or mutate game state
+
+Rejected. Routing targets are product-owned, votes are resolved by a pure
+deterministic function, and gameplay consequences remain canonical commands
+admitted through the existing authority boundary.
+
+### Parse client source to answer questions
+
+Rejected. Runtime source is bundler-dependent, may expose secrets, and cannot
+establish authority. Products publish versioned explanatory manifests beside
+the code they implement.
