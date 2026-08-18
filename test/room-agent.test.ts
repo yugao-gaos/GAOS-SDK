@@ -5,6 +5,10 @@ import {
   type RoomAgentContext,
   type RoomAgentRegistration,
 } from '../src/room-agent.js';
+import {
+  RoomInteractionRouter,
+  roomAgentInputFromInteraction,
+} from '../src/room-interaction.js';
 import type { SubmittedAction } from '../src/engine/index.js';
 
 interface Observation {
@@ -82,6 +86,129 @@ describe('room agents', () => {
       agentId: 'merchant',
       utterances: [{ text: 'Merchant answer' }],
     });
+  });
+
+  it('allows an agent to continue an unscripted agent-to-agent exchange', async () => {
+    const router = new RoomInteractionRouter({ createId: () => 'reply-1' });
+    const interaction = router.create(
+      'room-1',
+      'agents:merchant:guide',
+      { kind: 'agent', id: 'merchant' },
+      {
+        targets: [{ kind: 'agent', id: 'guide' }],
+        disclosure: { kind: 'none' },
+        payload: { kind: 'message', text: 'Where is the map?', modality: 'generated' },
+      },
+    );
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: {
+        id: 'guide',
+        label: 'Guide',
+        role: 'guide',
+        personaId: 'patient-guide',
+      },
+      driver: {
+        respond: async () => ({
+          interactions: [{
+            targets: [{ kind: 'agent', id: 'merchant' }],
+            payload: {
+              kind: 'message',
+              text: 'The player is carrying it.',
+              modality: 'generated',
+            },
+          }],
+        }),
+      },
+    }]);
+
+    await expect(registry.respond('guide', {
+      ...baseContext,
+      input: roomAgentInputFromInteraction(interaction),
+      interaction,
+    })).resolves.toMatchObject({
+      agentId: 'guide',
+      utterances: [],
+      interactions: [{
+        targets: [{ kind: 'agent', id: 'merchant' }],
+        disclosure: { kind: 'none' },
+        payload: { kind: 'message', text: 'The player is carrying it.' },
+      }],
+    });
+  });
+
+  it('clamps a private participant reply even when the driver asks to address the room', async () => {
+    const router = new RoomInteractionRouter({ createId: () => 'private-1' });
+    const interaction = router.create(
+      'room-1',
+      'private:audience-1:guide',
+      { kind: 'participant', id: 'audience-1' },
+      {
+        targets: [{ kind: 'agent', id: 'guide' }],
+        disclosure: { kind: 'participants', participantIds: ['audience-1'] },
+        payload: { kind: 'message', text: 'What is my hint?', modality: 'text' },
+      },
+    );
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'guide', label: 'Guide', role: 'guide' },
+      driver: {
+        respond: async () => ({
+          utterances: [{ text: 'Your private hint.', audience: { kind: 'room' } }],
+          interactions: [{
+            targets: [{ kind: 'service', id: 'hints' }],
+            disclosure: { kind: 'room' },
+            payload: {
+              kind: 'service-request',
+              callId: 'hint-1',
+              serviceId: 'hints',
+              operation: 'acknowledge',
+            },
+          }],
+        }),
+      },
+    }]);
+
+    await expect(registry.respond('guide', {
+      ...baseContext,
+      input: roomAgentInputFromInteraction(interaction),
+      interaction,
+    })).resolves.toMatchObject({
+      utterances: [{
+        text: 'Your private hint.',
+        audience: { kind: 'participants', participantIds: ['audience-1'] },
+      }],
+      interactions: [{
+        disclosure: { kind: 'participants', participantIds: ['audience-1'] },
+      }],
+    });
+  });
+
+  it('rejects a spoofed routed source before invoking the agent driver', async () => {
+    const respond = vi.fn(async () => ({ utterances: [{ text: 'No.' }] }));
+    const router = new RoomInteractionRouter({ createId: () => 'private-1' });
+    const interaction = router.create(
+      'room-1',
+      'private:audience-1:guide',
+      { kind: 'participant', id: 'audience-1' },
+      {
+        targets: [{ kind: 'agent', id: 'guide' }],
+        disclosure: { kind: 'participants', participantIds: ['audience-1'] },
+        payload: { kind: 'message', text: 'Hello.', modality: 'text' },
+      },
+    );
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'guide', label: 'Guide', role: 'guide' },
+      driver: { respond },
+    }]);
+
+    await expect(registry.respond('guide', {
+      ...baseContext,
+      input: {
+        ...roomAgentInputFromInteraction(interaction),
+        speakerId: 'player-1',
+      },
+      interaction,
+    })).rejects.toThrow('source does not match');
+    expect(respond).not.toHaveBeenCalled();
   });
 
   it('copies descriptor metadata across the driver and registry boundaries', async () => {

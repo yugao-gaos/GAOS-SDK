@@ -3,6 +3,18 @@ import {
   type ControlSubject,
 } from './control.js';
 import type { SubmittedAction } from './engine/contracts.js';
+import {
+  intersectRoomDisclosures,
+  type RoomDisclosure,
+  type RoomEndpointKind,
+  type RoomInteractionDraft,
+  type RoomInteractionEnvelope,
+} from './room-interaction.js';
+
+export type {
+  RoomInteractionDraft,
+  RoomInteractionEnvelope,
+} from './room-interaction.js';
 
 export type RoomParticipantRole =
   | 'player'
@@ -22,6 +34,8 @@ export interface RoomParticipant {
 export interface RoomAgentInput {
   id: string;
   speakerId: string;
+  /** Defaults to participant for direct PTT/text compatibility. */
+  speakerKind?: RoomEndpointKind;
   text: string;
   modality: 'speech' | 'text';
   /** Explicit host routing hint. The SDK does not infer mentions or wake policy. */
@@ -34,11 +48,20 @@ export interface GameAgentRule {
   body: string;
 }
 
+/** Product-authored explanation exported beside the implementing game code. */
+export interface GameAgentMechanism {
+  id: string;
+  title: string;
+  body: string;
+  relatedActionIds?: readonly string[];
+}
+
 /** Versioned, product-owned material that makes game rules explainable. */
 export interface GameAgentManifest<TKnowledge = unknown> {
   gameId: string;
   gameVersion: string;
   rules: readonly GameAgentRule[];
+  mechanisms?: readonly GameAgentMechanism[];
   glossary?: Readonly<Record<string, string>>;
   knowledge?: TKnowledge;
 }
@@ -60,7 +83,11 @@ export interface RoomAgentDescriptor {
   label: string;
   role: RoomAgentRole;
   description?: string;
+  /** Stable product key used by the driver to resolve private persona instructions. */
+  personaId?: string;
   voice?: RoomAgentVoice;
+  /** Explicit service capabilities available to this agent. */
+  serviceIds?: readonly string[];
   /** Host-enforced visibility for this presence. Defaults to the room. */
   visibility?: RoomAgentAudience;
   /**
@@ -83,6 +110,8 @@ export interface RoomAgentUtterance {
 
 export interface RoomAgentDecision {
   utterances?: readonly RoomAgentUtterance[];
+  /** Follow-up messages/events. The room router stamps and privacy-clamps them. */
+  interactions?: readonly RoomInteractionDraft[];
   /** At most one canonical proposal, matching the existing ControlSource cadence. */
   action?: SubmittedAction;
 }
@@ -91,6 +120,8 @@ export interface RoomAgentContext<TObservation = unknown, TKnowledge = unknown> 
   roomId: string;
   agent: RoomAgentDescriptor;
   input: RoomAgentInput;
+  /** Structured source envelope when invoked through the common room router. */
+  interaction?: RoomInteractionEnvelope;
   participants: readonly RoomParticipant[];
   /** A host-supplied public, seat, or product projection; never implied full state. */
   observation: TObservation;
@@ -122,6 +153,7 @@ export interface RoomAgentActionProposal {
 export interface RoomAgentTurn {
   agentId: string;
   utterances: readonly RoomAgentUtterance[];
+  interactions?: readonly RoomInteractionDraft[];
   /** The host must submit this through ordinary GAOS validation and authority checks. */
   action?: RoomAgentActionProposal;
 }
@@ -154,10 +186,24 @@ function assertDescriptor(descriptor: RoomAgentDescriptor): void {
   if (!AGENT_ROLES.includes(descriptor.role)) {
     throw new TypeError('room agent role is unsupported');
   }
+  if (descriptor.personaId !== undefined) {
+    assertText(descriptor.personaId, 'room agent persona id');
+  }
   if (descriptor.voice !== undefined) {
     assertText(descriptor.voice.id, 'room agent voice id');
     if (descriptor.voice.language !== undefined) {
       assertText(descriptor.voice.language, 'room agent voice language');
+    }
+  }
+  if (descriptor.serviceIds !== undefined) {
+    if (!Array.isArray(descriptor.serviceIds)) {
+      throw new TypeError('room agent serviceIds must be an array');
+    }
+    const ids = new Set<string>();
+    for (const id of descriptor.serviceIds) {
+      assertText(id, 'room agent service id');
+      if (ids.has(id)) throw new TypeError(`duplicate room agent service: ${id}`);
+      ids.add(id);
     }
   }
   if (descriptor.visibility?.kind === 'participants') {
@@ -181,6 +227,9 @@ function copyDescriptor(descriptor: RoomAgentDescriptor): RoomAgentDescriptor {
   return {
     ...descriptor,
     ...(descriptor.voice === undefined ? {} : { voice: { ...descriptor.voice } }),
+    ...(descriptor.serviceIds === undefined
+      ? {}
+      : { serviceIds: [...descriptor.serviceIds] }),
     ...(descriptor.visibility === undefined
       ? {}
       : {
@@ -199,7 +248,7 @@ function copyDescriptor(descriptor: RoomAgentDescriptor): RoomAgentDescriptor {
 
 function assertParticipants(
   participants: readonly RoomParticipant[],
-  speakerId: string,
+  speakerId: string | undefined,
 ): void {
   if (!Array.isArray(participants)) {
     throw new TypeError('room participants must be an array');
@@ -221,7 +270,7 @@ function assertParticipants(
       assertText(participant.seat, 'room participant seat');
     }
   }
-  if (!ids.has(speakerId)) {
+  if (speakerId !== undefined && !ids.has(speakerId)) {
     throw new Error(`room input speaker is not present: ${speakerId}`);
   }
 }
@@ -246,6 +295,32 @@ function assertManifest(manifest: GameAgentManifest<unknown>): void {
     assertText(rule.title, 'game agent rule title');
     assertText(rule.body, 'game agent rule body');
   }
+  if (manifest.mechanisms !== undefined) {
+    if (!Array.isArray(manifest.mechanisms)) {
+      throw new TypeError('game agent manifest mechanisms must be an array');
+    }
+    const mechanismIds = new Set<string>();
+    for (const mechanism of manifest.mechanisms) {
+      if (mechanism === null || typeof mechanism !== 'object') {
+        throw new TypeError('game agent mechanism must be an object');
+      }
+      assertText(mechanism.id, 'game agent mechanism id');
+      if (mechanismIds.has(mechanism.id)) {
+        throw new TypeError(`duplicate game agent mechanism: ${mechanism.id}`);
+      }
+      mechanismIds.add(mechanism.id);
+      assertText(mechanism.title, 'game agent mechanism title');
+      assertText(mechanism.body, 'game agent mechanism body');
+      if (mechanism.relatedActionIds !== undefined) {
+        if (!Array.isArray(mechanism.relatedActionIds)) {
+          throw new TypeError('game agent mechanism relatedActionIds must be an array');
+        }
+        for (const actionId of mechanism.relatedActionIds) {
+          assertText(actionId, 'game agent mechanism action id');
+        }
+      }
+    }
+  }
 }
 
 function assertContext<TObservation, TKnowledge>(
@@ -261,6 +336,10 @@ function assertContext<TObservation, TKnowledge>(
   assertText(context.input.id, 'room input id');
   assertText(context.input.speakerId, 'room input speakerId');
   assertText(context.input.text, 'room input text');
+  const speakerKind = context.input.speakerKind ?? 'participant';
+  if (!['participant', 'agent', 'service', 'watcher'].includes(speakerKind)) {
+    throw new TypeError('room input speakerKind is unsupported');
+  }
   if (context.input.modality !== 'speech' && context.input.modality !== 'text') {
     throw new TypeError('room input modality must be speech or text');
   }
@@ -275,7 +354,10 @@ function assertContext<TObservation, TKnowledge>(
       ids.add(id);
     }
   }
-  assertParticipants(context.participants, context.input.speakerId);
+  assertParticipants(
+    context.participants,
+    speakerKind === 'participant' ? context.input.speakerId : undefined,
+  );
   assertManifest(context.manifest);
   if (!Array.isArray(context.legalActions)) {
     throw new TypeError('room agent legalActions must be an array');
@@ -292,9 +374,51 @@ function assertContext<TObservation, TKnowledge>(
   }
 }
 
+function disclosureForAudience(
+  audience: RoomAgentAudience | undefined,
+): RoomDisclosure {
+  if (audience === undefined || audience.kind === 'room') return { kind: 'room' };
+  return { kind: 'participants', participantIds: [...audience.participantIds] };
+}
+
+function audienceForDisclosure(
+  disclosure: Exclude<RoomDisclosure, { kind: 'none' }>,
+): RoomAgentAudience {
+  return disclosure.kind === 'room'
+    ? { kind: 'room' }
+    : { kind: 'participants', participantIds: [...disclosure.participantIds] };
+}
+
+function normalizeAudience(
+  descriptor: RoomAgentDescriptor,
+  requested: RoomAgentAudience | undefined,
+  parentDisclosure: RoomDisclosure | undefined,
+): RoomAgentAudience | undefined {
+  const visibility = disclosureForAudience(descriptor.visibility);
+  const permitted = parentDisclosure === undefined
+    ? visibility
+    : intersectRoomDisclosures(parentDisclosure, visibility);
+  if (permitted.kind === 'none') {
+    throw new Error(`room agent cannot speak on a non-disclosed interaction: ${descriptor.id}`);
+  }
+  const effective = requested === undefined
+    ? permitted
+    : intersectRoomDisclosures(permitted, disclosureForAudience(requested));
+  if (effective.kind === 'none') {
+    throw new Error(`room agent utterance has no permitted audience: ${descriptor.id}`);
+  }
+  if (requested === undefined
+    && parentDisclosure === undefined
+    && descriptor.visibility === undefined) {
+    return undefined;
+  }
+  return audienceForDisclosure(effective);
+}
+
 function normalizeDecision(
   descriptor: RoomAgentDescriptor,
   decision: RoomAgentDecision,
+  parentDisclosure?: RoomDisclosure,
 ): RoomAgentTurn {
   if (decision === null || typeof decision !== 'object') {
     throw new TypeError('room agent decision must be an object or null');
@@ -303,6 +427,7 @@ function normalizeDecision(
   if (!Array.isArray(utterances)) {
     throw new TypeError('room agent utterances must be an array when present');
   }
+  const normalizedUtterances: RoomAgentUtterance[] = [];
   for (const utterance of utterances) {
     if (utterance === null || typeof utterance !== 'object') {
       throw new TypeError('room agent utterance must be an object');
@@ -320,12 +445,48 @@ function normalizeDecision(
       && utterance.audience.kind !== 'room') {
       throw new TypeError('room agent utterance audience is unsupported');
     }
+    const audience = normalizeAudience(
+      descriptor,
+      utterance.audience,
+      parentDisclosure,
+    );
+    normalizedUtterances.push({
+      ...utterance,
+      ...(audience === undefined ? {} : { audience }),
+    });
+  }
+  const interactions = decision.interactions ?? [];
+  if (!Array.isArray(interactions)) {
+    throw new TypeError('room agent interactions must be an array when present');
+  }
+  const visibility = disclosureForAudience(descriptor.visibility);
+  const permittedInteractionDisclosure = parentDisclosure === undefined
+    ? visibility
+    : intersectRoomDisclosures(parentDisclosure, visibility);
+  const normalizedInteractions: RoomInteractionDraft[] = [];
+  for (const interaction of interactions) {
+    if (interaction === null || typeof interaction !== 'object') {
+      throw new TypeError('room agent interaction draft must be an object');
+    }
+    normalizedInteractions.push({
+      ...interaction,
+      disclosure: intersectRoomDisclosures(
+        permittedInteractionDisclosure,
+        interaction.disclosure ?? permittedInteractionDisclosure,
+      ),
+    });
   }
   if (decision.action === undefined) {
-    if (utterances.length === 0) {
-      throw new TypeError('room agent decision must contain an utterance or action');
+    if (normalizedUtterances.length === 0 && normalizedInteractions.length === 0) {
+      throw new TypeError('room agent decision must contain an utterance, interaction, or action');
     }
-    return { agentId: descriptor.id, utterances: [...utterances] };
+    return {
+      agentId: descriptor.id,
+      utterances: normalizedUtterances,
+      ...(normalizedInteractions.length === 0
+        ? {}
+        : { interactions: normalizedInteractions }),
+    };
   }
   if (decision.action === null
     || typeof decision.action !== 'object'
@@ -344,7 +505,10 @@ function normalizeDecision(
   }
   return {
     agentId: descriptor.id,
-    utterances: [...utterances],
+    utterances: normalizedUtterances,
+    ...(normalizedInteractions.length === 0
+      ? {}
+      : { interactions: normalizedInteractions }),
     action: { subject: { ...subject }, action: decision.action },
   };
 }
@@ -444,6 +608,24 @@ export class RoomAgentRegistry<TObservation = unknown, TKnowledge = unknown> {
     assertContext(context);
     const registration = this.registrations.get(id);
     if (registration === undefined) throw new Error(`unknown room agent: ${id}`);
+    if (context.interaction !== undefined) {
+      const interaction = context.interaction;
+      if (interaction.roomId !== context.roomId) {
+        throw new Error('room interaction does not belong to the agent room');
+      }
+      if (interaction.id !== context.input.id) {
+        throw new Error('room interaction does not match the agent input');
+      }
+      if (interaction.source.id !== context.input.speakerId
+        || interaction.source.kind !== (context.input.speakerKind ?? 'participant')) {
+        throw new Error('room interaction source does not match the agent input');
+      }
+      if (!interaction.targets.some((target) => (
+        target.kind === 'agent' && target.id === id
+      ))) {
+        throw new Error(`room interaction does not target agent: ${id}`);
+      }
+    }
     const linked = linkedAbortController(context.signal);
     registration.active.add(linked.controller);
     try {
@@ -467,7 +649,11 @@ export class RoomAgentRegistry<TObservation = unknown, TKnowledge = unknown> {
         || decision === null) {
         return null;
       }
-      return normalizeDecision(registration.descriptor, decision);
+      return normalizeDecision(
+        registration.descriptor,
+        decision,
+        context.interaction?.disclosure,
+      );
     } finally {
       registration.active.delete(linked.controller);
       linked.dispose();

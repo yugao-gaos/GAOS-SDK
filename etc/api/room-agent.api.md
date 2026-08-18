@@ -41,7 +41,21 @@ export interface GameAgentManifest<TKnowledge = unknown> {
     // (undocumented)
     knowledge?: TKnowledge;
     // (undocumented)
+    mechanisms?: readonly GameAgentMechanism[];
+    // (undocumented)
     rules: readonly GameAgentRule[];
+}
+
+// @public
+export interface GameAgentMechanism {
+    // (undocumented)
+    body: string;
+    // (undocumented)
+    id: string;
+    // (undocumented)
+    relatedActionIds?: readonly string[];
+    // (undocumented)
+    title: string;
 }
 
 // @public (undocumented)
@@ -109,6 +123,7 @@ export interface RoomAgentContext<TObservation = unknown, TKnowledge = unknown> 
     agent: RoomAgentDescriptor;
     // (undocumented)
     input: RoomAgentInput;
+    interaction?: RoomInteractionEnvelope;
     // (undocumented)
     legalActions: readonly SubmittedAction[];
     // (undocumented)
@@ -131,6 +146,7 @@ export interface RoomAgentContext<TObservation = unknown, TKnowledge = unknown> 
 // @public (undocumented)
 export interface RoomAgentDecision {
     action?: SubmittedAction;
+    interactions?: readonly RoomInteractionDraft[];
     // (undocumented)
     utterances?: readonly RoomAgentUtterance[];
 }
@@ -144,8 +160,10 @@ export interface RoomAgentDescriptor {
     id: string;
     // (undocumented)
     label: string;
+    personaId?: string;
     // (undocumented)
     role: RoomAgentRole;
+    serviceIds?: readonly string[];
     visibility?: RoomAgentAudience;
     // (undocumented)
     voice?: RoomAgentVoice;
@@ -168,6 +186,7 @@ export interface RoomAgentInput {
     modality: 'speech' | 'text';
     // (undocumented)
     speakerId: string;
+    speakerKind?: RoomEndpointKind;
     // (undocumented)
     text: string;
 }
@@ -208,6 +227,8 @@ export interface RoomAgentTurn {
     // (undocumented)
     agentId: string;
     // (undocumented)
+    interactions?: readonly RoomInteractionDraft[];
+    // (undocumented)
     utterances: readonly RoomAgentUtterance[];
 }
 
@@ -227,6 +248,92 @@ export interface RoomAgentVoice {
     // (undocumented)
     language?: string;
 }
+
+// @public
+type RoomDisclosure = {
+    kind: 'none';
+} | {
+    kind: 'participants';
+    participantIds: readonly string[];
+} | {
+    kind: 'room';
+};
+
+// @public (undocumented)
+interface RoomEndpoint {
+    // (undocumented)
+    id: string;
+    // (undocumented)
+    kind: RoomEndpointKind;
+}
+
+// @public (undocumented)
+type RoomEndpointKind = 'participant' | 'agent' | 'service' | 'watcher';
+
+// @public (undocumented)
+interface RoomInteractionCause {
+    // (undocumented)
+    hop: number;
+    // (undocumented)
+    parentId?: string;
+    // (undocumented)
+    rootId: string;
+}
+
+// @public
+export interface RoomInteractionDraft<TPayload extends RoomInteractionPayload = RoomInteractionPayload> {
+    disclosure?: RoomDisclosure;
+    // (undocumented)
+    payload: TPayload;
+    // (undocumented)
+    targets: readonly RoomEndpoint[];
+}
+
+// @public (undocumented)
+export interface RoomInteractionEnvelope<TPayload extends RoomInteractionPayload = RoomInteractionPayload> {
+    // (undocumented)
+    cause: RoomInteractionCause;
+    channelId: string;
+    // (undocumented)
+    disclosure: RoomDisclosure;
+    // (undocumented)
+    id: string;
+    // (undocumented)
+    payload: TPayload;
+    // (undocumented)
+    roomId: string;
+    // (undocumented)
+    source: RoomEndpoint;
+    // (undocumented)
+    targets: readonly RoomEndpoint[];
+}
+
+// @public (undocumented)
+type RoomInteractionPayload = {
+    kind: 'message';
+    text: string;
+    modality: 'speech' | 'text' | 'generated';
+    speak?: boolean;
+    interruptible?: boolean;
+} | {
+    kind: 'event';
+    topic: string;
+    data?: JsonValue;
+    transitionRevision?: number;
+} | {
+    kind: 'service-request';
+    callId: string;
+    serviceId: string;
+    operation: string;
+    input?: JsonValue;
+} | {
+    kind: 'service-result';
+    callId: string;
+    serviceId: string;
+    ok: boolean;
+    output?: JsonValue;
+    errorCode?: string;
+};
 
 // @public
 export interface RoomParticipant {

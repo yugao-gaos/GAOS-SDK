@@ -47,6 +47,8 @@ Use the narrowest package surface:
 - `./session` — authoritative transitions and evidence capture
 - `./protocol` — product-neutral tick envelopes
 - `./control` — behavior-tree, human-input, and agent-input control sources
+- `./room-agent` and `./room-interaction` — conversational presences plus
+  privacy-bounded room messages, services, watchers, and audience polls
 - `./agent` and `./agent-cli` — the common session runner, model drivers, and
   MCP-capable CLIs
 - Python — hosted evaluation and replay exchange

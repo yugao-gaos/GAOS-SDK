@@ -149,8 +149,11 @@ interpretation.
 conversational room presences. A guide may answer without inventing a game
 action; a character, player bot, or referee may carry an optional actor/seat
 binding and return an untrusted canonical action proposal. Audience presence
-remains separate from seat authority. Provider-specific push-to-talk, STT,
-TTS, persistence, and networking stay in optional runtime packages.
+remains separate from seat authority. A companion `./room-interaction` surface
+adds explicit privacy-bounded messages and events, agent services, committed
+watchers, and deterministic audience polls without creating another authority
+path. Provider-specific push-to-talk, STT, TTS, persistence, and networking
+stay in optional runtime packages.
 
 ### Stable bridge contracts
 
