@@ -9,8 +9,8 @@ Prepared August 1, 2026. v1.0 freezes the complete product-neutral SDK after
 the v0.26 release and includes all subsequently implemented work: RFC-017
 portal-aware pathfinding, RFC-018 unified sessions, RFC-019 unified actor
 control sources, benchmark resource reporting, and the 1.0 quality and
-architecture gates, plus RFC-020 unified command effects. No separate v0.27
-or v0.29 package was published.
+architecture gates, plus RFC-020 unified command effects and RFC-021 in-room
+agent contracts. No separate v0.27 or v0.29 package was published.
 
 - Normal, guided, autonomous, watched, and benchmark play share one
   `create/attach → observe/act → finalize → close` session lifecycle.
@@ -24,6 +24,10 @@ or v0.29 package was published.
 - One authoritative command classifier distinguishes reducer-backed
   interactions from collected intents; accepted intents freeze their
   canonical action and interactions preserve the open window.
+- The new `./room-agent` surface supports several explicitly addressed room
+  agents, speech-only guides, versioned explanatory rules, audience input, and
+  optional actor/seat-bound action proposals without weakening ordinary
+  command authority.
 - `gaos.replay` v1.4 preserves interactions in order for recovery and
   independent verification.
 - Benchmark bundles carry token, cost, timing, and provider data under the

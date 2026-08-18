@@ -63,6 +63,7 @@ export default defineConfig({
           { text: 'Mechanisms', link: '/mechanisms/' },
           { text: 'Real-time games', link: '/high-frequency' },
           { text: 'Agentic play', link: '/agentic-play' },
+          { text: 'Room agents', link: '/room-agents' },
         ],
       },
       {
@@ -136,6 +137,7 @@ export default defineConfig({
         text: 'Agents and integration',
         items: [
           { text: 'Agentic play', link: '/agentic-play' },
+          { text: 'Room agents', link: '/room-agents' },
             { text: 'Tick protocol v1', link: '/protocol-v1' },
           { text: 'Python SDK surface', link: '/python' },
           { text: 'Interoperability', link: '/interoperability' },

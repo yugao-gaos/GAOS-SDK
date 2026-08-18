@@ -57,7 +57,8 @@ Use the narrowest package surface:
 
 v1.0 freezes the product-neutral GAOS surface after the coordinated rename,
 unified session lifecycle, portal-aware paths, actor control sources,
-unified command effects, verifiable benchmark publication, and historical
+unified command effects, in-room agents and audience interaction, verifiable
+benchmark publication, and historical
 verifier kits. TypeScript and Python expose generic hosted-session clients
 over `gaos.ticks` v1.
 Product-specific observations, matchmaking, convenience endpoints, and

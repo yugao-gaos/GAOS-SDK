@@ -50,6 +50,10 @@
       "types": "./dist/control.d.ts",
       "import": "./dist/control.js"
     },
+    "./room-agent": {
+      "types": "./dist/room-agent.d.ts",
+      "import": "./dist/room-agent.js"
+    },
     "./benchmark": {
       "types": "./dist/benchmark.d.ts",
       "import": "./dist/benchmark.js"
