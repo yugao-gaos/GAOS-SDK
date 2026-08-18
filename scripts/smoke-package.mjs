@@ -34,7 +34,7 @@ try {
       "const engine = await import(`${sdk}/engine`);",
       "if (engine.GAOS_REPLAY_FORMAT_VERSION !== '1.4') process.exit(1);",
       "for (const entry of ['session-host', 'benchmark', 'ecosystem', 'evidence',",
-      "  'leaderboard', 'presentation-client', 'seat-control']) {",
+      "  'leaderboard', 'presentation-client', 'seat-control', 'room-agent']) {",
       "  await import(`${sdk}/${entry}`);",
       '}',
     ].join('\n'),
