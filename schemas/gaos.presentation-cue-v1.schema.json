@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yugao-gaos.github.io/GAOS-SDK/schemas/gaos.presentation-cue-v1.schema.json",
+  "title": "GAOS Presentation Cue v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "sessionId",
+    "cueId",
+    "sequence",
+    "type",
+    "priority",
+    "payload"
+  ],
+  "properties": {
+    "schema": { "const": "gaos.presentation-cue.v1" },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "cueId": { "type": "string", "minLength": 1 },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "type": { "type": "string", "minLength": 1 },
+    "priority": { "enum": ["normal", "emergency"] },
+    "payload": {
+      "description": "Product-defined JSON command payload.",
+      "type": ["array", "boolean", "null", "number", "object", "string"]
+    }
+  },
+  "additionalProperties": false
+}

@@ -35,7 +35,7 @@ try {
       "if (engine.GAOS_REPLAY_FORMAT_VERSION !== '1.4') process.exit(1);",
       "for (const entry of ['session-host', 'benchmark', 'ecosystem', 'evidence',",
       "  'leaderboard', 'presentation-client', 'seat-control', 'room-agent',",
-      "  'room-interaction']) {",
+      "  'room-agent-runtime', 'room-interaction', 'presentation-cues']) {",
       "  await import(`${sdk}/${entry}`);",
       '}',
     ].join('\n'),
@@ -44,6 +44,7 @@ try {
   for (const path of [
     'schemas/gaos.replay-v1.schema.json',
     'schemas/gaos.benchmark-bundle-v1.schema.json',
+    'schemas/gaos.presentation-cue-v1.schema.json',
     'fixtures/replay/gaos-replay-v1.golden.jsonl',
     'fixtures/replay/gaos-replay-v1.3-ended.golden.jsonl',
     'fixtures/signatures/gaos.submission.ed25519.v2.vectors.json',

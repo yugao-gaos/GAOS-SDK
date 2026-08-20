@@ -14,7 +14,8 @@ Published release notes remain the source of truth for shipped behavior.
 v1.0 includes every implemented roadmap item through RFC-021: the canonical
 GAOS identity, historical verifier kits, portal-aware paths, one durable
 session lifecycle, unified actor control sources, and verifiable benchmark
-publication, plus provider-neutral room-agent contracts. The scheduled
+publication, plus provider-neutral room-agent contracts, runtime orchestration,
+and presentation cues. The scheduled
 neutral-core compatibility aliases are removed;
 historical replay v1.0–v1.3 semantics remain stable, while replay v1.4 records
 ordered reducer-backed interactions.
@@ -152,8 +153,11 @@ binding and return an untrusted canonical action proposal. Audience presence
 remains separate from seat authority. A companion `./room-interaction` surface
 adds explicit privacy-bounded messages and events, agent services, committed
 watchers, and deterministic audience polls without creating another authority
-path. Provider-specific push-to-talk, STT, TTS, persistence, and networking
-stay in optional runtime packages.
+path. `./room-agent-runtime` adds final-text routing, durable store seams,
+channel transcripts, cancellation, speech arbitration, captions, and reconnect.
+`./presentation-cues` adds ordered host-to-renderer effects and repair.
+Provider-specific push-to-talk, STT, TTS, persistence, and networking stay in
+host adapters.
 
 ### Stable bridge contracts
 

@@ -8,8 +8,9 @@ authority or observation.
 The portable agent API is exported from
 `@yugao-gaos/gaos-sdk/room-agent`. Common room messages, events, services,
 watchers, and votes are exported from
-`@yugao-gaos/gaos-sdk/room-interaction`. Voice, network, persistence, and model
-providers remain host-owned runtime concerns.
+`@yugao-gaos/gaos-sdk/room-interaction`. The provider-neutral hosting runtime
+is exported from `@yugao-gaos/gaos-sdk/room-agent-runtime`. Voice, network,
+durable-storage implementations, and model providers remain host-owned.
 
 ## Agent roles
 
@@ -27,14 +28,18 @@ session admission remain authoritative.
 ## Hosted turn flow
 
 1. The host authenticates a room participant and obtains final text from chat
-   or STT.
-2. Product routing selects one agent ID from an explicit mention, interaction
-   focus, world context, phase rule, or fallback guide.
-3. The host derives the observation that agent is permitted to see and supplies
+   or STT, then calls `RoomAgentRuntime.handleFinalInput` with a stable input ID
+   and channel ID.
+2. The runtime selects one visible agent from an explicit address, participant
+   focus, phase rule, or fallback guide.
+3. The product context source derives the observation that agent is permitted
+   to see and supplies
    the current legal actions plus the game's `GameAgentManifest`.
 4. `RoomAgentRegistry.respond` returns `null`, utterances, an optional action
    proposal, or both.
-5. The host captions and synthesizes utterances using the registered voice.
+5. The runtime records exact input/output transcript boundaries, publishes
+   caption lifecycle events, and serializes utterances through one room speech
+   adapter using the registered provider-neutral voice ID.
 6. If an action was proposed, the host submits it through its ordinary GAOS
    authority, legality, idempotency, persistence, and commit path.
 
@@ -106,16 +111,60 @@ the accepted command enters state and replay.
 ## Voice runtime boundary
 
 The SDK input begins with final authenticated text and its output ends with
-utterance text and a provider-neutral voice ID. A room runtime layers on:
+utterance text and a provider-neutral voice ID. `RoomAgentRuntime` supplies:
 
-- push-to-talk and speaker attribution;
-- STT segmentation and text fallback;
 - mention/focus/phase routing;
-- per-agent conversation memory;
 - interruption and stale response cancellation;
 - one speech arbiter for simultaneous agents;
-- TTS, captions, audio queues, and reconnect; and
-- durable operational state and observability.
+- exact transcripts partitioned by channel ID;
+- provider-neutral speech and caption adapters;
+- serializable registration, phase, focus, and reconnect state; and
+- operational lifecycle and duration events that deliberately exclude
+  transcript text.
+
+The host still owns push-to-talk, STT segmentation, speaker authentication,
+the concrete TTS/audio transport, and provider conversation objects. A
+`RoomAgentRuntimeStore` adapter persists room state and channel transcripts in
+the host's database or Durable Object. A `RoomAgentRuntimeContextSource`
+receives only the requested channel transcript and resolves product-owned
+model memory, scoped observations, prompts, and legal actions.
+
+```ts
+import {
+  InMemoryRoomAgentRuntimeStore,
+  RoomAgentRuntime,
+} from '@yugao-gaos/gaos-sdk/room-agent-runtime';
+
+const runtime = new RoomAgentRuntime({
+  roomId: 'room-42',
+  registry,
+  store: new InMemoryRoomAgentRuntimeStore(), // replace in production
+  contextSource: buildScopedContext,
+  createId: crypto.randomUUID,
+  fallbackAgentId: 'guide',
+  speech: ttsAdapter,
+  captions: captionBroadcaster,
+});
+
+await runtime.handleFinalInput({
+  channelId: 'private:visitor-7:guide',
+  input: {
+    id: 'final-transcript-19',
+    speakerId: 'visitor-7',
+    modality: 'speech',
+    text: 'What should I carry forward?',
+  },
+});
+```
+
+Input IDs are idempotency keys: a byte-identical retry returns `duplicate`
+without interrupting the original turn. A new final input cancels stale model
+work and interruptible speech. Non-interruptible speech finishes before the
+single speech lane advances. On reconnect, `resume(channelId)` returns the
+current runtime state and only that channel's transcript.
+
+Use the companion [presentation cue bridge](./presentation-cues.md) when a
+room agent must drive ordered browser, Godot, Unity, or native effects.
 
 The governing requirements, release gates, and package plan are recorded in
 [RFC-021](./rfcs/rfc-021-room-agents.md).

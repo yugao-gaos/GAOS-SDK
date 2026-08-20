@@ -1,7 +1,7 @@
 # RFC-021 — In-room agents and audience interaction
 
-Status: **implemented contract foundation** · Ships in: **v1.0** · Runtime
-integration: staged behind this contract · Depends on:
+Status: **implemented provider-neutral contract and runtime** · Ships in:
+**v1.0** · Provider integration: host-owned · Depends on:
 [RFC-003](rfc-003-information-partitions.md),
 [RFC-006](rfc-006-session-kernel.md),
 [RFC-013](rfc-013-ecosystem-bridges-and-benchmark-tooling.md),
@@ -172,18 +172,22 @@ mentions, UI focus, proximity, phase policy, or a fallback guide. The SDK does
 not run an LLM router and does not cause every registered agent to answer a
 broadcast. This keeps activation policy observable and product-owned.
 
-The v1.0 core contract starts at final authenticated text and ends at
-provider-neutral utterance text plus voice identity. The optional room runtime
-owns:
+The v1.0 runtime starts at final authenticated text and ends at
+provider-neutral utterance text plus voice identity. It owns:
 
-- hold-to-talk floor control and audio segmentation;
-- STT and final-transcript production;
-- speaker attribution, presence, reconnect, and text fallback;
-- per-agent memory and provider conversations;
+- explicit mention/focus/phase/fallback routing;
+- exact transcript boundaries partitioned by channel ID;
 - response interruption and stale-response cancellation;
 - speech arbitration when several agents are eligible;
-- TTS, audio queues, captions, and broadcast delivery; and
-- durable operational state and provider usage metadata.
+- speech and caption adapter invocation;
+- serializable registration, focus, phase, and reconnect state; and
+- text-free operational lifecycle events.
+
+The host owns hold-to-talk floor control, audio segmentation, STT and final
+transcript production, authenticated speaker presence, concrete TTS/audio
+delivery, the durable store implementation, and provider conversation objects.
+The runtime supplies the selected channel transcript to the product context
+source so private and public model memory cannot be mixed by default.
 
 Provider clients, sockets, audio streams, and conversation objects are not
 stored in reducer state.
@@ -194,15 +198,16 @@ The GAOS package exports the agent registry and driver contracts from
 `@yugao-gaos/gaos-sdk/room-agent`, and the operational envelope, router,
 services, watchers, and vote resolver from
 `@yugao-gaos/gaos-sdk/room-interaction`. Both are browser-safe and
-provider-neutral.
+provider-neutral. The same package exports the orchestration state machine from
+`@yugao-gaos/gaos-sdk/room-agent-runtime`.
 
-Concrete hosting and voice implementations remain optional packages. The
-recommended package family is:
+The package family is:
 
 - `@yugao-gaos/gaos-sdk/room-agent` — stable core contract;
 - `@yugao-gaos/gaos-sdk/room-interaction` — stable routing and interaction
   mechanisms;
-- `@yugao-gaos/room-agent-runtime` — room lifecycle and orchestration; and
+- `@yugao-gaos/gaos-sdk/room-agent-runtime` — stable room lifecycle and
+  orchestration; and
 - provider adapters such as STT, TTS, and model integrations behind runtime
   interfaces.
 
@@ -228,14 +233,16 @@ session SDKs.
 
 ### Gate B — generic room runtime
 
-- [ ] Extract the push-to-talk, STT, interruption, TTS, captions, and reconnect
-      pipeline from the prior room implementation without sportsbook policy.
-- [ ] Persist room-agent registrations, transcript boundaries, and per-agent
-      operational memory durably, partitioned by channel ID.
-- [ ] Implement explicit mention/focus/phase routing and one room speech
+- [x] Define host adapter seams for final transcripts, speech, captions, and
+      reconnect without provider or product policy.
+- [x] Persist room-agent registrations and exact transcript boundaries through
+      a host store, partitioned by channel ID.
+- [x] Implement explicit mention/focus/phase routing and one room speech
       arbiter.
-- [ ] Add structured observability for latency, cancellation, provider errors,
-      and usage without placing it in game replay.
+- [x] Add structured text-free lifecycle observability for duration,
+      completion, cancellation, provider errors, and reconnect without replay.
+- [x] Add retry-safe input ingestion, stale-turn cancellation, caption
+      lifecycle, serializable state, and reconnect tests.
 
 ### Gate C — game-mechanism validation
 

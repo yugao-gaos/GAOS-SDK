@@ -16,9 +16,11 @@ scope without publishing intermediate packages. It freezes the neutral API,
 removes the scheduled `Grid*`/grid-named aliases, and ships unified sessions,
 portal-aware paths, unified actor control sources, self-reported benchmark
 resource observations, unified command effects, historical verifier kits, and
-provider-neutral room-agent contracts for guides, NPCs, referees, and audience
-interaction, including privacy-bounded routing, services, committed watchers,
-and deterministic polls, plus the full quality gate. Historical replay,
+provider-neutral room-agent contracts and runtime orchestration for guides,
+NPCs, referees, and audience interaction, including privacy-bounded routing,
+channel transcripts, interruption, speech/caption adapters, reconnect,
+services, committed watchers, and deterministic polls. A presentation-cue
+bridge adds retry-safe browser/native effects. Historical replay,
 signature, schema, and verifier semantics remain compatible.
 
 [Migration and release notes →](/releases#v100)

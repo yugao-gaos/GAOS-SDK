@@ -29,6 +29,12 @@ agent contracts. No separate v0.27 or v0.29 package was published.
   mechanisms, privacy-bounded messages/events, services, committed watchers,
   deterministic audience polls, and optional actor/seat-bound action proposals
   without weakening ordinary command authority.
+- The additive `./room-agent-runtime` surface handles final-text routing,
+  channel-partitioned transcript persistence, cancellation, one speech lane,
+  captions, operational events, and reconnect behind host adapters.
+- The additive `./presentation-cues` surface carries ordered, idempotent
+  product effects to browser and native renderers with acknowledgements,
+  bounded replay repair, and emergency interruption.
 - `gaos.replay` v1.4 preserves interactions in order for recovery and
   independent verification.
 - Benchmark bundles carry token, cost, timing, and provider data under the

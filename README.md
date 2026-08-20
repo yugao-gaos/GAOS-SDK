@@ -49,6 +49,10 @@ Use the narrowest package surface:
 - `./control` — behavior-tree, human-input, and agent-input control sources
 - `./room-agent` and `./room-interaction` — conversational presences plus
   privacy-bounded room messages, services, watchers, and audience polls
+- `./room-agent-runtime` — final-text routing, durable channel transcripts,
+  interruption, speech arbitration, captions, and reconnect state
+- `./presentation-cues` — ordered, idempotent host-to-renderer commands with
+  replay repair and emergency interruption
 - `./agent` and `./agent-cli` — the common session runner, model drivers, and
   MCP-capable CLIs
 - Python — hosted evaluation and replay exchange
