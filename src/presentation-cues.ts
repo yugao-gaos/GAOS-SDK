@@ -126,6 +126,10 @@ function acknowledgementFingerprint(ack: PresentationCueAcknowledgement): string
   return canonicalJson(ack);
 }
 
+function isSuccessfulAcknowledgement(status: PresentationCueAcknowledgementStatus): boolean {
+  return status === 'applied' || status === 'duplicate';
+}
+
 function copyCue(cue: PresentationCue): PresentationCue {
   return structuredClone(cue);
 }
@@ -243,15 +247,20 @@ export class PresentationCueHost {
     }
     const current = this.value.acknowledgements[ack.cueId];
     if (current !== undefined) {
-      if (current.sequence === ack.sequence
-        && current.status === 'applied'
-        && ack.status === 'duplicate') {
+      if (acknowledgementFingerprint(current) === acknowledgementFingerprint(ack)) {
         return 'duplicate';
       }
-      if (acknowledgementFingerprint(current) !== acknowledgementFingerprint(ack)) {
-        throw new Error(`presentation cue acknowledgement changed: ${ack.cueId}`);
+      if (isSuccessfulAcknowledgement(current.status)) {
+        return 'duplicate';
       }
-      return 'duplicate';
+      this.value = {
+        ...this.value,
+        acknowledgements: {
+          ...this.value.acknowledgements,
+          [ack.cueId]: structuredClone(ack),
+        },
+      };
+      return 'recorded';
     }
     this.value = {
       ...this.value,

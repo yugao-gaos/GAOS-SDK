@@ -52,21 +52,92 @@ describe('presentation cues', () => {
       apply: async () => undefined,
     });
 
-    await expect(client.receive(second)).resolves.toMatchObject({
+    const repair = await client.receive(second);
+    expect(repair).toMatchObject({
       status: 'repair_required',
       reason: 'sequence_gap',
     });
+    expect(host.acknowledge(repair)).toBe('recorded');
     expect(client.state().lastAppliedSequence).toBe(0);
-    expect(host.resumeAfter(0)).toEqual({
+    const restoredHost = new PresentationCueHost({
+      sessionId: 'session-1',
+      createId: idFactory(),
+      state: host.state(),
+    });
+    expect(restoredHost.resumeAfter(0)).toEqual({
       status: 'replay',
       cues: [first, second],
     });
     await client.receive(first);
-    await client.receive(second);
+    const applied = await client.receive(second);
+    expect(restoredHost.acknowledge(applied)).toBe('recorded');
+    expect(restoredHost.state().acknowledgements[second.cueId]).toEqual(applied);
     expect(client.state()).toMatchObject({
       status: 'ready',
       lastAppliedSequence: 2,
     });
+  });
+
+  it('settles a rejected cue after replay and ignores a stale regression', async () => {
+    const host = new PresentationCueHost({
+      sessionId: 'session-1',
+      createId: idFactory(),
+    });
+    const cue = host.issue('enter_scene', { scene: 'garden' });
+    let attempts = 0;
+    const client = new PresentationCueClient({
+      sessionId: 'session-1',
+      apply: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('renderer_not_ready');
+      },
+    });
+
+    const rejected = await client.receive(cue);
+    expect(rejected).toMatchObject({ status: 'rejected', reason: 'renderer_not_ready' });
+    expect(host.acknowledge(rejected)).toBe('recorded');
+
+    const applied = await client.receive(cue);
+    expect(applied).toMatchObject({ status: 'applied' });
+    expect(host.acknowledge(applied)).toBe('recorded');
+    expect(host.acknowledge({ ...applied, status: 'duplicate' })).toBe('duplicate');
+    expect(host.state().acknowledgements[cue.cueId]).toEqual(applied);
+
+    expect(host.acknowledge(rejected)).toBe('duplicate');
+    expect(host.state().acknowledgements[cue.cueId]).toEqual(applied);
+  });
+
+  it('treats a duplicate acknowledgement as successful recovery settlement', () => {
+    const host = new PresentationCueHost({
+      sessionId: 'session-1',
+      createId: idFactory(),
+    });
+    const cue = host.issue('set_phase', { phase: 'welcome' });
+    const repair = {
+      schema: PRESENTATION_CUE_SCHEMA,
+      sessionId: cue.sessionId,
+      cueId: cue.cueId,
+      sequence: cue.sequence,
+      status: 'repair_required' as const,
+      reason: 'sequence_gap',
+    };
+    const duplicate = {
+      schema: PRESENTATION_CUE_SCHEMA,
+      sessionId: cue.sessionId,
+      cueId: cue.cueId,
+      sequence: cue.sequence,
+      status: 'duplicate' as const,
+    };
+    const rejected = {
+      ...duplicate,
+      status: 'rejected' as const,
+      reason: 'renderer_not_ready',
+    };
+
+    expect(host.acknowledge(repair)).toBe('recorded');
+    expect(host.acknowledge(rejected)).toBe('recorded');
+    expect(host.acknowledge(duplicate)).toBe('recorded');
+    expect(host.state().acknowledgements[cue.cueId]).toEqual(duplicate);
   });
 
   it('lets an emergency cue interrupt and supersede a missing normal cue', async () => {

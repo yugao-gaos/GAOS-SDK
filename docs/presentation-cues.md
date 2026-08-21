@@ -50,6 +50,13 @@ duplicate cue ID with identical content returns `duplicate`. Reusing an ID for
 different content is rejected. Emergency cues call the optional interruption
 hook before application and may advance over missing normal cues.
 
+Host acknowledgement state progresses monotonically per cue.
+`repair_required` and `rejected` report an unresolved delivery attempt, so a
+later attempt may replace either outcome. `applied` and `duplicate` are
+equivalent successful settlements and make the cue terminal: later
+acknowledgements are treated as stale duplicates and cannot regress the stored
+success.
+
 ## Authority boundary
 
 Presentation cues never mutate the product reducer and are not evidence of an
