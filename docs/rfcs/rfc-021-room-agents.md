@@ -177,8 +177,8 @@ provider-neutral utterance text plus voice identity. It owns:
 
 - explicit mention/focus/phase/fallback routing;
 - exact transcript boundaries partitioned by channel ID;
-- response interruption and stale-response cancellation;
-- speech arbitration when several agents are eligible;
+- response interruption and stale-response cancellation within each channel;
+- room-global speech arbitration when several agents are eligible;
 - speech and caption adapter invocation;
 - serializable registration, focus, phase, and reconnect state; and
 - text-free operational lifecycle events.
@@ -188,6 +188,12 @@ transcript production, authenticated speaker presence, concrete TTS/audio
 delivery, the durable store implementation, and provider conversation objects.
 The runtime supplies the selected channel transcript to the product context
 source so private and public model memory cannot be mixed by default.
+Every final input also supplies authenticated disclosure independently of its
+channel ID. The runtime owns the resulting interaction envelope, clamps every
+derived audience to it, and rejects an idempotency-key retry that changes it.
+Provider work may proceed concurrently on separate channels; replacement only
+aborts work on the same channel, while explicit `interrupt()` remains
+room-wide.
 
 Provider clients, sockets, audio streams, and conversation objects are not
 stored in reducer state.
@@ -286,6 +292,10 @@ and C.
     private traffic.
 15. Provider memory is partitioned by channel so delivery clamping cannot leak
     facts retained from a more privileged thread.
+16. Runtime inputs carry authenticated disclosure; channel names never imply
+    or widen participant visibility.
+17. Replacement and cancellation abort only the owning channel unless the host
+    invokes the explicit room-wide interrupt.
 
 ## 11 — Rejected alternatives
 

@@ -34,10 +34,16 @@ const participants = [
   { id: 'visitor-1', role: 'spectator' as const },
 ];
 
+const roomDisclosure = { kind: 'room' } as const;
+const privateDisclosure = {
+  kind: 'participants',
+  participantIds: ['visitor-1'],
+} as const;
+
 function contextSource(): RoomAgentRuntimeContextSource<Observation> {
   return async ({ phase }): Promise<Omit<
     RoomAgentContext<Observation>,
-    'agent' | 'roomId' | 'input' | 'signal'
+    'agent' | 'roomId' | 'input' | 'interaction' | 'signal'
   >> => ({
     participants,
     observation: { phase: phase ?? 'arrival' },
@@ -132,6 +138,7 @@ function activeRecoveryRun(id: string, channelId: string): RoomAgentRunRecord {
     latestInput: {
       id: 'input-1', speakerId: 'visitor-1', text: 'Recover', modality: 'text',
     },
+    disclosure: privateDisclosure,
     attempt: 1,
     status: 'active',
     startedAt: 1,
@@ -153,6 +160,7 @@ async function seedRecoveryOutput(
     turnId: run.latestInput.id,
     direction: 'input',
     endpoint: { kind: 'participant', id: run.latestInput.speakerId },
+    disclosure: run.disclosure,
     text: run.latestInput.text,
     modality: run.latestInput.modality,
   });
@@ -200,6 +208,7 @@ describe('room agent runtime', () => {
     await runtime.setPhase('ritual');
     await runtime.handleFinalInput({
       channelId: 'public',
+      disclosure: roomDisclosure,
       input: {
         id: 'turn-1', speakerId: 'visitor-1', text: 'Hello', modality: 'text',
       },
@@ -207,12 +216,14 @@ describe('room agent runtime', () => {
     await runtime.setFocus('visitor-1', 'guide');
     await runtime.handleFinalInput({
       channelId: 'public',
+      disclosure: roomDisclosure,
       input: {
         id: 'turn-2', speakerId: 'visitor-1', text: 'Hello again', modality: 'speech',
       },
     });
     await runtime.handleFinalInput({
       channelId: 'public',
+      disclosure: roomDisclosure,
       input: {
         id: 'turn-3',
         speakerId: 'visitor-1',
@@ -225,6 +236,7 @@ describe('room agent runtime', () => {
     await runtime.setPhase('other');
     await runtime.handleFinalInput({
       channelId: 'public',
+      disclosure: roomDisclosure,
       input: {
         id: 'turn-4', speakerId: 'visitor-1', text: 'Fallback?', modality: 'text',
       },
@@ -273,6 +285,7 @@ describe('room agent runtime', () => {
 
     await runtime.handleFinalInput({
       channelId: 'private:visitor-1:oracle',
+      disclosure: privateDisclosure,
       input: {
         id: 'question-1',
         speakerId: 'visitor-1',
@@ -315,6 +328,173 @@ describe('room agent runtime', () => {
     await expect(store.loadTranscript('room-1', 'public')).resolves.toEqual([]);
   });
 
+  it('owns the interaction disclosure and clamps private replies across every presentation surface', async () => {
+    const interactions: unknown[] = [];
+    const spoken: RoomSpeechRequest[] = [];
+    const captions: RoomCaptionEvent[] = [];
+    const store = new InMemoryRoomAgentRuntimeStore();
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'guide', label: 'Guide', role: 'guide' },
+      driver: {
+        respond: async ({ interaction }) => {
+          interactions.push(structuredClone(interaction));
+          return {
+            utterances: [{ text: 'Private answer.', audience: { kind: 'room' } }],
+          };
+        },
+      },
+    }]);
+    const runtime = new RoomAgentRuntime({
+      roomId: 'room-1',
+      registry,
+      store,
+      contextSource: async (request) => {
+        expect(request.interaction.disclosure).toEqual(privateDisclosure);
+        return {
+          participants,
+          observation: { phase: 'arrival' },
+          manifest,
+          legalActions: [],
+          tick: 0,
+        };
+      },
+      createId: idFactory(),
+      fallbackAgentId: 'guide',
+      speech: { speak: async (request) => { spoken.push(request); } },
+      captions: { publish: async (event) => { captions.push(event); } },
+    });
+
+    const result = await runtime.handleFinalInput({
+      channelId: 'private:visitor-1:guide',
+      disclosure: privateDisclosure,
+      input: {
+        id: 'private-turn',
+        speakerId: 'visitor-1',
+        text: 'Tell only me.',
+        modality: 'text',
+      },
+    });
+
+    const expectedAudience = {
+      kind: 'participants',
+      participantIds: ['visitor-1'],
+    };
+    expect(interactions).toEqual([expect.objectContaining({
+      roomId: 'room-1',
+      channelId: 'private:visitor-1:guide',
+      source: { kind: 'participant', id: 'visitor-1' },
+      targets: [{ kind: 'agent', id: 'guide' }],
+      disclosure: privateDisclosure,
+    })]);
+    expect(result.turn?.utterances).toEqual([{
+      text: 'Private answer.',
+      audience: expectedAudience,
+    }]);
+    expect(spoken).toEqual([expect.objectContaining({ audience: expectedAudience })]);
+    expect(captions).toEqual([
+      expect.objectContaining({ status: 'started', audience: expectedAudience }),
+      expect.objectContaining({ status: 'completed', audience: expectedAudience }),
+    ]);
+    await expect(store.loadTranscript(
+      'room-1', 'private:visitor-1:guide',
+    )).resolves.toMatchObject([
+      { direction: 'input', disclosure: privateDisclosure },
+      { direction: 'output', disclosure: privateDisclosure },
+    ]);
+  });
+
+  it('rejects missing disclosure and input-id reuse with a wider disclosure', async () => {
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'guide', label: 'Guide', role: 'guide' },
+      driver: { respond: async () => ({ utterances: [{ text: 'Answer.' }] }) },
+    }]);
+    const runtime = new RoomAgentRuntime({
+      roomId: 'room-1',
+      registry,
+      store: new InMemoryRoomAgentRuntimeStore(),
+      contextSource: contextSource(),
+      createId: idFactory(),
+      fallbackAgentId: 'guide',
+    });
+    const request = {
+      channelId: 'private:visitor-1:guide',
+      disclosure: privateDisclosure,
+      input: {
+        id: 'stable-input',
+        speakerId: 'visitor-1',
+        text: 'Keep this private.',
+        modality: 'text' as const,
+      },
+    };
+
+    await expect(runtime.handleFinalInput({
+      channelId: 'private:visitor-1:guide',
+      input: request.input,
+    } as Parameters<typeof runtime.handleFinalInput>[0])).rejects.toThrow();
+    await expect(runtime.handleFinalInput(request)).resolves.toMatchObject({ status: 'completed' });
+    await expect(runtime.handleFinalInput({
+      ...request,
+      disclosure: roomDisclosure,
+    })).rejects.toThrow('room transcript id was reused');
+  });
+
+  it('keeps provider work isolated by channel while speech remains room-global', async () => {
+    const providerReleases = new Map<string, () => void>();
+    const providerSignals = new Map<string, AbortSignal>();
+    let releaseFirstSpeech!: () => void;
+    const firstSpeech = new Promise<void>((resolve) => { releaseFirstSpeech = resolve; });
+    const spoken: string[] = [];
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'guide', label: 'Guide', role: 'guide' },
+      driver: {
+        respond: async ({ input, signal }) => {
+          providerSignals.set(input.text, signal!);
+          await new Promise<void>((resolve) => { providerReleases.set(input.text, resolve); });
+          return { utterances: [{ text: input.text }] };
+        },
+      },
+    }]);
+    const runtime = new RoomAgentRuntime({
+      roomId: 'room-1',
+      registry,
+      store: new InMemoryRoomAgentRuntimeStore(),
+      contextSource: contextSource(),
+      createId: idFactory(),
+      fallbackAgentId: 'guide',
+      speech: {
+        speak: async ({ text }) => {
+          spoken.push(text);
+          if (spoken.length === 1) await firstSpeech;
+        },
+      },
+    });
+    const first = runtime.handleFinalInput({
+      channelId: 'private:first',
+      disclosure: privateDisclosure,
+      input: { id: 'turn-first', speakerId: 'visitor-1', text: 'First', modality: 'text' },
+    });
+    await vi.waitFor(() => expect(providerReleases.has('First')).toBe(true));
+    const second = runtime.handleFinalInput({
+      channelId: 'private:second',
+      disclosure: privateDisclosure,
+      input: { id: 'turn-second', speakerId: 'visitor-1', text: 'Second', modality: 'text' },
+    });
+    await vi.waitFor(() => expect(providerReleases.has('Second')).toBe(true));
+
+    expect(providerSignals.get('First')?.aborted).toBe(false);
+    expect(providerSignals.get('Second')?.aborted).toBe(false);
+    providerReleases.get('First')!();
+    providerReleases.get('Second')!();
+    await vi.waitFor(() => expect(spoken).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(spoken).toHaveLength(1);
+    releaseFirstSpeech();
+
+    await expect(first).resolves.toMatchObject({ status: 'completed' });
+    await expect(second).resolves.toMatchObject({ status: 'completed' });
+    expect(spoken).toHaveLength(2);
+  });
+
   it('interrupts stale work when a newer final input arrives', async () => {
     let finishFirst!: () => void;
     const firstStarted = new Promise<void>((resolve) => {
@@ -344,6 +524,7 @@ describe('room agent runtime', () => {
 
     const first = runtime.handleFinalInput({
       channelId: 'public',
+      disclosure: roomDisclosure,
       input: {
         id: 'turn-1', speakerId: 'visitor-1', text: 'First', modality: 'speech',
       },
@@ -351,6 +532,7 @@ describe('room agent runtime', () => {
     await vi.waitFor(() => expect(speak).toHaveBeenCalledOnce());
     const second = runtime.handleFinalInput({
       channelId: 'public',
+      disclosure: roomDisclosure,
       input: {
         id: 'turn-2', speakerId: 'visitor-1', text: 'Second', modality: 'speech',
       },
@@ -383,6 +565,7 @@ describe('room agent runtime', () => {
     });
     const request = {
       channelId: 'public',
+      disclosure: roomDisclosure,
       input: {
         id: 'turn-1', speakerId: 'visitor-1', text: 'Retry me', modality: 'text' as const,
       },
@@ -428,11 +611,13 @@ describe('room agent runtime', () => {
 
     const first = runtime.handleFinalInput({
       channelId: 'public',
+      disclosure: roomDisclosure,
       input: { id: 'turn-1', speakerId: 'visitor-1', text: 'First', modality: 'speech' },
     });
     await vi.waitFor(() => expect(spoken).toEqual(['First']));
     const second = runtime.handleFinalInput({
       channelId: 'public',
+      disclosure: roomDisclosure,
       input: { id: 'turn-2', speakerId: 'visitor-1', text: 'Second', modality: 'speech' },
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -463,6 +648,7 @@ describe('room agent runtime', () => {
     await first.setFocus('visitor-1', 'guide');
     await first.handleFinalInput({
       channelId: 'private:visitor-1:guide',
+      disclosure: privateDisclosure,
       input: {
         id: 'turn-1', speakerId: 'visitor-1', text: 'Resume me', modality: 'text',
       },
@@ -537,6 +723,7 @@ describe('room agent runtime', () => {
 
     const execution = runtime.startRun({
       channelId: 'private:visitor-1:oracle',
+      disclosure: privateDisclosure,
       input: {
         id: 'input-1', speakerId: 'visitor-1', text: 'Guide me', modality: 'text',
       },
@@ -621,6 +808,7 @@ describe('room agent runtime', () => {
 
     const first = await runtime.handleRunInput({
       channelId: 'private',
+      disclosure: privateDisclosure,
       deadlineMs: 100,
       input: { id: 'input-1', speakerId: 'visitor-1', text: 'A gate', modality: 'text' },
     });
@@ -639,6 +827,7 @@ describe('room agent runtime', () => {
     wallClock = 50_000;
     const second = await runtime.handleRunInput({
       channelId: 'private',
+      disclosure: privateDisclosure,
       continuation: { runId: first.run.id, token: 'continue-1' },
       input: { id: 'input-2', speakerId: 'visitor-1', text: 'a garden', modality: 'speech' },
     });
@@ -696,6 +885,7 @@ describe('room agent runtime', () => {
     });
     const result = await runtime.handleRunInput({
       channelId: 'public',
+      disclosure: roomDisclosure,
       input: { id: 'input-1', speakerId: 'visitor-1', text: 'Hello', modality: 'text' },
     });
     expect(result).toMatchObject({
@@ -734,10 +924,12 @@ describe('room agent runtime', () => {
 
     await expect(runtime.handleRunInput({
       channelId: 'implicit',
+      disclosure: roomDisclosure,
       input: { id: 'implicit', speakerId: 'visitor-1', text: 'Finish', modality: 'text' },
     })).resolves.toMatchObject({ status: 'completed' });
     await expect(runtime.handleRunInput({
       channelId: 'failure',
+      disclosure: roomDisclosure,
       input: { id: 'failure', speakerId: 'visitor-1', text: 'Fail', modality: 'text' },
     })).rejects.toThrow('provider failed');
     await expect(store.loadRunByInput('room-1', 'failure', 'failure')).resolves.toMatchObject({
@@ -766,6 +958,7 @@ describe('room agent runtime', () => {
     });
     const execution = runtime.startRun({
       channelId: 'cancel',
+      disclosure: roomDisclosure,
       input: { id: 'cancel-1', speakerId: 'visitor-1', text: 'Stop', modality: 'text' },
     });
     const iterator = execution.events[Symbol.asyncIterator]();
@@ -784,6 +977,7 @@ describe('room agent runtime', () => {
 
     const deadline = await runtime.handleRunInput({
       channelId: 'deadline',
+      disclosure: roomDisclosure,
       deadlineMs: 5,
       input: { id: 'deadline-1', speakerId: 'visitor-1', text: 'Wait', modality: 'text' },
     });
@@ -819,6 +1013,7 @@ describe('room agent runtime', () => {
       latestInput: {
         id: 'input-1', speakerId: 'visitor-1', text: 'Recover', modality: 'text',
       },
+      disclosure: privateDisclosure,
       attempt: 1,
       status: 'active',
       startedAt: 1,
@@ -871,6 +1066,7 @@ describe('room agent runtime', () => {
 
     const result = await runtime.handleRunInput({
       channelId: 'atomic',
+      disclosure: roomDisclosure,
       input: { id: 'input-1', speakerId: 'visitor-1', text: 'Begin', modality: 'text' },
     });
     expect(result.status).toBe('waiting_for_input');
@@ -929,10 +1125,12 @@ describe('room agent runtime', () => {
     });
     const first = await runtime.handleRunInput({
       channelId: 'first-channel',
+      disclosure: roomDisclosure,
       input: { id: 'input-1', speakerId: 'visitor-1', text: 'First', modality: 'text' },
     });
     const second = runtime.startRun({
       channelId: 'second-channel',
+      disclosure: roomDisclosure,
       input: { id: 'input-2', speakerId: 'visitor-1', text: 'Second', modality: 'text' },
     });
     await second.events[Symbol.asyncIterator]().next();
@@ -940,6 +1138,54 @@ describe('room agent runtime', () => {
     await expect(runtime.cancelRun(first.run.id, 'cancel_waiting')).resolves.toBe(true);
     expect(secondSignal?.aborted).toBe(false);
     releaseSecond();
+    await expect(second.result).resolves.toMatchObject({ status: 'completed' });
+  });
+
+  it('runs durable work concurrently across channels and cancels only its owning channel', async () => {
+    const releases = new Map<string, () => void>();
+    const signals = new Map<string, AbortSignal>();
+    const store = new InMemoryRoomAgentRuntimeStore();
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'oracle', label: 'Oracle', role: 'character' },
+      driver: {
+        run: async function* ({ input, signal }) {
+          signals.set(input.text, signal!);
+          yield { type: 'progress', progress: { stage: input.text } };
+          await new Promise<void>((resolve) => { releases.set(input.text, resolve); });
+          if (!signal?.aborted) yield { type: 'completed' };
+        },
+      },
+    }]);
+    const runtime = new RoomAgentRuntime({
+      roomId: 'room-1', registry, store, runStore: store,
+      contextSource: contextSource(), createId: idFactory(), fallbackAgentId: 'oracle',
+    });
+    const first = runtime.startRun({
+      channelId: 'private:first',
+      disclosure: privateDisclosure,
+      input: { id: 'run-input-first', speakerId: 'visitor-1', text: 'First', modality: 'text' },
+    });
+    const firstProgress = await first.events[Symbol.asyncIterator]().next();
+    const second = runtime.startRun({
+      channelId: 'private:second',
+      disclosure: privateDisclosure,
+      input: { id: 'run-input-second', speakerId: 'visitor-1', text: 'Second', modality: 'text' },
+    });
+    const secondProgress = await second.events[Symbol.asyncIterator]().next();
+
+    expect(firstProgress.value?.event).toMatchObject({ type: 'progress' });
+    expect(secondProgress.value?.event).toMatchObject({ type: 'progress' });
+    expect(signals.get('First')?.aborted).toBe(false);
+    expect(signals.get('Second')?.aborted).toBe(false);
+
+    const firstRun = await store.loadRunByInput('room-1', 'private:first', 'run-input-first');
+    await expect(runtime.cancelRun(firstRun!.id, 'cancel_first')).resolves.toBe(true);
+    expect(signals.get('First')?.aborted).toBe(true);
+    expect(signals.get('Second')?.aborted).toBe(false);
+    releases.get('First')!();
+    releases.get('Second')!();
+
+    await expect(first.result).resolves.toMatchObject({ status: 'canceled' });
     await expect(second.result).resolves.toMatchObject({ status: 'completed' });
   });
 
@@ -994,6 +1240,7 @@ describe('room agent runtime', () => {
 
       const result = await runtime.handleRunInput({
         channelId: failurePoint,
+        disclosure: roomDisclosure,
         deadlineMs: 5,
         input: { id: `input-${failurePoint}`, speakerId: 'visitor-1', text: 'Wait', modality: 'text' },
       });
@@ -1019,6 +1266,7 @@ describe('room agent runtime', () => {
       latestInput: {
         id: 'input-1', speakerId: 'visitor-1', text: 'Recover', modality: 'text',
       },
+      disclosure: privateDisclosure,
       attempt: 1,
       status: 'active',
       startedAt: 1,
@@ -1080,6 +1328,7 @@ describe('room agent runtime', () => {
       turnId: active.latestInput.id,
       direction: 'output',
       endpoint: { kind: 'agent', id: active.agentId },
+      disclosure: active.disclosure,
       text: 'Already committed.',
       modality: 'generated',
     });
@@ -1360,6 +1609,7 @@ describe('room agent runtime', () => {
     };
     const request = {
       channelId: 'atomic-admission',
+      disclosure: roomDisclosure,
       input: {
         id: 'input-atomic',
         speakerId: 'visitor-1',
@@ -1413,6 +1663,7 @@ describe('room agent runtime', () => {
       latestInput: {
         id: 'old-input', speakerId: 'visitor-1', text: 'Old work', modality: 'text',
       },
+      disclosure: roomDisclosure,
       attempt: 1,
       status: 'active',
       startedAt: 1,
@@ -1440,6 +1691,7 @@ describe('room agent runtime', () => {
     };
     const request = {
       channelId: oldRun.channelId,
+      disclosure: roomDisclosure,
       input: {
         id: 'replacement-input',
         speakerId: 'visitor-1',
@@ -1504,6 +1756,7 @@ describe('room agent runtime', () => {
       latestInput: {
         id: 'old-input', speakerId: 'visitor-1', text: 'Old work', modality: 'text',
       },
+      disclosure: roomDisclosure,
       attempt: 1,
       status: 'active',
       startedAt: 1,
@@ -1522,6 +1775,7 @@ describe('room agent runtime', () => {
     };
     const request = {
       channelId: oldRun.channelId,
+      disclosure: roomDisclosure,
       input: {
         id: 'replacement-input',
         speakerId: 'visitor-1',
@@ -1569,6 +1823,7 @@ describe('room agent runtime', () => {
       latestInput: {
         id: 'input-1', speakerId: 'visitor-1', text: 'Retry events', modality: 'text',
       },
+      disclosure: privateDisclosure,
       attempt: 1,
       status: 'active',
       startedAt: 1,
@@ -1659,11 +1914,13 @@ describe('room agent runtime', () => {
     });
     const first = runtime.startRun({
       channelId: 'same-channel',
+      disclosure: roomDisclosure,
       input: { id: 'input-first', speakerId: 'visitor-1', text: 'First', modality: 'text' },
     });
     await store.firstCommitted;
     const latest = runtime.startRun({
       channelId: 'same-channel',
+      disclosure: roomDisclosure,
       input: { id: 'input-latest', speakerId: 'visitor-1', text: 'Latest', modality: 'text' },
     });
     store.allowFirstToReturn();
@@ -1727,6 +1984,7 @@ describe('room agent runtime', () => {
       latestInput: {
         id: 'input-1', speakerId: 'visitor-1', text: 'Resume me', modality: 'text',
       },
+      disclosure: privateDisclosure,
       attempt: 1,
       status: 'active',
       startedAt: 1,

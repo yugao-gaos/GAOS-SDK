@@ -153,8 +153,9 @@ binding and return an untrusted canonical action proposal. Audience presence
 remains separate from seat authority. A companion `./room-interaction` surface
 adds explicit privacy-bounded messages and events, agent services, committed
 watchers, and deterministic audience polls without creating another authority
-path. `./room-agent-runtime` adds final-text routing, durable store seams,
-channel transcripts, cancellation, speech arbitration, captions, and reconnect.
+path. `./room-agent-runtime` adds final-text routing, authenticated disclosure,
+durable store seams, channel-isolated provider work and transcripts,
+room-global speech arbitration, captions, and reconnect.
 `./presentation-cues` adds ordered host-to-renderer effects and repair.
 Provider-specific push-to-talk, STT, TTS, persistence, and networking stay in
 host adapters.

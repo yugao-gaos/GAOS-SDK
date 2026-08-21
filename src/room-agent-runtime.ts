@@ -10,7 +10,12 @@ import {
   type RoomAgentUtterance,
   type RoomAgentVoice,
 } from './room-agent.js';
-import type { RoomEndpointKind } from './room-interaction.js';
+import {
+  intersectRoomDisclosures,
+  type RoomDisclosure,
+  type RoomEndpointKind,
+  type RoomInteractionEnvelope,
+} from './room-interaction.js';
 
 export const ROOM_AGENT_RUNTIME_SCHEMA = 'gaos.room-agent-runtime.v1' as const;
 
@@ -30,6 +35,7 @@ export interface RoomAgentTranscriptEntry {
   turnId: string;
   direction: 'input' | 'output';
   endpoint: { kind: RoomEndpointKind; id: string };
+  disclosure: RoomDisclosure;
   text: string;
   modality: 'speech' | 'text' | 'generated';
 }
@@ -68,6 +74,8 @@ export interface RoomAgentRunRecord {
   agentId: string;
   rootInputId: string;
   latestInput: RoomAgentInput;
+  /** Authenticated maximum participant-visible scope for the latest input. */
+  disclosure: RoomDisclosure;
   attempt: number;
   status: RoomAgentRunStatus;
   startedAt: number;
@@ -159,6 +167,7 @@ export interface RoomAgentRuntimeContextRequest {
   channelId: string;
   agentId: string;
   input: RoomAgentInput;
+  interaction: RoomInteractionEnvelope;
   phase?: string;
   transcript: readonly RoomAgentTranscriptEntry[];
   /** Aborts when the turn is canceled or its active-attempt deadline expires. */
@@ -169,10 +178,10 @@ export type RoomAgentRuntimeContextSource<TObservation = unknown, TKnowledge = u
   request: RoomAgentRuntimeContextRequest,
 ) => Omit<
   RoomAgentContext<TObservation, TKnowledge>,
-  'agent' | 'roomId' | 'input' | 'signal'
+  'agent' | 'roomId' | 'input' | 'interaction' | 'signal'
 > | Promise<Omit<
   RoomAgentContext<TObservation, TKnowledge>,
-  'agent' | 'roomId' | 'input' | 'signal'
+  'agent' | 'roomId' | 'input' | 'interaction' | 'signal'
 >>;
 
 export interface RoomSpeechRequest {
@@ -258,6 +267,8 @@ export interface RoomAgentRuntimeOptions<TObservation = unknown, TKnowledge = un
 export interface RoomAgentRuntimeInput {
   channelId: string;
   input: RoomAgentInput;
+  /** Authenticated maximum participant-visible scope. Never inferred from channelId. */
+  disclosure: RoomDisclosure;
 }
 
 export interface RoomAgentRuntimeResult {
@@ -344,6 +355,7 @@ function assertTranscriptDraft(draft: RoomAgentTranscriptDraft): void {
   assertText(draft.channelId, 'room transcript channelId');
   assertText(draft.turnId, 'room transcript turnId');
   assertText(draft.endpoint.id, 'room transcript endpoint id');
+  copyDisclosure(draft.disclosure);
   assertText(draft.text, 'room transcript text');
   if (!['participant', 'agent', 'service', 'watcher'].includes(draft.endpoint.kind)) {
     throw new TypeError('room transcript endpoint kind is unsupported');
@@ -364,6 +376,44 @@ function visibleTo(descriptor: RoomAgentDescriptor, input: RoomAgentInput): bool
   return descriptor.visibility === undefined
     || descriptor.visibility.kind === 'room'
     || descriptor.visibility.participantIds.includes(input.speakerId);
+}
+
+function copyDisclosure(disclosure: RoomDisclosure): RoomDisclosure {
+  return structuredClone(intersectRoomDisclosures(disclosure, disclosure));
+}
+
+function disclosureFromAudience(
+  audience: RoomAgentUtterance['audience'],
+): Exclude<RoomDisclosure, { kind: 'none' }> {
+  return audience === undefined || audience.kind === 'room'
+    ? { kind: 'room' }
+    : { kind: 'participants', participantIds: [...audience.participantIds] };
+}
+
+function runtimeInteraction(
+  roomId: string,
+  channelId: string,
+  input: RoomAgentInput,
+  disclosure: RoomDisclosure,
+  agentId: string,
+): RoomInteractionEnvelope {
+  return {
+    id: input.id,
+    roomId,
+    channelId,
+    source: {
+      kind: input.speakerKind ?? 'participant',
+      id: input.speakerId,
+    },
+    targets: [{ kind: 'agent', id: agentId }],
+    disclosure: copyDisclosure(disclosure),
+    payload: {
+      kind: 'message',
+      text: input.text,
+      modality: input.modality,
+    },
+    cause: { rootId: input.id, hop: 0 },
+  };
 }
 
 /** Reference persistence implementation for tests, local hosts, and adapters. */
@@ -675,6 +725,7 @@ function assertRunRecord(run: RoomAgentRunRecord): void {
   assertText(run.channelId, 'room agent run channelId');
   assertText(run.agentId, 'room agent run agentId');
   assertText(run.rootInputId, 'room agent run rootInputId');
+  copyDisclosure(run.disclosure);
   if (!Number.isSafeInteger(run.attempt) || run.attempt < 1) {
     throw new RangeError('room agent run attempt must be positive');
   }
@@ -752,9 +803,11 @@ class RoomSpeechArbiter {
     return await operation;
   }
 
-  async interrupt(): Promise<boolean> {
+  async interrupt(channelId?: string): Promise<boolean> {
     const active = this.active;
-    if (active === undefined || !active.request.interruptible) return false;
+    if (active === undefined
+      || !active.request.interruptible
+      || (channelId !== undefined && active.request.channelId !== channelId)) return false;
     active.controller.abort('interrupted');
     await this.adapter?.interrupt?.(active.request.utteranceId);
     return true;
@@ -779,7 +832,10 @@ class RoomSpeechArbiter {
 export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
   private stateValue?: RoomAgentRuntimeState;
   private initialization?: Promise<void>;
-  private activeTurn?: { controller: AbortController; runId?: string };
+  private readonly activeTurns = new Map<
+    string,
+    { controller: AbortController; runId?: string }
+  >();
   private intakeLane: Promise<void> = Promise.resolve();
   private readonly speechArbiter: RoomSpeechArbiter;
 
@@ -855,23 +911,23 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
   }
 
   async interrupt(reason = 'interrupted'): Promise<boolean> {
-    const active = this.activeTurn;
-    if (active === undefined) return false;
-    active.controller.abort(reason);
-    await this.speechArbiter.interrupt();
-    return true;
+    const active = [...this.activeTurns.values()];
+    for (const turn of active) turn.controller.abort(reason);
+    const speechInterrupted = await this.speechArbiter.interrupt();
+    return active.length > 0 || speechInterrupted;
   }
 
   async handleFinalInput(request: RoomAgentRuntimeInput): Promise<RoomAgentRuntimeResult> {
     await this.initialize();
-    assertText(request?.channelId, 'room agent runtime channelId');
-    assertText(request.input?.id, 'room agent input id');
-    assertText(request.input.speakerId, 'room agent input speakerId');
-    assertText(request.input.text, 'room agent input text');
-    if (request.input.modality !== 'speech' && request.input.modality !== 'text') {
-      throw new TypeError('room agent input modality is unsupported');
-    }
+    this.assertRuntimeInput(request);
     const agentId = this.resolveAgent(request.input);
+    const interaction = runtimeInteraction(
+      this.options.roomId,
+      request.channelId,
+      request.input,
+      request.disclosure,
+      agentId,
+    );
     const admission = await this.admitInput(request);
     if (admission.duplicate) {
       return { status: 'duplicate', agentId, turn: null };
@@ -895,6 +951,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
         channelId: request.channelId,
         agentId,
         input: structuredClone(request.input),
+        interaction: structuredClone(interaction),
         phase: this.requireState().phase,
         transcript,
         signal: controller.signal,
@@ -903,6 +960,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
         ...context,
         roomId: this.options.roomId,
         input: structuredClone(request.input),
+        interaction: structuredClone(interaction),
         signal: controller.signal,
       });
       if (controller.signal.aborted) {
@@ -921,6 +979,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
             turnId: request.input.id,
             direction: 'output',
             endpoint: { kind: 'agent', id: agentId },
+            disclosure: disclosureFromAudience(utterance.audience),
             text: utterance.text,
             modality: 'generated',
           });
@@ -971,7 +1030,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       });
       throw error;
     } finally {
-      if (this.activeTurn?.controller === controller) this.activeTurn = undefined;
+      this.clearActiveTurn(request.channelId, controller);
     }
   }
 
@@ -1037,9 +1096,9 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     if (stored.status !== 'active') {
       return { status: stored.status, agentId: stored.agentId, run: stored, turn: null };
     }
-    await this.interrupt('run_resumed');
+    await this.interruptChannel(stored.channelId, 'run_resumed');
     const controller = new AbortController();
-    this.activeTurn = { controller, runId };
+    this.activeTurns.set(stored.channelId, { controller, runId });
     const run = {
       ...stored,
       attempt: stored.attempt + 1,
@@ -1048,7 +1107,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     const acquired = await runStore.saveRun(run);
     if (!acquired) {
       controller.abort('resume_ownership_lost');
-      if (this.activeTurn?.controller === controller) this.activeTurn = undefined;
+      this.clearActiveTurn(stored.channelId, controller);
       const current = await runStore.loadRun(this.options.roomId, runId);
       if (current === undefined) throw new Error(`unknown room agent run: ${runId}`);
       return { status: current.status, agentId: current.agentId, run: current, turn: null };
@@ -1064,9 +1123,10 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     const runStore = this.requireRunStore();
     const run = await runStore.loadRun(this.options.roomId, runId);
     if (run === undefined || isTerminalRun(run.status)) return false;
-    if (this.activeTurn?.runId === runId) {
-      this.activeTurn.controller.abort(reason);
-      await this.speechArbiter.interrupt();
+    const active = this.activeTurns.get(run.channelId);
+    if (active?.runId === runId) {
+      active.controller.abort(reason);
+      await this.speechArbiter.interrupt(run.channelId);
     }
     await this.finishRun(run, 'canceled', { type: 'run_canceled', reason });
     return true;
@@ -1140,6 +1200,9 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       request.input.id,
     );
     if (duplicate !== undefined) {
+      if (canonicalJson(duplicate.disclosure) !== canonicalJson(request.disclosure)) {
+        throw new Error('room agent input id was reused with a different disclosure');
+      }
       const retried = await runStore.admitRunInput(
         this.inputTranscriptDraft(request),
         duplicate,
@@ -1173,6 +1236,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       run = {
         ...omitRunFields(open, 'continuation', 'deadlineAt', 'deadlineMs', 'failureCode'),
         latestInput: structuredClone(request.input),
+        disclosure: copyDisclosure(request.disclosure),
         attempt: open.attempt + 1,
         status: 'active',
         updatedAt: now,
@@ -1198,6 +1262,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
         agentId,
         rootInputId: request.input.id,
         latestInput: structuredClone(request.input),
+        disclosure: copyDisclosure(request.disclosure),
         attempt: 1,
         status: 'active',
         startedAt: now,
@@ -1216,9 +1281,9 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     }
     const admission = await runStore.admitRunInput(this.inputTranscriptDraft(request), run);
     if (admission.duplicate) return { duplicate: true, run: admission.run };
-    await this.interrupt('superseded_by_new_input');
+    await this.interruptChannel(request.channelId, 'superseded_by_new_input');
     const controller = new AbortController();
-    this.activeTurn = { controller, runId: admission.run.id };
+    this.activeTurns.set(request.channelId, { controller, runId: admission.run.id });
     return {
       duplicate: false,
       run: admission.run,
@@ -1287,17 +1352,21 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
         const settled = await this.settleAbortedRun(run, controller, liveObserver);
         return { status: settled.status, agentId: run.agentId, run: settled, turn: null };
       } finally {
-        if (this.activeTurn?.controller === controller) this.activeTurn = undefined;
+        this.clearActiveTurn(run.channelId, controller);
       }
     }
     const deadlineRemaining = run.deadlineAt === undefined
       ? undefined
       : run.deadlineAt - this.wallNow();
     if (deadlineRemaining !== undefined && deadlineRemaining <= 0) {
-      await this.finishRun(run, 'deadline_exceeded', { type: 'deadline_exceeded' });
-      const settled = await runStore.loadRun(run.roomId, run.id);
-      if (settled === undefined) throw new Error(`unknown room agent run: ${run.id}`);
-      return { status: 'deadline_exceeded', agentId: run.agentId, run: settled, turn: null };
+      try {
+        await this.finishRun(run, 'deadline_exceeded', { type: 'deadline_exceeded' });
+        const settled = await runStore.loadRun(run.roomId, run.id);
+        if (settled === undefined) throw new Error(`unknown room agent run: ${run.id}`);
+        return { status: 'deadline_exceeded', agentId: run.agentId, run: settled, turn: null };
+      } finally {
+        this.clearActiveTurn(run.channelId, controller);
+      }
     }
     const timer = deadlineRemaining === undefined
       ? undefined
@@ -1369,6 +1438,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
           turnId: run.latestInput.id,
           direction: 'output',
           endpoint: { kind: 'agent', id: run.agentId },
+          disclosure: disclosureFromAudience(current.audience),
           text: current.text,
           modality: 'generated',
         });
@@ -1390,11 +1460,19 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
 
     try {
       const transcript = await this.options.store.loadTranscript(run.roomId, run.channelId);
+      const interaction = runtimeInteraction(
+        run.roomId,
+        run.channelId,
+        run.latestInput,
+        run.disclosure,
+        run.agentId,
+      );
       const context = await this.options.contextSource({
         roomId: run.roomId,
         channelId: run.channelId,
         agentId: run.agentId,
         input: structuredClone(run.latestInput),
+        interaction: structuredClone(interaction),
         phase: this.requireState().phase,
         transcript,
         signal: controller.signal,
@@ -1403,6 +1481,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
         ...context,
         roomId: run.roomId,
         input: structuredClone(run.latestInput),
+        interaction: structuredClone(interaction),
         signal: controller.signal,
       }, {
         id: run.id,
@@ -1426,7 +1505,11 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
             const outputId = this.options.createId();
             assertText(outputId, 'created room agent progress output id');
             const descriptor = this.options.registry.require(run.agentId).descriptor;
-            const audience = clampRunAudience(descriptor, presentation.utterance.audience);
+            const audience = clampRunAudience(
+              descriptor,
+              run.disclosure,
+              presentation.utterance.audience,
+            );
             await handleOutput({
               type: 'assistant_output',
               outputId: allocateOutputId('runtime', outputId),
@@ -1554,7 +1637,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       throw error;
     } finally {
       if (timer !== undefined) clearTimeout(timer);
-      if (this.activeTurn?.controller === controller) this.activeTurn = undefined;
+      this.clearActiveTurn(run.channelId, controller);
     }
   }
 
@@ -1622,6 +1705,9 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
         turnId: output.inputId,
         direction: 'output',
         endpoint: { kind: 'agent', id: run.agentId },
+        disclosure: output.audience === undefined
+          ? copyDisclosure(run.disclosure)
+          : disclosureFromAudience(output.audience),
         text: output.text,
         modality: 'generated',
       });
@@ -1702,6 +1788,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     if (request.input.modality !== 'speech' && request.input.modality !== 'text') {
       throw new TypeError('room agent input modality is unsupported');
     }
+    copyDisclosure(request.disclosure);
   }
 
   private inputTranscriptDraft(request: RoomAgentRuntimeInput): RoomAgentTranscriptDraft {
@@ -1715,6 +1802,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
         kind: request.input.speakerKind ?? 'participant',
         id: request.input.speakerId,
       },
+      disclosure: copyDisclosure(request.disclosure),
       text: request.input.text,
       modality: request.input.modality,
     };
@@ -1724,25 +1812,29 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     request: RoomAgentRuntimeInput,
   ): Promise<{ duplicate: true } | { duplicate: false; controller: AbortController }> {
     return await this.withIntakeLane(async () => {
-      const inputAppend = await this.options.store.appendTranscript({
-        id: request.input.id,
-        roomId: this.options.roomId,
-        channelId: request.channelId,
-        turnId: request.input.id,
-        direction: 'input',
-        endpoint: {
-          kind: request.input.speakerKind ?? 'participant',
-          id: request.input.speakerId,
-        },
-        text: request.input.text,
-        modality: request.input.modality,
-      });
+      const inputAppend = await this.options.store.appendTranscript(
+        this.inputTranscriptDraft(request),
+      );
       if (inputAppend.duplicate) return { duplicate: true } as const;
-      await this.interrupt('superseded_by_new_input');
+      await this.interruptChannel(request.channelId, 'superseded_by_new_input');
       const controller = new AbortController();
-      this.activeTurn = { controller };
+      this.activeTurns.set(request.channelId, { controller });
       return { duplicate: false, controller } as const;
     });
+  }
+
+  private async interruptChannel(channelId: string, reason: string): Promise<boolean> {
+    const active = this.activeTurns.get(channelId);
+    if (active === undefined) return false;
+    active.controller.abort(reason);
+    await this.speechArbiter.interrupt(channelId);
+    return true;
+  }
+
+  private clearActiveTurn(channelId: string, controller: AbortController): void {
+    if (this.activeTurns.get(channelId)?.controller === controller) {
+      this.activeTurns.delete(channelId);
+    }
   }
 
   private async withIntakeLane<T>(operation: () => Promise<T>): Promise<T> {
@@ -1882,22 +1974,21 @@ function makeRunTurn(
 
 function clampRunAudience(
   descriptor: RoomAgentDescriptor,
+  parentDisclosure: RoomDisclosure,
   requested: RoomAgentUtterance['audience'],
 ): RoomAgentUtterance['audience'] {
-  if (descriptor.visibility === undefined || descriptor.visibility.kind === 'room') {
-    return requested === undefined ? undefined : structuredClone(requested);
-  }
-  if (requested === undefined || requested.kind === 'room') {
-    return structuredClone(descriptor.visibility);
-  }
-  const permitted = new Set(descriptor.visibility.participantIds);
-  const participantIds = requested.participantIds.filter((id) => permitted.has(id));
-  if (participantIds.length === 0) {
+  const visibility = disclosureFromAudience(descriptor.visibility);
+  const requestedDisclosure = disclosureFromAudience(requested);
+  const permitted = intersectRoomDisclosures(parentDisclosure, visibility);
+  const effective = intersectRoomDisclosures(permitted, requestedDisclosure);
+  if (effective.kind === 'none') {
     throw new Error(
       `room agent progress presentation has no permitted audience: ${descriptor.id}`,
     );
   }
-  return { kind: 'participants', participantIds };
+  return effective.kind === 'room'
+    ? { kind: 'room' }
+    : { kind: 'participants', participantIds: [...effective.participantIds] };
 }
 
 /** Compare persisted runtime snapshots without relying on object identity. */

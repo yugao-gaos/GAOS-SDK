@@ -456,6 +456,7 @@ export interface RoomAgentRunRecord {
     // (undocumented)
     deadlineAt?: number;
     deadlineMs?: number;
+    disclosure: RoomDisclosure;
     // (undocumented)
     failureCode?: string;
     // (undocumented)
@@ -551,6 +552,8 @@ export interface RoomAgentRuntimeContextRequest {
     // (undocumented)
     input: RoomAgentInput;
     // (undocumented)
+    interaction: RoomInteractionEnvelope;
+    // (undocumented)
     phase?: string;
     // (undocumented)
     roomId: string;
@@ -560,7 +563,7 @@ export interface RoomAgentRuntimeContextRequest {
 }
 
 // @public (undocumented)
-export type RoomAgentRuntimeContextSource<TObservation = unknown, TKnowledge = unknown> = (request: RoomAgentRuntimeContextRequest) => Omit<RoomAgentContext<TObservation, TKnowledge>, 'agent' | 'roomId' | 'input' | 'signal'> | Promise<Omit<RoomAgentContext<TObservation, TKnowledge>, 'agent' | 'roomId' | 'input' | 'signal'>>;
+export type RoomAgentRuntimeContextSource<TObservation = unknown, TKnowledge = unknown> = (request: RoomAgentRuntimeContextRequest) => Omit<RoomAgentContext<TObservation, TKnowledge>, 'agent' | 'roomId' | 'input' | 'interaction' | 'signal'> | Promise<Omit<RoomAgentContext<TObservation, TKnowledge>, 'agent' | 'roomId' | 'input' | 'interaction' | 'signal'>>;
 
 // @public
 export interface RoomAgentRuntimeEvent {
@@ -589,6 +592,7 @@ export type RoomAgentRuntimeEventType = 'turn_started' | 'turn_completed' | 'tur
 export interface RoomAgentRuntimeInput {
     // (undocumented)
     channelId: string;
+    disclosure: RoomDisclosure;
     // (undocumented)
     input: RoomAgentInput;
 }
@@ -690,6 +694,8 @@ export interface RoomAgentTranscriptEntry {
     channelId: string;
     // (undocumented)
     direction: 'input' | 'output';
+    // (undocumented)
+    disclosure: RoomDisclosure;
     // (undocumented)
     endpoint: {
         kind: RoomEndpointKind;
