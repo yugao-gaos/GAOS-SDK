@@ -57,7 +57,8 @@ form one message and `final: true` closes it. Driver output IDs are logical and
 attempt-local. The runtime adds a collision-free attempt namespace before
 journaling or live delivery; consumers must treat that qualified ID as opaque.
 This lets a continuation reuse the same logical ID for a new message without
-joining it to the prior attempt.
+joining it to the prior attempt. Journaled outputs also carry runtime-owned
+`delivery` metadata with the origin, attempt, and driver-local logical ID.
 
 ```ts
 const driver = {
@@ -122,6 +123,9 @@ prior-attempt output remains in the journal as crash evidence but is abandoned:
 it is excluded from current completion checks and cannot prefix a freshly
 streamed recovery output. A recovery driver uses the same logical ID when
 retrying the same message and a new logical ID for genuinely new output.
+Suppression relies only on runtime-owned `delivery` metadata, never on parsing
+the opaque output ID. Legacy journal rows without that optional metadata remain
+replayable but are not suppressed on recovery.
 
 Durability of the ledger does not serialize a JavaScript closure. After an
 isolate or process restart, the host calls `resumeRun()`. The driver is invoked

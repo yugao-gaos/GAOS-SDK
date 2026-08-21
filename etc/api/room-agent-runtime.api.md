@@ -400,7 +400,17 @@ export interface RoomAgentRunJournalEntry {
 }
 
 // @public (undocumented)
-export type RoomAgentRunJournalEvent = RoomAgentRunEvent | {
+export type RoomAgentRunJournalEvent = Exclude<RoomAgentRunEvent, {
+    type: 'assistant_output';
+}> | (Extract<RoomAgentRunEvent, {
+    type: 'assistant_output';
+}> & {
+    delivery?: {
+        origin: 'driver' | 'runtime';
+        attempt: number;
+        logicalOutputId: string;
+    };
+}) | {
     type: 'run_canceled';
     reason: string;
 } | {

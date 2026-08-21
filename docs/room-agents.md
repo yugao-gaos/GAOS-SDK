@@ -182,9 +182,12 @@ replaying speech, cues, actions, or provider calls.
 
 Driver `assistant_output.outputId` values are logical IDs local to an attempt.
 The runtime qualifies them with an opaque attempt namespace in journal and live
-events. On crash recovery, already-closed logical outputs are reconciled but not
-presented or recorded again; incomplete prior output remains replayable crash
-evidence but is abandoned before the resumed attempt begins streaming.
+events and adds runtime-owned `delivery` metadata recording origin, attempt, and
+logical ID. On crash recovery, already-closed logical outputs are reconciled but
+not presented or recorded again; incomplete prior output remains replayable
+crash evidence but is abandoned before the resumed attempt begins streaming.
+Legacy output rows without `delivery` metadata are never inferred from their
+opaque IDs and therefore are not suppressed.
 
 ```ts
 import {

@@ -81,7 +81,15 @@ export interface RoomAgentRunRecord {
   failureCode?: string;
 }
 
-export type RoomAgentRunJournalEvent = RoomAgentRunEvent
+export type RoomAgentRunJournalEvent = Exclude<RoomAgentRunEvent, { type: 'assistant_output' }>
+  | (Extract<RoomAgentRunEvent, { type: 'assistant_output' }> & {
+    /** Runtime-owned recovery identity. Missing only on legacy journal rows. */
+    delivery?: {
+      origin: 'driver' | 'runtime';
+      attempt: number;
+      logicalOutputId: string;
+    };
+  })
   | { type: 'run_canceled'; reason: string }
   | { type: 'deadline_exceeded' }
   | { type: 'run_failed'; code: string };
@@ -1222,12 +1230,20 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     let completed = false;
     const replayedEvents = await runStore.loadRunEvents(this.options.roomId, run.id);
     await this.reconcileRecordedOutputs(run, replayedEvents);
-    const recoveredBuffers = this.restoreOutputBuffers(replayedEvents.filter(
-      (entry) => entry.inputId === run.latestInput.id,
-    ));
-    const closedRecoveredOutputIds = new Set([...recoveredBuffers]
-      .filter(([, buffer]) => buffer.closed)
-      .map(([outputId]) => logicalRunOutputId(outputId)));
+    const closedRecoveredOutputIds = new Set(replayedEvents.flatMap((entry) => {
+      const event = entry.event;
+      return entry.inputId === run.latestInput.id
+        && event.type === 'assistant_output'
+        && event.final === true
+        && event.delivery?.origin === 'driver'
+        && Number.isSafeInteger(event.delivery.attempt)
+        && event.delivery.attempt > 0
+        && event.delivery.attempt < run.attempt
+        && typeof event.delivery.logicalOutputId === 'string'
+        && event.delivery.logicalOutputId.trim().length > 0
+        ? [event.delivery.logicalOutputId]
+        : [];
+    }));
     // Output assembly is local to this invocation. Incomplete buffers from a
     // prior attempt remain journal evidence but cannot contaminate or block
     // the recovery attempt.
@@ -1276,7 +1292,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     };
 
     const handleOutput = async (
-      event: Extract<RoomAgentRunEvent, { type: 'assistant_output' }>,
+      event: Extract<RoomAgentRunJournalEvent, { type: 'assistant_output' }>,
       alreadyJournaled = false,
     ): Promise<void> => {
       if (!alreadyJournaled) await append(event);
@@ -1380,6 +1396,11 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
             await handleOutput({
               type: 'assistant_output',
               outputId: qualifyRunOutputId(run.attempt, 'runtime', outputId),
+              delivery: {
+                origin: 'runtime',
+                attempt: run.attempt,
+                logicalOutputId: outputId,
+              },
               delta: presentation.utterance.text,
               final: true,
               purpose: 'progress',
@@ -1393,6 +1414,11 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
           const scopedEvent = {
             ...event,
             outputId: qualifyRunOutputId(run.attempt, 'driver', event.outputId),
+            delivery: {
+              origin: 'driver' as const,
+              attempt: run.attempt,
+              logicalOutputId: event.outputId,
+            },
           };
           await append(scopedEvent);
           await handleOutput(scopedEvent, true);
@@ -1424,6 +1450,11 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
             await handleOutput({
               type: 'assistant_output',
               outputId: qualifyRunOutputId(run.attempt, 'runtime', outputId),
+              delivery: {
+                origin: 'runtime',
+                attempt: run.attempt,
+                logicalOutputId: outputId,
+              },
               delta: utterance.text,
               final: true,
               purpose: 'answer',
@@ -1739,17 +1770,6 @@ function qualifyRunOutputId(
   outputId: string,
 ): string {
   return `${RUN_OUTPUT_ATTEMPT_PREFIX}${attempt}:${source}:${outputId}`;
-}
-
-/** Recover the driver-local ID from runtime-qualified or legacy journal output. */
-function logicalRunOutputId(outputId: string): string {
-  if (!outputId.startsWith(RUN_OUTPUT_ATTEMPT_PREFIX)) return outputId;
-  const separator = outputId.indexOf(':', RUN_OUTPUT_ATTEMPT_PREFIX.length);
-  if (separator < 0) return outputId;
-  const attempt = Number(outputId.slice(RUN_OUTPUT_ATTEMPT_PREFIX.length, separator));
-  if (!Number.isSafeInteger(attempt) || attempt < 1) return outputId;
-  const remainder = outputId.slice(separator + 1);
-  return remainder.startsWith('driver:') ? remainder.slice('driver:'.length) : outputId;
 }
 
 interface OutputBuffer {
