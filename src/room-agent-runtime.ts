@@ -4,7 +4,10 @@ import {
   type RoomAgentContext,
   type RoomAgentDescriptor,
   type RoomAgentInput,
+  type RoomAgentRunEvent,
+  type RoomAgentRunProgress,
   type RoomAgentTurn,
+  type RoomAgentUtterance,
   type RoomAgentVoice,
 } from './room-agent.js';
 import type { RoomEndpointKind } from './room-interaction.js';
@@ -44,6 +47,78 @@ export interface RoomAgentRuntimeStore {
   saveState(state: RoomAgentRuntimeState): Promise<void>;
   appendTranscript(entry: RoomAgentTranscriptDraft): Promise<RoomAgentTranscriptAppendResult>;
   loadTranscript(roomId: string, channelId: string): Promise<readonly RoomAgentTranscriptEntry[]>;
+}
+
+export const ROOM_AGENT_RUN_SCHEMA = 'gaos.room-agent-run.v1' as const;
+
+export type RoomAgentRunStatus =
+  | 'active'
+  | 'waiting_for_input'
+  | 'completed'
+  | 'canceled'
+  | 'deadline_exceeded'
+  | 'failed';
+
+/** Durable, provider-neutral status for one logical task across user turns. */
+export interface RoomAgentRunRecord {
+  schema: typeof ROOM_AGENT_RUN_SCHEMA;
+  id: string;
+  roomId: string;
+  channelId: string;
+  agentId: string;
+  rootInputId: string;
+  latestInput: RoomAgentInput;
+  attempt: number;
+  status: RoomAgentRunStatus;
+  startedAt: number;
+  updatedAt: number;
+  /** Active-attempt budget. The wall deadline is paused while waiting for input. */
+  deadlineMs?: number;
+  deadlineAt?: number;
+  lastSequence: number;
+  checkpoint?: unknown;
+  continuation?: { requestId: string; token: string };
+  failureCode?: string;
+}
+
+export type RoomAgentRunJournalEvent = RoomAgentRunEvent
+  | { type: 'run_canceled'; reason: string }
+  | { type: 'deadline_exceeded' }
+  | { type: 'run_failed'; code: string };
+
+export interface RoomAgentRunJournalEntry {
+  id: string;
+  runId: string;
+  roomId: string;
+  channelId: string;
+  agentId: string;
+  sequence: number;
+  recordedAt: number;
+  event: RoomAgentRunJournalEvent;
+}
+
+export type RoomAgentRunJournalDraft = Omit<RoomAgentRunJournalEntry, 'sequence'>;
+
+export interface RoomAgentRunJournalAppendResult {
+  entry: RoomAgentRunJournalEntry;
+  duplicate: boolean;
+}
+
+/** Durable hosts implement these rows in SQLite or an equivalent ordered store. */
+export interface RoomAgentRunStore {
+  createRun(run: RoomAgentRunRecord): Promise<{ run: RoomAgentRunRecord; duplicate: boolean }>;
+  saveRun(run: RoomAgentRunRecord): Promise<void>;
+  loadRun(roomId: string, runId: string): Promise<RoomAgentRunRecord | undefined>;
+  loadRunByInput(
+    roomId: string,
+    channelId: string,
+    inputId: string,
+  ): Promise<RoomAgentRunRecord | undefined>;
+  loadOpenRun(roomId: string, channelId: string): Promise<RoomAgentRunRecord | undefined>;
+  appendRunEvent(
+    event: RoomAgentRunJournalDraft,
+  ): Promise<RoomAgentRunJournalAppendResult>;
+  loadRunEvents(roomId: string, runId: string): Promise<readonly RoomAgentRunJournalEntry[]>;
 }
 
 export interface RoomAgentRuntimeContextRequest {
@@ -127,6 +202,20 @@ export interface RoomAgentRuntimeOptions<TObservation = unknown, TKnowledge = un
   speech?: RoomSpeechAdapter;
   captions?: RoomCaptionSink;
   observer?: RoomAgentRuntimeObserver;
+  /** Required by `handleRunInput`; kept separate for backward-compatible stores. */
+  runStore?: RoomAgentRunStore;
+  /** Receives durable run events for UI, cue, or transport-specific presentation. */
+  runObserver?: RoomAgentRunObserver;
+  /**
+   * Optional product policy for turning verified progress into speech. It may
+   * use prerecorded, deterministic, or freshly generated text; the SDK does
+   * not choose a modality.
+   */
+  progressPresenter?: RoomAgentProgressPresenter;
+  /** Default wall-clock deadline for new runs. Zero or undefined disables it. */
+  runDeadlineMs?: number;
+  /** Epoch clock used for persisted timestamps and deadlines. Defaults to Date.now. */
+  wallNow?: () => number;
   /** Operational monotonic clock used for duration metrics. Defaults to Date.now. */
   now?: () => number;
 }
@@ -140,6 +229,55 @@ export interface RoomAgentRuntimeResult {
   status: 'completed' | 'interrupted' | 'duplicate';
   agentId: string;
   turn: RoomAgentTurn | null;
+}
+
+export interface RoomAgentRunObserver {
+  publish(entry: RoomAgentRunJournalEntry): void | Promise<void>;
+}
+
+export interface RoomAgentProgressPresentation {
+  utterance: RoomAgentUtterance;
+  /** Defaults to ephemeral so filler cannot silently enter model history. */
+  history?: 'ephemeral' | 'record';
+}
+
+export interface RoomAgentProgressPresenterContext {
+  run: RoomAgentRunRecord;
+  progress: RoomAgentRunProgress;
+  signal: AbortSignal;
+}
+
+export interface RoomAgentProgressPresenter {
+  present(
+    context: RoomAgentProgressPresenterContext,
+  ): RoomAgentProgressPresentation | null | Promise<RoomAgentProgressPresentation | null>;
+}
+
+export interface RoomAgentRunInput extends RoomAgentRuntimeInput {
+  /** Explicit proof that this input continues the named waiting run. */
+  continuation?: { runId: string; token: string };
+  /** Per-run override. Zero disables the default deadline. */
+  deadlineMs?: number;
+  /** Per-call live delivery, invoked after each event is durably appended. */
+  onEvent?(entry: RoomAgentRunJournalEntry): void | Promise<void>;
+}
+
+export interface RoomAgentRunResult {
+  status: RoomAgentRunStatus | 'duplicate';
+  agentId: string;
+  run: RoomAgentRunRecord;
+  turn: RoomAgentTurn | null;
+}
+
+export interface RoomAgentRunReplay {
+  run: RoomAgentRunRecord;
+  events: readonly RoomAgentRunJournalEntry[];
+}
+
+/** Immediate live event stream plus the eventual durable run result. */
+export interface RoomAgentRunExecution {
+  events: AsyncIterable<RoomAgentRunJournalEntry>;
+  result: Promise<RoomAgentRunResult>;
 }
 
 export interface RoomAgentRuntimeResume {
@@ -173,12 +311,19 @@ function visibleTo(descriptor: RoomAgentDescriptor, input: RoomAgentInput): bool
 }
 
 /** Reference persistence implementation for tests, local hosts, and adapters. */
-export class InMemoryRoomAgentRuntimeStore implements RoomAgentRuntimeStore {
+export class InMemoryRoomAgentRuntimeStore implements RoomAgentRuntimeStore, RoomAgentRunStore {
   private readonly states = new Map<string, RoomAgentRuntimeState>();
   private readonly transcripts = new Map<string, RoomAgentTranscriptEntry[]>();
   private readonly transcriptIds = new Map<
     string,
     { fingerprint: string; entry: RoomAgentTranscriptEntry }
+  >();
+  private readonly runs = new Map<string, RoomAgentRunRecord>();
+  private readonly runInputs = new Map<string, string>();
+  private readonly runEvents = new Map<string, RoomAgentRunJournalEntry[]>();
+  private readonly runEventIds = new Map<
+    string,
+    { fingerprint: string; entry: RoomAgentRunJournalEntry }
   >();
 
   async loadState(roomId: string): Promise<RoomAgentRuntimeState | undefined> {
@@ -242,6 +387,119 @@ export class InMemoryRoomAgentRuntimeStore implements RoomAgentRuntimeStore {
   ): Promise<readonly RoomAgentTranscriptEntry[]> {
     const entries = this.transcripts.get(`${roomId}\u0000${channelId}`) ?? [];
     return structuredClone(entries);
+  }
+
+  async createRun(
+    run: RoomAgentRunRecord,
+  ): Promise<{ run: RoomAgentRunRecord; duplicate: boolean }> {
+    assertRunRecord(run);
+    const key = `${run.roomId}\u0000${run.id}`;
+    const existing = this.runs.get(key);
+    if (existing !== undefined) {
+      if (canonicalJson(existing) !== canonicalJson(run)) {
+        throw new Error(`room agent run id was reused: ${run.id}`);
+      }
+      return { run: structuredClone(existing), duplicate: true };
+    }
+    const inputKey = runInputKey(run.roomId, run.channelId, run.latestInput.id);
+    const existingRunId = this.runInputs.get(inputKey);
+    if (existingRunId !== undefined) {
+      const duplicate = this.runs.get(`${run.roomId}\u0000${existingRunId}`);
+      if (duplicate === undefined) throw new Error('room agent run input index is corrupt');
+      return { run: structuredClone(duplicate), duplicate: true };
+    }
+    this.runs.set(key, structuredClone(run));
+    this.runInputs.set(inputKey, run.id);
+    return { run: structuredClone(run), duplicate: false };
+  }
+
+  async saveRun(run: RoomAgentRunRecord): Promise<void> {
+    assertRunRecord(run);
+    const key = `${run.roomId}\u0000${run.id}`;
+    if (!this.runs.has(key)) throw new Error(`unknown room agent run: ${run.id}`);
+    this.runs.set(key, structuredClone(run));
+    this.runInputs.set(runInputKey(run.roomId, run.channelId, run.latestInput.id), run.id);
+  }
+
+  async loadRun(roomId: string, runId: string): Promise<RoomAgentRunRecord | undefined> {
+    const run = this.runs.get(`${roomId}\u0000${runId}`);
+    return run === undefined ? undefined : structuredClone(run);
+  }
+
+  async loadRunByInput(
+    roomId: string,
+    channelId: string,
+    inputId: string,
+  ): Promise<RoomAgentRunRecord | undefined> {
+    const runId = this.runInputs.get(runInputKey(roomId, channelId, inputId));
+    return runId === undefined ? undefined : await this.loadRun(roomId, runId);
+  }
+
+  async loadOpenRun(
+    roomId: string,
+    channelId: string,
+  ): Promise<RoomAgentRunRecord | undefined> {
+    const candidates = [...this.runs.values()]
+      .filter((run) => run.roomId === roomId
+        && run.channelId === channelId
+        && (run.status === 'active' || run.status === 'waiting_for_input'))
+      .sort((left, right) => right.updatedAt - left.updatedAt);
+    return candidates[0] === undefined ? undefined : structuredClone(candidates[0]);
+  }
+
+  async appendRunEvent(
+    draft: RoomAgentRunJournalDraft,
+  ): Promise<RoomAgentRunJournalAppendResult> {
+    assertText(draft.id, 'room agent run event id');
+    assertText(draft.runId, 'room agent run event runId');
+    const key = `${draft.roomId}\u0000${draft.runId}`;
+    if (!this.runs.has(key)) throw new Error(`unknown room agent run: ${draft.runId}`);
+    const fingerprint = canonicalJson(draft);
+    const idKey = `${key}\u0000${draft.id}`;
+    const existing = this.runEventIds.get(idKey);
+    if (existing !== undefined) {
+      if (existing.fingerprint !== fingerprint) {
+        throw new Error(`room agent run event id was reused: ${draft.id}`);
+      }
+      return { entry: structuredClone(existing.entry), duplicate: true };
+    }
+    const events = this.runEvents.get(key) ?? [];
+    const entry: RoomAgentRunJournalEntry = {
+      ...structuredClone(draft),
+      sequence: events.length + 1,
+    };
+    events.push(entry);
+    this.runEvents.set(key, events);
+    this.runEventIds.set(idKey, { fingerprint, entry });
+    return { entry: structuredClone(entry), duplicate: false };
+  }
+
+  async loadRunEvents(
+    roomId: string,
+    runId: string,
+  ): Promise<readonly RoomAgentRunJournalEntry[]> {
+    return structuredClone(this.runEvents.get(`${roomId}\u0000${runId}`) ?? []);
+  }
+}
+
+function runInputKey(roomId: string, channelId: string, inputId: string): string {
+  return `${roomId}\u0000${channelId}\u0000${inputId}`;
+}
+
+function assertRunRecord(run: RoomAgentRunRecord): void {
+  if (run?.schema !== ROOM_AGENT_RUN_SCHEMA) {
+    throw new TypeError('room agent run schema is unsupported');
+  }
+  assertText(run.id, 'room agent run id');
+  assertText(run.roomId, 'room agent run roomId');
+  assertText(run.channelId, 'room agent run channelId');
+  assertText(run.agentId, 'room agent run agentId');
+  assertText(run.rootInputId, 'room agent run rootInputId');
+  if (!Number.isSafeInteger(run.attempt) || run.attempt < 1) {
+    throw new RangeError('room agent run attempt must be positive');
+  }
+  if (!Number.isSafeInteger(run.lastSequence) || run.lastSequence < 0) {
+    throw new RangeError('room agent run lastSequence must be non-negative');
   }
 }
 
@@ -536,6 +794,185 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     }
   }
 
+  /**
+   * Start or continue a durable logical run. A waiting run on the same channel
+   * is continued automatically; clients may supply the token for strict
+   * correlation. A legacy `respond()` driver is adapted to this lifecycle.
+   */
+  async handleRunInput(request: RoomAgentRunInput): Promise<RoomAgentRunResult> {
+    await this.initialize();
+    this.assertRuntimeInput(request);
+    const runStore = this.requireRunStore();
+    const agentId = this.resolveAgent(request.input);
+    const duplicate = await runStore.loadRunByInput(
+      this.options.roomId,
+      request.channelId,
+      request.input.id,
+    );
+    if (duplicate !== undefined) {
+      return { status: 'duplicate', agentId: duplicate.agentId, run: duplicate, turn: null };
+    }
+
+    const open = await runStore.loadOpenRun(this.options.roomId, request.channelId);
+    let continuation: RoomAgentRunRecord['continuation'];
+    let run: RoomAgentRunRecord;
+    if (request.continuation !== undefined) {
+      if (open === undefined
+        || open.id !== request.continuation.runId
+        || open.status !== 'waiting_for_input'
+        || open.continuation?.token !== request.continuation.token) {
+        throw new Error('room agent continuation does not match a waiting run');
+      }
+    }
+    const continuesOpen = open?.status === 'waiting_for_input'
+      && open.agentId === agentId
+      && (request.continuation === undefined || request.continuation.runId === open.id);
+    if (continuesOpen && open !== undefined) {
+      continuation = open.continuation;
+      const deadlineMs = request.deadlineMs ?? open.deadlineMs ?? this.options.runDeadlineMs;
+      if (deadlineMs !== undefined
+        && (!Number.isFinite(deadlineMs) || deadlineMs < 0)) {
+        throw new RangeError('room agent run deadlineMs must be non-negative');
+      }
+      const now = this.wallNow();
+      run = {
+        ...open,
+        latestInput: structuredClone(request.input),
+        attempt: open.attempt + 1,
+        status: 'active',
+        updatedAt: now,
+        ...(deadlineMs === undefined || deadlineMs === 0
+          ? { deadlineMs: undefined, deadlineAt: undefined }
+          : { deadlineMs, deadlineAt: now + deadlineMs }),
+        continuation: undefined,
+        failureCode: undefined,
+      };
+    } else {
+      if (open !== undefined) await this.cancelRun(open.id, 'superseded_by_new_input');
+      const now = this.wallNow();
+      const deadlineMs = request.deadlineMs ?? this.options.runDeadlineMs;
+      if (deadlineMs !== undefined
+        && (!Number.isFinite(deadlineMs) || deadlineMs < 0)) {
+        throw new RangeError('room agent run deadlineMs must be non-negative');
+      }
+      const runId = this.options.createId();
+      assertText(runId, 'created room agent run id');
+      run = {
+        schema: ROOM_AGENT_RUN_SCHEMA,
+        id: runId,
+        roomId: this.options.roomId,
+        channelId: request.channelId,
+        agentId,
+        rootInputId: request.input.id,
+        latestInput: structuredClone(request.input),
+        attempt: 1,
+        status: 'active',
+        startedAt: now,
+        updatedAt: now,
+        ...(deadlineMs === undefined || deadlineMs === 0
+          ? {}
+          : { deadlineMs, deadlineAt: now + deadlineMs }),
+        lastSequence: 0,
+      };
+    }
+
+    const admission = await this.admitInput(request);
+    if (admission.duplicate) {
+      const existing = await runStore.loadRunByInput(
+        this.options.roomId,
+        request.channelId,
+        request.input.id,
+      );
+      if (existing === undefined) {
+        throw new Error('room agent input predates the durable run journal');
+      }
+      return { status: 'duplicate', agentId: existing.agentId, run: existing, turn: null };
+    }
+    if (continuesOpen) await runStore.saveRun(run);
+    else {
+      const created = await runStore.createRun(run);
+      if (created.duplicate) {
+        return { status: 'duplicate', agentId: created.run.agentId, run: created.run, turn: null };
+      }
+    }
+    return await this.executeRun(
+      run,
+      admission.controller,
+      continuation,
+      false,
+      request.onEvent,
+    );
+  }
+
+  /**
+   * Start a run without awaiting completion. This is the voice/chat streaming
+   * seam: consumers can forward assistant deltas while `result` remains open.
+   */
+  startRun(request: RoomAgentRunInput): RoomAgentRunExecution {
+    const queue = new RoomAgentRunEventQueue();
+    const result = this.handleRunInput({
+      ...request,
+      onEvent: async (entry) => {
+        queue.push(entry);
+        await request.onEvent?.(entry);
+      },
+    });
+    void result.then(
+      () => queue.close(),
+      (error: unknown) => queue.fail(error),
+    );
+    return { events: queue, result };
+  }
+
+  /** Resume checkpoint-aware active work after a host/runtime restart. */
+  async resumeRun(runId: string): Promise<RoomAgentRunResult> {
+    await this.initialize();
+    assertText(runId, 'room agent run id');
+    const runStore = this.requireRunStore();
+    const stored = await runStore.loadRun(this.options.roomId, runId);
+    if (stored === undefined) throw new Error(`unknown room agent run: ${runId}`);
+    if (stored.status !== 'active') {
+      return { status: stored.status, agentId: stored.agentId, run: stored, turn: null };
+    }
+    await this.interrupt('run_resumed');
+    const controller = new AbortController();
+    this.activeTurn = controller;
+    const run = {
+      ...stored,
+      attempt: stored.attempt + 1,
+      updatedAt: this.wallNow(),
+    };
+    await runStore.saveRun(run);
+    return await this.executeRun(run, controller, undefined, true);
+  }
+
+  /** Cooperatively cancel a live run and durably record the terminal state. */
+  async cancelRun(runId: string, reason = 'canceled_by_host'): Promise<boolean> {
+    await this.initialize();
+    assertText(runId, 'room agent run id');
+    assertText(reason, 'room agent run cancellation reason');
+    const runStore = this.requireRunStore();
+    const run = await runStore.loadRun(this.options.roomId, runId);
+    if (run === undefined || isTerminalRun(run.status)) return false;
+    if (this.activeTurn !== undefined) {
+      this.activeTurn.abort(reason);
+      await this.speechArbiter.interrupt();
+    }
+    await this.finishRun(run, 'canceled', { type: 'run_canceled', reason });
+    return true;
+  }
+
+  /** Read the exact durable event sequence without replaying side effects. */
+  async replayRun(runId: string): Promise<RoomAgentRunReplay> {
+    await this.initialize();
+    assertText(runId, 'room agent run id');
+    const runStore = this.requireRunStore();
+    const run = await runStore.loadRun(this.options.roomId, runId);
+    if (run === undefined) throw new Error(`unknown room agent run: ${runId}`);
+    const events = await runStore.loadRunEvents(this.options.roomId, runId);
+    return { run, events };
+  }
+
   async resume(channelId: string): Promise<RoomAgentRuntimeResume> {
     await this.initialize();
     assertText(channelId, 'room agent runtime channelId');
@@ -580,6 +1017,347 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     const fallback = eligible(this.options.fallbackAgentId);
     if (fallback !== undefined) return fallback;
     throw new Error('room agent runtime could not resolve a visible agent');
+  }
+
+  private async executeRun(
+    initialRun: RoomAgentRunRecord,
+    controller: AbortController,
+    continuation: RoomAgentRunRecord['continuation'],
+    resumed: boolean,
+    liveObserver?: RoomAgentRunInput['onEvent'],
+  ): Promise<RoomAgentRunResult> {
+    const runStore = this.requireRunStore();
+    let run = structuredClone(initialRun);
+    const recordedUtterances: RoomAgentUtterance[] = [];
+    const interactions: NonNullable<RoomAgentTurn['interactions']>[number][] = [];
+    let action: RoomAgentTurn['action'];
+    let waiting = false;
+    let completed = false;
+    const buffers = await this.restoreOutputBuffers(run.id);
+    const deadlineRemaining = run.deadlineAt === undefined
+      ? undefined
+      : run.deadlineAt - this.wallNow();
+    if (deadlineRemaining !== undefined && deadlineRemaining <= 0) {
+      await this.finishRun(run, 'deadline_exceeded', { type: 'deadline_exceeded' });
+      const settled = await runStore.loadRun(run.roomId, run.id);
+      if (settled === undefined) throw new Error(`unknown room agent run: ${run.id}`);
+      return { status: 'deadline_exceeded', agentId: run.agentId, run: settled, turn: null };
+    }
+    const timer = deadlineRemaining === undefined
+      ? undefined
+      : setTimeout(() => controller.abort('deadline_exceeded'), deadlineRemaining);
+
+    const append = async (event: RoomAgentRunJournalEvent): Promise<RoomAgentRunJournalEntry> => {
+      const eventId = this.options.createId();
+      assertText(eventId, 'created room agent run event id');
+      const appended = await runStore.appendRunEvent({
+        id: eventId,
+        runId: run.id,
+        roomId: run.roomId,
+        channelId: run.channelId,
+        agentId: run.agentId,
+        recordedAt: this.wallNow(),
+        event: structuredClone(event),
+      });
+      run = {
+        ...run,
+        lastSequence: appended.entry.sequence,
+        updatedAt: appended.entry.recordedAt,
+      };
+      await runStore.saveRun(run);
+      await this.options.runObserver?.publish(appended.entry);
+      await liveObserver?.(appended.entry);
+      return appended.entry;
+    };
+
+    const handleOutput = async (
+      event: Extract<RoomAgentRunEvent, { type: 'assistant_output' }>,
+      alreadyJournaled = false,
+    ): Promise<void> => {
+      if (!alreadyJournaled) await append(event);
+      const current = buffers.get(event.outputId) ?? {
+        text: '',
+        purpose: event.purpose ?? 'answer',
+        history: event.history ?? ((event.purpose ?? 'answer') === 'progress'
+          ? 'ephemeral'
+          : 'record'),
+        audience: event.audience,
+        interruptible: event.interruptible ?? true,
+        closed: false,
+      };
+      if (current.closed) throw new Error(`room agent output is already closed: ${event.outputId}`);
+      if (event.purpose !== undefined && event.purpose !== current.purpose) {
+        throw new Error(`room agent output purpose changed: ${event.outputId}`);
+      }
+      if (event.history !== undefined && event.history !== current.history) {
+        throw new Error(`room agent output history changed: ${event.outputId}`);
+      }
+      current.text += event.delta;
+      current.purpose = event.purpose ?? current.purpose;
+      current.history = event.history ?? current.history;
+      current.audience = event.audience ?? current.audience;
+      current.interruptible = event.interruptible ?? current.interruptible;
+      current.closed = event.final === true;
+      buffers.set(event.outputId, current);
+      if (!current.closed) return;
+      assertText(current.text, 'completed room agent output');
+      const utterance: RoomAgentUtterance = {
+        text: current.text,
+        ...(current.audience === undefined ? {} : { audience: current.audience }),
+        interruptible: current.interruptible,
+      };
+      if (current.history === 'record') {
+        await this.options.store.appendTranscript({
+          id: `${run.id}:output:${event.outputId}`,
+          roomId: run.roomId,
+          channelId: run.channelId,
+          turnId: run.latestInput.id,
+          direction: 'output',
+          endpoint: { kind: 'agent', id: run.agentId },
+          text: current.text,
+          modality: 'generated',
+        });
+        recordedUtterances.push(utterance);
+      }
+      const descriptor = this.options.registry.require(run.agentId).descriptor;
+      const speech = await this.speechArbiter.speak({
+        utteranceId: event.outputId,
+        roomId: run.roomId,
+        channelId: run.channelId,
+        agentId: run.agentId,
+        text: current.text,
+        ...(descriptor.voice === undefined ? {} : { voice: descriptor.voice }),
+        ...(current.audience === undefined ? {} : { audience: current.audience }),
+        interruptible: current.interruptible,
+      }, controller.signal);
+      if (speech.status === 'interrupted') controller.abort(controller.signal.reason);
+    };
+
+    try {
+      const transcript = await this.options.store.loadTranscript(run.roomId, run.channelId);
+      const context = await this.options.contextSource({
+        roomId: run.roomId,
+        channelId: run.channelId,
+        agentId: run.agentId,
+        input: structuredClone(run.latestInput),
+        phase: this.requireState().phase,
+        transcript,
+      });
+      for await (const event of this.options.registry.run(run.agentId, {
+        ...context,
+        roomId: run.roomId,
+        input: structuredClone(run.latestInput),
+        signal: controller.signal,
+      }, {
+        id: run.id,
+        attempt: run.attempt,
+        resumed,
+        ...(run.checkpoint === undefined ? {} : { checkpoint: structuredClone(run.checkpoint) }),
+        ...(continuation === undefined
+          ? {}
+          : { continuation: { requestId: continuation.requestId, token: continuation.token } }),
+      })) {
+        if (controller.signal.aborted) break;
+        await append(event);
+        if (event.type === 'progress') {
+          const presentation = await this.options.progressPresenter?.present({
+            run: structuredClone(run),
+            progress: structuredClone(event.progress),
+            signal: controller.signal,
+          });
+          if (presentation !== undefined && presentation !== null) {
+            assertText(presentation.utterance.text, 'room agent progress presentation text');
+            const outputId = this.options.createId();
+            assertText(outputId, 'created room agent progress output id');
+            const descriptor = this.options.registry.require(run.agentId).descriptor;
+            const audience = clampRunAudience(descriptor, presentation.utterance.audience);
+            await handleOutput({
+              type: 'assistant_output',
+              outputId,
+              delta: presentation.utterance.text,
+              final: true,
+              purpose: 'progress',
+              history: presentation.history ?? 'ephemeral',
+              ...(audience === undefined ? {} : { audience }),
+              interruptible: presentation.utterance.interruptible ?? true,
+            });
+          }
+        } else if (event.type === 'assistant_output') {
+          await handleOutput(event, true);
+        } else if (event.type === 'checkpoint') {
+          run = { ...run, checkpoint: structuredClone(event.value) };
+          await runStore.saveRun(run);
+        } else if (event.type === 'input_requested') {
+          if ([...buffers.values()].some((buffer) => !buffer.closed)) {
+            throw new Error('room agent requested input with an open assistant output');
+          }
+          run = {
+            ...run,
+            status: 'waiting_for_input',
+            deadlineAt: undefined,
+            continuation: {
+              requestId: event.requestId,
+              token: event.continuationToken,
+            },
+          };
+          await runStore.saveRun(run);
+          waiting = true;
+          break;
+        } else if (event.type === 'decision') {
+          for (const utterance of event.decision.utterances ?? []) {
+            const outputId = this.options.createId();
+            assertText(outputId, 'created room agent decision output id');
+            await handleOutput({
+              type: 'assistant_output',
+              outputId,
+              delta: utterance.text,
+              final: true,
+              purpose: 'answer',
+              history: 'record',
+              ...(utterance.audience === undefined ? {} : { audience: utterance.audience }),
+              interruptible: utterance.interruptible ?? true,
+            });
+          }
+          interactions.push(...structuredClone(event.decision.interactions ?? []));
+          if (event.decision.action !== undefined) {
+            if (action !== undefined) {
+              throw new Error('room agent run proposed more than one action');
+            }
+            const subject = this.options.registry.require(run.agentId).descriptor.controlSubject;
+            if (subject === undefined) {
+              throw new Error(`speech-only room agent cannot propose an action: ${run.agentId}`);
+            }
+            action = { subject: structuredClone(subject), action: structuredClone(event.decision.action) };
+          }
+        } else if (event.type === 'completed') {
+          completed = true;
+          break;
+        }
+      }
+
+      if (controller.signal.aborted) {
+        const deadline = controller.signal.reason === 'deadline_exceeded';
+        const status: RoomAgentRunStatus = deadline ? 'deadline_exceeded' : 'canceled';
+        const terminal: RoomAgentRunJournalEvent = deadline
+          ? { type: 'deadline_exceeded' }
+          : {
+            type: 'run_canceled',
+            reason: typeof controller.signal.reason === 'string'
+              ? controller.signal.reason
+              : 'canceled',
+          };
+        const latest = await runStore.loadRun(run.roomId, run.id);
+        if (latest !== undefined && !isTerminalRun(latest.status)) {
+          await this.finishRun(run, status, terminal, liveObserver);
+        }
+        const settled = await runStore.loadRun(run.roomId, run.id) ?? { ...run, status };
+        return { status: settled.status, agentId: run.agentId, run: settled, turn: null };
+      }
+
+      if (waiting) {
+        const turn = makeRunTurn(run.agentId, recordedUtterances, interactions, action);
+        return { status: 'waiting_for_input', agentId: run.agentId, run, turn };
+      }
+      if ([...buffers.values()].some((buffer) => !buffer.closed)) {
+        throw new Error('room agent run completed with an open assistant output');
+      }
+      if (!completed) await append({ type: 'completed' });
+      run = { ...run, status: 'completed', continuation: undefined };
+      await runStore.saveRun(run);
+      const turn = makeRunTurn(run.agentId, recordedUtterances, interactions, action);
+      return { status: 'completed', agentId: run.agentId, run, turn };
+    } catch (error) {
+      if (controller.signal.aborted) {
+        const latest = await runStore.loadRun(run.roomId, run.id) ?? run;
+        return { status: latest.status, agentId: run.agentId, run: latest, turn: null };
+      }
+      await this.finishRun(
+        run,
+        'failed',
+        { type: 'run_failed', code: 'run_processing_failed' },
+        liveObserver,
+      );
+      throw error;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      if (this.activeTurn === controller) this.activeTurn = undefined;
+    }
+  }
+
+  private async restoreOutputBuffers(runId: string): Promise<Map<string, OutputBuffer>> {
+    const events = await this.requireRunStore().loadRunEvents(this.options.roomId, runId);
+    const buffers = new Map<string, OutputBuffer>();
+    for (const entry of events) {
+      if (entry.event.type !== 'assistant_output') continue;
+      const event = entry.event;
+      const current = buffers.get(event.outputId) ?? {
+        text: '',
+        purpose: event.purpose ?? 'answer',
+        history: event.history ?? ((event.purpose ?? 'answer') === 'progress'
+          ? 'ephemeral'
+          : 'record'),
+        audience: event.audience,
+        interruptible: event.interruptible ?? true,
+        closed: false,
+      };
+      current.text += event.delta;
+      current.closed = event.final === true;
+      buffers.set(event.outputId, current);
+    }
+    return buffers;
+  }
+
+  private async finishRun(
+    run: RoomAgentRunRecord,
+    status: Extract<RoomAgentRunStatus, 'canceled' | 'deadline_exceeded' | 'failed'>,
+    event: Extract<RoomAgentRunJournalEvent,
+      { type: 'run_canceled' | 'deadline_exceeded' | 'run_failed' }>,
+    liveObserver?: RoomAgentRunInput['onEvent'],
+  ): Promise<void> {
+    const runStore = this.requireRunStore();
+    const eventId = this.options.createId();
+    assertText(eventId, 'created room agent terminal event id');
+    const appended = await runStore.appendRunEvent({
+      id: eventId,
+      runId: run.id,
+      roomId: run.roomId,
+      channelId: run.channelId,
+      agentId: run.agentId,
+      recordedAt: this.wallNow(),
+      event,
+    });
+    const settled: RoomAgentRunRecord = {
+      ...run,
+      status,
+      updatedAt: appended.entry.recordedAt,
+      lastSequence: appended.entry.sequence,
+      continuation: undefined,
+      ...(event.type === 'run_failed' ? { failureCode: event.code } : {}),
+    };
+    await runStore.saveRun(settled);
+    await this.options.runObserver?.publish(appended.entry);
+    await liveObserver?.(appended.entry);
+  }
+
+  private requireRunStore(): RoomAgentRunStore {
+    if (this.options.runStore === undefined) {
+      throw new Error('room agent runtime requires runStore for durable runs');
+    }
+    return this.options.runStore;
+  }
+
+  private wallNow(): number {
+    return (this.options.wallNow ?? Date.now)();
+  }
+
+  private assertRuntimeInput(request: RoomAgentRuntimeInput): void {
+    assertText(request?.channelId, 'room agent runtime channelId');
+    assertText(request.input?.id, 'room agent input id');
+    assertText(request.input.speakerId, 'room agent input speakerId');
+    assertText(request.input.text, 'room agent input text');
+    if (request.input.modality !== 'speech' && request.input.modality !== 'text') {
+      throw new TypeError('room agent input modality is unsupported');
+    }
   }
 
   private async admitInput(
@@ -638,6 +1416,103 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
         : {}),
     });
   }
+}
+
+interface OutputBuffer {
+  text: string;
+  purpose: 'progress' | 'answer' | 'question';
+  history: 'ephemeral' | 'record';
+  audience: RoomAgentUtterance['audience'];
+  interruptible: boolean;
+  closed: boolean;
+}
+
+class RoomAgentRunEventQueue implements AsyncIterable<RoomAgentRunJournalEntry> {
+  private readonly values: RoomAgentRunJournalEntry[] = [];
+  private readonly waiters: Array<{
+    resolve(value: IteratorResult<RoomAgentRunJournalEntry>): void;
+    reject(reason: unknown): void;
+  }> = [];
+  private ended = false;
+  private failure?: unknown;
+
+  push(value: RoomAgentRunJournalEntry): void {
+    if (this.ended) return;
+    const waiter = this.waiters.shift();
+    if (waiter === undefined) this.values.push(structuredClone(value));
+    else waiter.resolve({ done: false, value: structuredClone(value) });
+  }
+
+  close(): void {
+    if (this.ended) return;
+    this.ended = true;
+    for (const waiter of this.waiters.splice(0)) {
+      waiter.resolve({ done: true, value: undefined });
+    }
+  }
+
+  fail(reason: unknown): void {
+    if (this.ended) return;
+    this.ended = true;
+    this.failure = reason;
+    for (const waiter of this.waiters.splice(0)) waiter.reject(reason);
+  }
+
+  [Symbol.asyncIterator](): AsyncIterator<RoomAgentRunJournalEntry> {
+    return {
+      next: async (): Promise<IteratorResult<RoomAgentRunJournalEntry>> => {
+        const value = this.values.shift();
+        if (value !== undefined) return { done: false, value };
+        if (this.failure !== undefined) throw this.failure;
+        if (this.ended) return { done: true, value: undefined };
+        return await new Promise((resolve, reject) => {
+          this.waiters.push({ resolve, reject });
+        });
+      },
+    };
+  }
+}
+
+function isTerminalRun(status: RoomAgentRunStatus): boolean {
+  return status === 'completed'
+    || status === 'canceled'
+    || status === 'deadline_exceeded'
+    || status === 'failed';
+}
+
+function makeRunTurn(
+  agentId: string,
+  utterances: readonly RoomAgentUtterance[],
+  interactions: NonNullable<RoomAgentTurn['interactions']>,
+  action: RoomAgentTurn['action'],
+): RoomAgentTurn | null {
+  if (utterances.length === 0 && interactions.length === 0 && action === undefined) return null;
+  return {
+    agentId,
+    utterances: structuredClone(utterances),
+    ...(interactions.length === 0 ? {} : { interactions: structuredClone(interactions) }),
+    ...(action === undefined ? {} : { action: structuredClone(action) }),
+  };
+}
+
+function clampRunAudience(
+  descriptor: RoomAgentDescriptor,
+  requested: RoomAgentUtterance['audience'],
+): RoomAgentUtterance['audience'] {
+  if (descriptor.visibility === undefined || descriptor.visibility.kind === 'room') {
+    return requested === undefined ? undefined : structuredClone(requested);
+  }
+  if (requested === undefined || requested.kind === 'room') {
+    return structuredClone(descriptor.visibility);
+  }
+  const permitted = new Set(descriptor.visibility.participantIds);
+  const participantIds = requested.participantIds.filter((id) => permitted.has(id));
+  if (participantIds.length === 0) {
+    throw new Error(
+      `room agent progress presentation has no permitted audience: ${descriptor.id}`,
+    );
+  }
+  return { kind: 'participants', participantIds };
 }
 
 /** Compare persisted runtime snapshots without relying on object identity. */

@@ -110,6 +110,12 @@ export interface RoomAgentActionProposal {
 }
 
 // @public (undocumented)
+export type RoomAgentAssistantHistory = 'ephemeral' | 'record';
+
+// @public (undocumented)
+export type RoomAgentAssistantPurpose = 'progress' | 'answer' | 'question';
+
+// @public (undocumented)
 export type RoomAgentAudience = {
     kind: 'room';
 } | {
@@ -173,8 +179,8 @@ export interface RoomAgentDescriptor {
 export interface RoomAgentDriver<TObservation = unknown, TKnowledge = unknown> {
     // (undocumented)
     reset?(): void | Promise<void>;
-    // (undocumented)
-    respond(context: RoomAgentContext<TObservation, TKnowledge>): RoomAgentDecision | null | Promise<RoomAgentDecision | null>;
+    respond?(context: RoomAgentContext<TObservation, TKnowledge>): RoomAgentDecision | null | Promise<RoomAgentDecision | null>;
+    run?(context: RoomAgentRunContext<TObservation, TKnowledge>): AsyncIterable<RoomAgentRunEvent>;
 }
 
 // @public
@@ -214,12 +220,74 @@ export class RoomAgentRegistry<TObservation = unknown, TKnowledge = unknown> {
     require(id: string): RoomAgentRegistration<TObservation, TKnowledge>;
     // (undocumented)
     respond(id: string, context: Omit<RoomAgentContext<TObservation, TKnowledge>, 'agent'>): Promise<RoomAgentTurn | null>;
+    run(id: string, context: Omit<RoomAgentContext<TObservation, TKnowledge>, 'agent'>, invocation: RoomAgentRunInvocation): AsyncGenerator<RoomAgentRunEvent>;
     // (undocumented)
     unregister(id: string): boolean;
 }
 
 // @public (undocumented)
 export type RoomAgentRole = 'guide' | 'character' | 'referee' | 'custom';
+
+// @public (undocumented)
+export interface RoomAgentRunContext<TObservation = unknown, TKnowledge = unknown> extends RoomAgentContext<TObservation, TKnowledge> {
+    // (undocumented)
+    run: RoomAgentRunInvocation;
+}
+
+// @public
+export type RoomAgentRunEvent = {
+    type: 'progress';
+    progress: RoomAgentRunProgress;
+} | {
+    type: 'assistant_output';
+    outputId: string;
+    delta: string;
+    final?: boolean;
+    purpose?: RoomAgentAssistantPurpose;
+    history?: RoomAgentAssistantHistory;
+    audience?: RoomAgentAudience;
+    interruptible?: boolean;
+} | {
+    type: 'input_requested';
+    requestId: string;
+    continuationToken: string;
+    prompt?: string;
+} | {
+    type: 'checkpoint';
+    value: unknown;
+} | {
+    type: 'decision';
+    decision: RoomAgentDecision;
+} | {
+    type: 'completed';
+};
+
+// @public
+export interface RoomAgentRunInvocation {
+    // (undocumented)
+    attempt: number;
+    checkpoint?: unknown;
+    continuation?: {
+        requestId: string;
+        token: string;
+    };
+    // (undocumented)
+    id: string;
+    // (undocumented)
+    resumed: boolean;
+}
+
+// @public
+export interface RoomAgentRunProgress {
+    // (undocumented)
+    current?: number;
+    message?: string;
+    stage: string;
+    // (undocumented)
+    total?: number;
+    // (undocumented)
+    unit?: string;
+}
 
 // @public (undocumented)
 export interface RoomAgentTurn {

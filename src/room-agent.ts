@@ -133,11 +133,77 @@ export interface RoomAgentContext<TObservation = unknown, TKnowledge = unknown> 
   signal?: AbortSignal;
 }
 
+/** Durable invocation metadata supplied when a driver participates in a long run. */
+export interface RoomAgentRunInvocation {
+  id: string;
+  attempt: number;
+  resumed: boolean;
+  /** Opaque product checkpoint restored by the host. */
+  checkpoint?: unknown;
+  /** Present when this invocation continues a prior input request. */
+  continuation?: {
+    requestId: string;
+    token: string;
+  };
+}
+
+export interface RoomAgentRunContext<TObservation = unknown, TKnowledge = unknown>
+  extends RoomAgentContext<TObservation, TKnowledge> {
+  run: RoomAgentRunInvocation;
+}
+
+/** Work-derived progress. It must describe completed or currently executing work. */
+export interface RoomAgentRunProgress {
+  /** Stable product-authored stage key. */
+  stage: string;
+  /** Optional user-facing description based only on verified run state. */
+  message?: string;
+  current?: number;
+  total?: number;
+  unit?: string;
+}
+
+export type RoomAgentAssistantPurpose = 'progress' | 'answer' | 'question';
+export type RoomAgentAssistantHistory = 'ephemeral' | 'record';
+
+/**
+ * Driver output for long-running and multi-turn work. Output deltas with the
+ * same outputId form one assistant message; `final` closes that message.
+ */
+export type RoomAgentRunEvent =
+  | { type: 'progress'; progress: RoomAgentRunProgress }
+  | {
+    type: 'assistant_output';
+    outputId: string;
+    delta: string;
+    final?: boolean;
+    purpose?: RoomAgentAssistantPurpose;
+    /** Progress filler is ephemeral unless a product explicitly records it. */
+    history?: RoomAgentAssistantHistory;
+    audience?: RoomAgentAudience;
+    interruptible?: boolean;
+  }
+  | {
+    type: 'input_requested';
+    requestId: string;
+    /** Opaque token a client can echo to explicitly continue this run. */
+    continuationToken: string;
+    prompt?: string;
+  }
+  | { type: 'checkpoint'; value: unknown }
+  | { type: 'decision'; decision: RoomAgentDecision }
+  | { type: 'completed' };
+
 export interface RoomAgentDriver<TObservation = unknown, TKnowledge = unknown> {
   reset?(): void | Promise<void>;
-  respond(
+  /** Legacy single-decision entry point. Long-run hosts adapt it automatically. */
+  respond?(
     context: RoomAgentContext<TObservation, TKnowledge>,
   ): RoomAgentDecision | null | Promise<RoomAgentDecision | null>;
+  /** Streaming entry point for progress, multiple messages, and continuations. */
+  run?(
+    context: RoomAgentRunContext<TObservation, TKnowledge>,
+  ): AsyncIterable<RoomAgentRunEvent>;
 }
 
 export interface RoomAgentRegistration<TObservation = unknown, TKnowledge = unknown> {
@@ -559,8 +625,9 @@ export class RoomAgentRegistry<TObservation = unknown, TKnowledge = unknown> {
     assertDescriptor(registration.descriptor);
     if (registration.driver === null
       || typeof registration.driver !== 'object'
-      || typeof registration.driver.respond !== 'function') {
-      throw new TypeError('room agent driver must define respond');
+      || (typeof registration.driver.respond !== 'function'
+        && typeof registration.driver.run !== 'function')) {
+      throw new TypeError('room agent driver must define respond or run');
     }
     const id = registration.descriptor.id;
     const current = this.registrations.get(id);
@@ -632,6 +699,9 @@ export class RoomAgentRegistry<TObservation = unknown, TKnowledge = unknown> {
       if (linked.controller.signal.aborted) return null;
       let decision: RoomAgentDecision | null;
       try {
+        if (registration.driver.respond === undefined) {
+          throw new Error(`room agent does not define respond: ${id}`);
+        }
         decision = await registration.driver.respond({
           ...context,
           agent: copyDescriptor(registration.descriptor),
@@ -660,10 +730,166 @@ export class RoomAgentRegistry<TObservation = unknown, TKnowledge = unknown> {
     }
   }
 
+  /**
+   * Invoke a streaming driver. Drivers that only implement `respond()` are
+   * adapted into one decision event followed by completion.
+   */
+  async *run(
+    id: string,
+    context: Omit<RoomAgentContext<TObservation, TKnowledge>, 'agent'>,
+    invocation: RoomAgentRunInvocation,
+  ): AsyncGenerator<RoomAgentRunEvent> {
+    assertContext(context);
+    assertText(invocation?.id, 'room agent run id');
+    if (!Number.isSafeInteger(invocation.attempt) || invocation.attempt < 1) {
+      throw new RangeError('room agent run attempt must be a positive safe integer');
+    }
+    const registration = this.registrations.get(id);
+    if (registration === undefined) throw new Error(`unknown room agent: ${id}`);
+    const linked = linkedAbortController(context.signal);
+    registration.active.add(linked.controller);
+    try {
+      if (linked.controller.signal.aborted) return;
+      const driverContext: RoomAgentRunContext<TObservation, TKnowledge> = {
+        ...context,
+        agent: copyDescriptor(registration.descriptor),
+        signal: linked.controller.signal,
+        run: structuredClone(invocation),
+      };
+      if (registration.driver.run === undefined) {
+        if (registration.driver.respond === undefined) return;
+        const decision = await registration.driver.respond(driverContext);
+        if (linked.controller.signal.aborted
+          || this.registrations.get(id) !== registration
+          || decision === null) return;
+        yield {
+          type: 'decision',
+          decision: decisionFromTurn(normalizeDecision(
+            registration.descriptor,
+            decision,
+            context.interaction?.disclosure,
+          )),
+        };
+        yield { type: 'completed' };
+        return;
+      }
+      const events = registration.driver.run(driverContext);
+      if (events === null
+        || typeof events !== 'object'
+        || !(Symbol.asyncIterator in events)) {
+        throw new TypeError('room agent run must return an AsyncIterable');
+      }
+      for await (const event of events) {
+        if (linked.controller.signal.aborted
+          || this.registrations.get(id) !== registration) return;
+        yield normalizeRunEvent(
+          registration.descriptor,
+          event,
+          context.interaction?.disclosure,
+        );
+      }
+    } catch (error) {
+      if (linked.controller.signal.aborted
+        || this.registrations.get(id) !== registration) return;
+      throw error;
+    } finally {
+      registration.active.delete(linked.controller);
+      linked.dispose();
+    }
+  }
+
   private abort(registration: ActiveRegistration<TObservation, TKnowledge>): void {
     for (const controller of registration.active) {
       controller.abort(new Error('room agent registration changed'));
     }
     registration.active.clear();
+  }
+}
+
+function decisionFromTurn(turn: RoomAgentTurn): RoomAgentDecision {
+  return {
+    utterances: structuredClone(turn.utterances),
+    ...(turn.interactions === undefined
+      ? {}
+      : { interactions: structuredClone(turn.interactions) }),
+    ...(turn.action === undefined ? {} : { action: structuredClone(turn.action.action) }),
+  };
+}
+
+function normalizeRunEvent(
+  descriptor: RoomAgentDescriptor,
+  event: RoomAgentRunEvent,
+  parentDisclosure?: RoomDisclosure,
+): RoomAgentRunEvent {
+  if (event === null || typeof event !== 'object') {
+    throw new TypeError('room agent run event must be an object');
+  }
+  switch (event.type) {
+    case 'progress': {
+      assertText(event.progress?.stage, 'room agent progress stage');
+      if (event.progress.message !== undefined) {
+        assertText(event.progress.message, 'room agent progress message');
+      }
+      for (const [label, value] of [
+        ['current', event.progress.current],
+        ['total', event.progress.total],
+      ] as const) {
+        if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
+          throw new RangeError(`room agent progress ${label} must be non-negative`);
+        }
+      }
+      if (event.progress.current !== undefined
+        && event.progress.total !== undefined
+        && event.progress.current > event.progress.total) {
+        throw new RangeError('room agent progress current cannot exceed total');
+      }
+      if (event.progress.unit !== undefined) {
+        assertText(event.progress.unit, 'room agent progress unit');
+      }
+      return structuredClone(event);
+    }
+    case 'assistant_output': {
+      assertText(event.outputId, 'room agent output id');
+      if (typeof event.delta !== 'string') {
+        throw new TypeError('room agent output delta must be a string');
+      }
+      if (event.delta.length === 0 && event.final !== true) {
+        throw new TypeError('empty room agent output delta must close the output');
+      }
+      if (event.purpose !== undefined
+        && !['progress', 'answer', 'question'].includes(event.purpose)) {
+        throw new TypeError('room agent output purpose is unsupported');
+      }
+      if (event.history !== undefined
+        && event.history !== 'ephemeral'
+        && event.history !== 'record') {
+        throw new TypeError('room agent output history is unsupported');
+      }
+      const audience = normalizeAudience(descriptor, event.audience, parentDisclosure);
+      return {
+        ...structuredClone(event),
+        ...(audience === undefined ? {} : { audience }),
+      };
+    }
+    case 'input_requested':
+      assertText(event.requestId, 'room agent input request id');
+      assertText(event.continuationToken, 'room agent continuation token');
+      if (event.prompt !== undefined) assertText(event.prompt, 'room agent input prompt');
+      return structuredClone(event);
+    case 'checkpoint':
+      return { type: 'checkpoint', value: structuredClone(event.value) };
+    case 'decision':
+      return {
+        type: 'decision',
+        decision: decisionFromTurn(normalizeDecision(
+          descriptor,
+          event.decision,
+          parentDisclosure,
+        )),
+      };
+    case 'completed':
+      return { type: 'completed' };
+    default:
+      throw new TypeError('room agent run event type is unsupported');
   }
 }

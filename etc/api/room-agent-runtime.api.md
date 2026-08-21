@@ -69,13 +69,30 @@ interface GameAgentRule {
 }
 
 // @public
-export class InMemoryRoomAgentRuntimeStore implements RoomAgentRuntimeStore {
+export class InMemoryRoomAgentRuntimeStore implements RoomAgentRuntimeStore, RoomAgentRunStore {
+    // (undocumented)
+    appendRunEvent(draft: RoomAgentRunJournalDraft): Promise<RoomAgentRunJournalAppendResult>;
     // (undocumented)
     appendTranscript(draft: RoomAgentTranscriptDraft): Promise<RoomAgentTranscriptAppendResult>;
+    // (undocumented)
+    createRun(run: RoomAgentRunRecord): Promise<{
+        run: RoomAgentRunRecord;
+        duplicate: boolean;
+    }>;
+    // (undocumented)
+    loadOpenRun(roomId: string, channelId: string): Promise<RoomAgentRunRecord | undefined>;
+    // (undocumented)
+    loadRun(roomId: string, runId: string): Promise<RoomAgentRunRecord | undefined>;
+    // (undocumented)
+    loadRunByInput(roomId: string, channelId: string, inputId: string): Promise<RoomAgentRunRecord | undefined>;
+    // (undocumented)
+    loadRunEvents(roomId: string, runId: string): Promise<readonly RoomAgentRunJournalEntry[]>;
     // (undocumented)
     loadState(roomId: string): Promise<RoomAgentRuntimeState | undefined>;
     // (undocumented)
     loadTranscript(roomId: string, channelId: string): Promise<readonly RoomAgentTranscriptEntry[]>;
+    // (undocumented)
+    saveRun(run: RoomAgentRunRecord): Promise<void>;
     // (undocumented)
     saveState(state: RoomAgentRuntimeState): Promise<void>;
 }
@@ -114,6 +131,9 @@ interface RevealEnvelope {
 }
 
 // @public (undocumented)
+export const ROOM_AGENT_RUN_SCHEMA: "gaos.room-agent-run.v1";
+
+// @public (undocumented)
 export const ROOM_AGENT_RUNTIME_SCHEMA: "gaos.room-agent-runtime.v1";
 
 // @public (undocumented)
@@ -123,6 +143,12 @@ interface RoomAgentActionProposal {
     // (undocumented)
     subject: ControlSubject;
 }
+
+// @public (undocumented)
+type RoomAgentAssistantHistory = 'ephemeral' | 'record';
+
+// @public (undocumented)
+type RoomAgentAssistantPurpose = 'progress' | 'answer' | 'question';
 
 // @public (undocumented)
 type RoomAgentAudience = {
@@ -188,8 +214,8 @@ interface RoomAgentDescriptor {
 interface RoomAgentDriver<TObservation = unknown, TKnowledge = unknown> {
     // (undocumented)
     reset?(): void | Promise<void>;
-    // (undocumented)
-    respond(context: RoomAgentContext<TObservation, TKnowledge>): RoomAgentDecision | null | Promise<RoomAgentDecision | null>;
+    respond?(context: RoomAgentContext<TObservation, TKnowledge>): RoomAgentDecision | null | Promise<RoomAgentDecision | null>;
+    run?(context: RoomAgentRunContext<TObservation, TKnowledge>): AsyncIterable<RoomAgentRunEvent>;
 }
 
 // @public
@@ -204,6 +230,29 @@ interface RoomAgentInput {
     speakerKind?: RoomEndpointKind;
     // (undocumented)
     text: string;
+}
+
+// @public (undocumented)
+export interface RoomAgentProgressPresentation {
+    history?: 'ephemeral' | 'record';
+    // (undocumented)
+    utterance: RoomAgentUtterance;
+}
+
+// @public (undocumented)
+export interface RoomAgentProgressPresenter {
+    // (undocumented)
+    present(context: RoomAgentProgressPresenterContext): RoomAgentProgressPresentation | null | Promise<RoomAgentProgressPresentation | null>;
+}
+
+// @public (undocumented)
+export interface RoomAgentProgressPresenterContext {
+    // (undocumented)
+    progress: RoomAgentRunProgress;
+    // (undocumented)
+    run: RoomAgentRunRecord;
+    // (undocumented)
+    signal: AbortSignal;
 }
 
 // @public (undocumented)
@@ -229,6 +278,7 @@ class RoomAgentRegistry<TObservation = unknown, TKnowledge = unknown> {
     require(id: string): RoomAgentRegistration<TObservation, TKnowledge>;
     // (undocumented)
     respond(id: string, context: Omit<RoomAgentContext<TObservation, TKnowledge>, 'agent'>): Promise<RoomAgentTurn | null>;
+    run(id: string, context: Omit<RoomAgentContext<TObservation, TKnowledge>, 'agent'>, invocation: RoomAgentRunInvocation): AsyncGenerator<RoomAgentRunEvent>;
     // (undocumented)
     unregister(id: string): boolean;
 }
@@ -236,19 +286,235 @@ class RoomAgentRegistry<TObservation = unknown, TKnowledge = unknown> {
 // @public (undocumented)
 type RoomAgentRole = 'guide' | 'character' | 'referee' | 'custom';
 
+// @public (undocumented)
+interface RoomAgentRunContext<TObservation = unknown, TKnowledge = unknown> extends RoomAgentContext<TObservation, TKnowledge> {
+    // (undocumented)
+    run: RoomAgentRunInvocation;
+}
+
+// @public
+type RoomAgentRunEvent = {
+    type: 'progress';
+    progress: RoomAgentRunProgress;
+} | {
+    type: 'assistant_output';
+    outputId: string;
+    delta: string;
+    final?: boolean;
+    purpose?: RoomAgentAssistantPurpose;
+    history?: RoomAgentAssistantHistory;
+    audience?: RoomAgentAudience;
+    interruptible?: boolean;
+} | {
+    type: 'input_requested';
+    requestId: string;
+    continuationToken: string;
+    prompt?: string;
+} | {
+    type: 'checkpoint';
+    value: unknown;
+} | {
+    type: 'decision';
+    decision: RoomAgentDecision;
+} | {
+    type: 'completed';
+};
+
+// @public
+export interface RoomAgentRunExecution {
+    // (undocumented)
+    events: AsyncIterable<RoomAgentRunJournalEntry>;
+    // (undocumented)
+    result: Promise<RoomAgentRunResult>;
+}
+
+// @public (undocumented)
+export interface RoomAgentRunInput extends RoomAgentRuntimeInput {
+    continuation?: {
+        runId: string;
+        token: string;
+    };
+    deadlineMs?: number;
+    onEvent?(entry: RoomAgentRunJournalEntry): void | Promise<void>;
+}
+
+// @public
+interface RoomAgentRunInvocation {
+    // (undocumented)
+    attempt: number;
+    checkpoint?: unknown;
+    continuation?: {
+        requestId: string;
+        token: string;
+    };
+    // (undocumented)
+    id: string;
+    // (undocumented)
+    resumed: boolean;
+}
+
+// @public (undocumented)
+export interface RoomAgentRunJournalAppendResult {
+    // (undocumented)
+    duplicate: boolean;
+    // (undocumented)
+    entry: RoomAgentRunJournalEntry;
+}
+
+// @public (undocumented)
+export type RoomAgentRunJournalDraft = Omit<RoomAgentRunJournalEntry, 'sequence'>;
+
+// @public (undocumented)
+export interface RoomAgentRunJournalEntry {
+    // (undocumented)
+    agentId: string;
+    // (undocumented)
+    channelId: string;
+    // (undocumented)
+    event: RoomAgentRunJournalEvent;
+    // (undocumented)
+    id: string;
+    // (undocumented)
+    recordedAt: number;
+    // (undocumented)
+    roomId: string;
+    // (undocumented)
+    runId: string;
+    // (undocumented)
+    sequence: number;
+}
+
+// @public (undocumented)
+export type RoomAgentRunJournalEvent = RoomAgentRunEvent | {
+    type: 'run_canceled';
+    reason: string;
+} | {
+    type: 'deadline_exceeded';
+} | {
+    type: 'run_failed';
+    code: string;
+};
+
+// @public (undocumented)
+export interface RoomAgentRunObserver {
+    // (undocumented)
+    publish(entry: RoomAgentRunJournalEntry): void | Promise<void>;
+}
+
+// @public
+interface RoomAgentRunProgress {
+    // (undocumented)
+    current?: number;
+    message?: string;
+    stage: string;
+    // (undocumented)
+    total?: number;
+    // (undocumented)
+    unit?: string;
+}
+
+// @public
+export interface RoomAgentRunRecord {
+    // (undocumented)
+    agentId: string;
+    // (undocumented)
+    attempt: number;
+    // (undocumented)
+    channelId: string;
+    // (undocumented)
+    checkpoint?: unknown;
+    // (undocumented)
+    continuation?: {
+        requestId: string;
+        token: string;
+    };
+    // (undocumented)
+    deadlineAt?: number;
+    deadlineMs?: number;
+    // (undocumented)
+    failureCode?: string;
+    // (undocumented)
+    id: string;
+    // (undocumented)
+    lastSequence: number;
+    // (undocumented)
+    latestInput: RoomAgentInput;
+    // (undocumented)
+    roomId: string;
+    // (undocumented)
+    rootInputId: string;
+    // (undocumented)
+    schema: typeof ROOM_AGENT_RUN_SCHEMA;
+    // (undocumented)
+    startedAt: number;
+    // (undocumented)
+    status: RoomAgentRunStatus;
+    // (undocumented)
+    updatedAt: number;
+}
+
+// @public (undocumented)
+export interface RoomAgentRunReplay {
+    // (undocumented)
+    events: readonly RoomAgentRunJournalEntry[];
+    // (undocumented)
+    run: RoomAgentRunRecord;
+}
+
+// @public (undocumented)
+export interface RoomAgentRunResult {
+    // (undocumented)
+    agentId: string;
+    // (undocumented)
+    run: RoomAgentRunRecord;
+    // (undocumented)
+    status: RoomAgentRunStatus | 'duplicate';
+    // (undocumented)
+    turn: RoomAgentTurn | null;
+}
+
+// @public (undocumented)
+export type RoomAgentRunStatus = 'active' | 'waiting_for_input' | 'completed' | 'canceled' | 'deadline_exceeded' | 'failed';
+
+// @public
+export interface RoomAgentRunStore {
+    // (undocumented)
+    appendRunEvent(event: RoomAgentRunJournalDraft): Promise<RoomAgentRunJournalAppendResult>;
+    // (undocumented)
+    createRun(run: RoomAgentRunRecord): Promise<{
+        run: RoomAgentRunRecord;
+        duplicate: boolean;
+    }>;
+    // (undocumented)
+    loadOpenRun(roomId: string, channelId: string): Promise<RoomAgentRunRecord | undefined>;
+    // (undocumented)
+    loadRun(roomId: string, runId: string): Promise<RoomAgentRunRecord | undefined>;
+    // (undocumented)
+    loadRunByInput(roomId: string, channelId: string, inputId: string): Promise<RoomAgentRunRecord | undefined>;
+    // (undocumented)
+    loadRunEvents(roomId: string, runId: string): Promise<readonly RoomAgentRunJournalEntry[]>;
+    // (undocumented)
+    saveRun(run: RoomAgentRunRecord): Promise<void>;
+}
+
 // @public
 export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     constructor(options: RoomAgentRuntimeOptions<TObservation, TKnowledge>);
+    cancelRun(runId: string, reason?: string): Promise<boolean>;
     // (undocumented)
     handleFinalInput(request: RoomAgentRuntimeInput): Promise<RoomAgentRuntimeResult>;
+    handleRunInput(request: RoomAgentRunInput): Promise<RoomAgentRunResult>;
     // (undocumented)
     interrupt(reason?: string): Promise<boolean>;
+    replayRun(runId: string): Promise<RoomAgentRunReplay>;
     // (undocumented)
     resume(channelId: string): Promise<RoomAgentRuntimeResume>;
+    resumeRun(runId: string): Promise<RoomAgentRunResult>;
     // (undocumented)
     setFocus(participantId: string, agentId: string | null): Promise<void>;
     // (undocumented)
     setPhase(phase: string | undefined): Promise<void>;
+    startRun(request: RoomAgentRunInput): RoomAgentRunExecution;
     // (undocumented)
     state(): RoomAgentRuntimeState;
 }
@@ -324,14 +590,19 @@ export interface RoomAgentRuntimeOptions<TObservation = unknown, TKnowledge = un
     observer?: RoomAgentRuntimeObserver;
     // (undocumented)
     phaseAgentIds?: Readonly<Record<string, string>>;
+    progressPresenter?: RoomAgentProgressPresenter;
     // (undocumented)
     registry: RoomAgentRegistry<TObservation, TKnowledge>;
     // (undocumented)
     roomId: string;
+    runDeadlineMs?: number;
+    runObserver?: RoomAgentRunObserver;
+    runStore?: RoomAgentRunStore;
     // (undocumented)
     speech?: RoomSpeechAdapter;
     // (undocumented)
     store: RoomAgentRuntimeStore;
+    wallNow?: () => number;
 }
 
 // @public (undocumented)
