@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/fix-room-agent-runtime-isolation-and-privacy",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "01a01550-ce4b-7503-86fa-196d5f5b5be1",
+  "branch": "orch/attempt/codex-fix-room-agent-runtime-isolation-and-privacy",
+  "status": "claimed",
+  "claimed_at": "2026-08-21T21:20:08.584Z",
+  "lease_until": "2026-08-21T22:20:08.584Z"
+}
