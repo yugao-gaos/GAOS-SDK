@@ -91,9 +91,18 @@ so existing host adapters remain source-compatible. A production host writes:
 3. the latest full checkpoint on the run record; and
 4. an input-to-run index for retry-safe admission.
 
-Journal sequence is per run and begins at one. Delivery to `runObserver`, the
-per-call event callback, and `startRun().events` happens after append, so a live
-consumer never receives an event that is absent from replay.
+Journal sequence is per run and begins at one. `commitRunEvent()` appends an
+event and persists its resulting run state (sequence, checkpoint, waiting, or
+terminal transition) in one host transaction. Delivery to `runObserver`, the
+per-call event callback, and `startRun().events` happens after that commit, so a
+live consumer never receives an event whose matching run transition is absent.
+Each event records the input attempt that produced it.
+
+The journal is the source of truth for recorded assistant outputs. On resume,
+the runtime idempotently reconciles any closed `history: 'record'` output into
+the channel transcript before invoking the driver. This repairs an isolate loss
+between the journal commit and transcript append without re-speaking or
+otherwise re-presenting the output.
 
 Durability of the ledger does not serialize a JavaScript closure. After an
 isolate or process restart, the host calls `resumeRun()`. The driver is invoked
@@ -134,9 +143,11 @@ permanently.
 
 ## 7 — Cancellation and deadlines
 
-Cancellation is cooperative. `cancelRun()` first aborts in-memory work and
-interruptible speech, then writes a terminal `run_canceled` event. Drivers must
-observe `context.signal` around expensive work and visible side effects.
+Cancellation is cooperative. `cancelRun()` aborts in-memory work only when the
+active controller belongs to that run ID, then interrupts that run's
+interruptible speech and writes a terminal `run_canceled` event. Drivers and
+context sources must observe their signal around expensive work and visible
+side effects.
 
 A run can use the runtime default deadline or a per-input override. Its active
 attempt deadline is persisted as an epoch timestamp so recovery cannot reset

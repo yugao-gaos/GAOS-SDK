@@ -668,4 +668,222 @@ describe('room agent runtime', () => {
       checkpoint: { completed: ['observe'] },
     })]);
   });
+
+  it('publishes checkpoint and waiting events only after their run transition commits', async () => {
+    const store = new InMemoryRoomAgentRuntimeStore();
+    const observed: Array<{ entry: RoomAgentRunJournalEntry; run?: RoomAgentRunRecord }> = [];
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'oracle', label: 'Oracle', role: 'character' },
+      driver: {
+        run: async function* () {
+          yield { type: 'checkpoint', value: { completed: ['observe'] } };
+          yield {
+            type: 'input_requested',
+            requestId: 'describe',
+            continuationToken: 'continue-1',
+          };
+        },
+      },
+    }]);
+    const runtime = new RoomAgentRuntime({
+      roomId: 'room-1', registry, store, runStore: store,
+      contextSource: contextSource(), createId: idFactory(), fallbackAgentId: 'oracle',
+      runObserver: {
+        publish: async (entry) => {
+          observed.push({ entry, run: await store.loadRun(entry.roomId, entry.runId) });
+        },
+      },
+    });
+
+    const result = await runtime.handleRunInput({
+      channelId: 'atomic',
+      input: { id: 'input-1', speakerId: 'visitor-1', text: 'Begin', modality: 'text' },
+    });
+    expect(result.status).toBe('waiting_for_input');
+    expect(observed).toEqual([
+      {
+        entry: expect.objectContaining({
+          sequence: 1,
+          event: expect.objectContaining({ type: 'checkpoint' }),
+        }),
+        run: expect.objectContaining({
+          lastSequence: 1,
+          checkpoint: { completed: ['observe'] },
+        }),
+      },
+      {
+        entry: expect.objectContaining({
+          sequence: 2,
+          event: expect.objectContaining({ type: 'input_requested' }),
+        }),
+        run: expect.objectContaining({
+          lastSequence: 2,
+          status: 'waiting_for_input',
+          continuation: { requestId: 'describe', token: 'continue-1' },
+        }),
+      },
+    ]);
+  });
+
+  it('cancels only the controller belonging to the requested run', async () => {
+    let releaseSecond!: () => void;
+    const secondWork = new Promise<void>((resolve) => { releaseSecond = resolve; });
+    let secondSignal: AbortSignal | undefined;
+    const store = new InMemoryRoomAgentRuntimeStore();
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'oracle', label: 'Oracle', role: 'character' },
+      driver: {
+        run: async function* ({ input, signal }) {
+          if (input.text === 'First') {
+            yield {
+              type: 'input_requested',
+              requestId: 'first-wait',
+              continuationToken: 'first-token',
+            };
+            return;
+          }
+          secondSignal = signal;
+          yield { type: 'progress', progress: { stage: 'second-active' } };
+          await secondWork;
+          if (!signal?.aborted) yield { type: 'completed' };
+        },
+      },
+    }]);
+    const runtime = new RoomAgentRuntime({
+      roomId: 'room-1', registry, store, runStore: store,
+      contextSource: contextSource(), createId: idFactory(), fallbackAgentId: 'oracle',
+    });
+    const first = await runtime.handleRunInput({
+      channelId: 'first-channel',
+      input: { id: 'input-1', speakerId: 'visitor-1', text: 'First', modality: 'text' },
+    });
+    const second = runtime.startRun({
+      channelId: 'second-channel',
+      input: { id: 'input-2', speakerId: 'visitor-1', text: 'Second', modality: 'text' },
+    });
+    await second.events[Symbol.asyncIterator]().next();
+
+    await expect(runtime.cancelRun(first.run.id, 'cancel_waiting')).resolves.toBe(true);
+    expect(secondSignal?.aborted).toBe(false);
+    releaseSecond();
+    await expect(second.result).resolves.toMatchObject({ status: 'completed' });
+  });
+
+  it.each(['context source', 'progress presenter'] as const)(
+    'persists deadline terminal state when an abort-aware %s rejects',
+    async (failurePoint) => {
+      const store = new InMemoryRoomAgentRuntimeStore();
+      const registry = new RoomAgentRegistry<Observation>([{
+        descriptor: { id: 'oracle', label: 'Oracle', role: 'character' },
+        driver: {
+          run: async function* () {
+            yield { type: 'progress', progress: { stage: 'slow-work' } };
+            yield { type: 'completed' };
+          },
+        },
+      }]);
+      const source: RoomAgentRuntimeContextSource<Observation> = async (request) => {
+        if (failurePoint === 'context source') {
+          await new Promise<void>((_resolve, reject) => {
+            request.signal.addEventListener(
+              'abort',
+              () => reject(new Error('context aborted')),
+              { once: true },
+            );
+          });
+        }
+        return {
+          participants,
+          observation: { phase: 'arrival' },
+          manifest,
+          legalActions: [],
+          tick: 0,
+        };
+      };
+      const runtime = new RoomAgentRuntime({
+        roomId: 'room-1', registry, store, runStore: store,
+        contextSource: source, createId: idFactory(), fallbackAgentId: 'oracle',
+        ...(failurePoint === 'progress presenter'
+          ? {
+            progressPresenter: {
+              present: async ({ signal }: { signal: AbortSignal }) => await new Promise(
+                (_resolve, reject) => signal.addEventListener(
+                  'abort',
+                  () => reject(new Error('presenter aborted')),
+                  { once: true },
+                ),
+              ),
+            },
+          }
+          : {}),
+      });
+
+      const result = await runtime.handleRunInput({
+        channelId: failurePoint,
+        deadlineMs: 5,
+        input: { id: `input-${failurePoint}`, speakerId: 'visitor-1', text: 'Wait', modality: 'text' },
+      });
+      expect(result.status).toBe('deadline_exceeded');
+      const replay = await runtime.replayRun(result.run.id);
+      expect(replay.run).toMatchObject({
+        status: 'deadline_exceeded',
+        lastSequence: replay.events.length,
+      });
+      expect(replay.events.at(-1)?.event).toEqual({ type: 'deadline_exceeded' });
+    },
+  );
+
+  it('reconciles a committed final output missing from transcript without re-speaking it', async () => {
+    const store = new InMemoryRoomAgentRuntimeStore();
+    const active: RoomAgentRunRecord = {
+      schema: 'gaos.room-agent-run.v1',
+      id: 'run-reconcile',
+      roomId: 'room-1',
+      channelId: 'private',
+      agentId: 'oracle',
+      rootInputId: 'input-1',
+      latestInput: {
+        id: 'input-1', speakerId: 'visitor-1', text: 'Recover', modality: 'text',
+      },
+      attempt: 1,
+      status: 'active',
+      startedAt: 1,
+      updatedAt: 1,
+      lastSequence: 0,
+    };
+    await store.createRun(active);
+    await store.commitRunEvent(active, {
+      id: 'event-1',
+      runId: active.id,
+      roomId: active.roomId,
+      channelId: active.channelId,
+      agentId: active.agentId,
+      inputId: active.latestInput.id,
+      recordedAt: 2,
+      event: {
+        type: 'assistant_output',
+        outputId: 'answer-1',
+        delta: 'Recovered answer.',
+        final: true,
+        purpose: 'answer',
+        history: 'record',
+      },
+    });
+    const speak = vi.fn(async () => undefined);
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'oracle', label: 'Oracle', role: 'character' },
+      driver: { run: async function* () { yield { type: 'completed' }; } },
+    }]);
+    const runtime = new RoomAgentRuntime({
+      roomId: 'room-1', registry, store, runStore: store,
+      contextSource: contextSource(), createId: idFactory(), fallbackAgentId: 'oracle',
+      speech: { speak },
+    });
+
+    await expect(runtime.resumeRun(active.id)).resolves.toMatchObject({ status: 'completed' });
+    await expect(store.loadTranscript(active.roomId, active.channelId)).resolves.toMatchObject([
+      { id: `${active.id}:output:answer-1`, text: 'Recovered answer.', turnId: 'input-1' },
+    ]);
+    expect(speak).not.toHaveBeenCalled();
+  });
 });

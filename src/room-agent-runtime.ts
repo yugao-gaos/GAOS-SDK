@@ -92,6 +92,8 @@ export interface RoomAgentRunJournalEntry {
   roomId: string;
   channelId: string;
   agentId: string;
+  /** Input attempt that produced this event. */
+  inputId: string;
   sequence: number;
   recordedAt: number;
   event: RoomAgentRunJournalEvent;
@@ -101,6 +103,7 @@ export type RoomAgentRunJournalDraft = Omit<RoomAgentRunJournalEntry, 'sequence'
 
 export interface RoomAgentRunJournalAppendResult {
   entry: RoomAgentRunJournalEntry;
+  run: RoomAgentRunRecord;
   duplicate: boolean;
 }
 
@@ -115,7 +118,9 @@ export interface RoomAgentRunStore {
     inputId: string,
   ): Promise<RoomAgentRunRecord | undefined>;
   loadOpenRun(roomId: string, channelId: string): Promise<RoomAgentRunRecord | undefined>;
-  appendRunEvent(
+  /** Atomically append an event and persist the resulting run transition. */
+  commitRunEvent(
+    run: RoomAgentRunRecord,
     event: RoomAgentRunJournalDraft,
   ): Promise<RoomAgentRunJournalAppendResult>;
   loadRunEvents(roomId: string, runId: string): Promise<readonly RoomAgentRunJournalEntry[]>;
@@ -128,6 +133,8 @@ export interface RoomAgentRuntimeContextRequest {
   input: RoomAgentInput;
   phase?: string;
   transcript: readonly RoomAgentTranscriptEntry[];
+  /** Aborts when the turn is canceled or its active-attempt deadline expires. */
+  signal: AbortSignal;
 }
 
 export type RoomAgentRuntimeContextSource<TObservation = unknown, TKnowledge = unknown> = (
@@ -447,13 +454,27 @@ export class InMemoryRoomAgentRuntimeStore implements RoomAgentRuntimeStore, Roo
     return candidates[0] === undefined ? undefined : structuredClone(candidates[0]);
   }
 
-  async appendRunEvent(
+  async commitRunEvent(
+    nextRun: RoomAgentRunRecord,
     draft: RoomAgentRunJournalDraft,
   ): Promise<RoomAgentRunJournalAppendResult> {
+    assertRunRecord(nextRun);
     assertText(draft.id, 'room agent run event id');
     assertText(draft.runId, 'room agent run event runId');
+    assertText(draft.inputId, 'room agent run event inputId');
     const key = `${draft.roomId}\u0000${draft.runId}`;
-    if (!this.runs.has(key)) throw new Error(`unknown room agent run: ${draft.runId}`);
+    const currentRun = this.runs.get(key);
+    if (currentRun === undefined) throw new Error(`unknown room agent run: ${draft.runId}`);
+    if (nextRun.id !== draft.runId
+      || nextRun.roomId !== draft.roomId
+      || nextRun.channelId !== draft.channelId
+      || nextRun.agentId !== draft.agentId
+      || nextRun.latestInput.id !== draft.inputId) {
+      throw new Error('room agent run transition does not match its event');
+    }
+    if (nextRun.lastSequence !== currentRun.lastSequence) {
+      throw new Error('room agent run transition is stale');
+    }
     const fingerprint = canonicalJson(draft);
     const idKey = `${key}\u0000${draft.id}`;
     const existing = this.runEventIds.get(idKey);
@@ -461,17 +482,37 @@ export class InMemoryRoomAgentRuntimeStore implements RoomAgentRuntimeStore, Roo
       if (existing.fingerprint !== fingerprint) {
         throw new Error(`room agent run event id was reused: ${draft.id}`);
       }
-      return { entry: structuredClone(existing.entry), duplicate: true };
+      return {
+        entry: structuredClone(existing.entry),
+        run: structuredClone(currentRun),
+        duplicate: true,
+      };
     }
     const events = this.runEvents.get(key) ?? [];
     const entry: RoomAgentRunJournalEntry = {
       ...structuredClone(draft),
       sequence: events.length + 1,
     };
+    const settledRun: RoomAgentRunRecord = {
+      ...structuredClone(nextRun),
+      lastSequence: entry.sequence,
+      updatedAt: entry.recordedAt,
+    };
+    // These in-memory mutations are synchronous. Durable adapters implement
+    // the same operation in one database transaction.
     events.push(entry);
     this.runEvents.set(key, events);
     this.runEventIds.set(idKey, { fingerprint, entry });
-    return { entry: structuredClone(entry), duplicate: false };
+    this.runs.set(key, settledRun);
+    this.runInputs.set(
+      runInputKey(settledRun.roomId, settledRun.channelId, settledRun.latestInput.id),
+      settledRun.id,
+    );
+    return {
+      entry: structuredClone(entry),
+      run: structuredClone(settledRun),
+      duplicate: false,
+    };
   }
 
   async loadRunEvents(
@@ -599,7 +640,7 @@ class RoomSpeechArbiter {
 export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
   private stateValue?: RoomAgentRuntimeState;
   private initialization?: Promise<void>;
-  private activeTurn?: AbortController;
+  private activeTurn?: { controller: AbortController; runId?: string };
   private intakeLane: Promise<void> = Promise.resolve();
   private readonly speechArbiter: RoomSpeechArbiter;
 
@@ -677,7 +718,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
   async interrupt(reason = 'interrupted'): Promise<boolean> {
     const active = this.activeTurn;
     if (active === undefined) return false;
-    active.abort(reason);
+    active.controller.abort(reason);
     await this.speechArbiter.interrupt();
     return true;
   }
@@ -717,6 +758,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
         input: structuredClone(request.input),
         phase: this.requireState().phase,
         transcript,
+        signal: controller.signal,
       });
       const turn = await this.options.registry.respond(agentId, {
         ...context,
@@ -790,7 +832,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       });
       throw error;
     } finally {
-      if (this.activeTurn === controller) this.activeTurn = undefined;
+      if (this.activeTurn?.controller === controller) this.activeTurn = undefined;
     }
   }
 
@@ -876,7 +918,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       };
     }
 
-    const admission = await this.admitInput(request);
+    const admission = await this.admitInput(request, run.id);
     if (admission.duplicate) {
       const existing = await runStore.loadRunByInput(
         this.options.roomId,
@@ -936,7 +978,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     }
     await this.interrupt('run_resumed');
     const controller = new AbortController();
-    this.activeTurn = controller;
+    this.activeTurn = { controller, runId };
     const run = {
       ...stored,
       attempt: stored.attempt + 1,
@@ -954,8 +996,8 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     const runStore = this.requireRunStore();
     const run = await runStore.loadRun(this.options.roomId, runId);
     if (run === undefined || isTerminalRun(run.status)) return false;
-    if (this.activeTurn !== undefined) {
-      this.activeTurn.abort(reason);
+    if (this.activeTurn?.runId === runId) {
+      this.activeTurn.controller.abort(reason);
       await this.speechArbiter.interrupt();
     }
     await this.finishRun(run, 'canceled', { type: 'run_canceled', reason });
@@ -1033,7 +1075,9 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     let action: RoomAgentTurn['action'];
     let waiting = false;
     let completed = false;
-    const buffers = await this.restoreOutputBuffers(run.id);
+    const replayedEvents = await runStore.loadRunEvents(this.options.roomId, run.id);
+    const buffers = this.restoreOutputBuffers(replayedEvents);
+    await this.reconcileRecordedOutputs(run, replayedEvents);
     const deadlineRemaining = run.deadlineAt === undefined
       ? undefined
       : run.deadlineAt - this.wallNow();
@@ -1047,24 +1091,23 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       ? undefined
       : setTimeout(() => controller.abort('deadline_exceeded'), deadlineRemaining);
 
-    const append = async (event: RoomAgentRunJournalEvent): Promise<RoomAgentRunJournalEntry> => {
+    const append = async (
+      event: RoomAgentRunJournalEvent,
+      transition?: (current: RoomAgentRunRecord) => RoomAgentRunRecord,
+    ): Promise<RoomAgentRunJournalEntry> => {
       const eventId = this.options.createId();
       assertText(eventId, 'created room agent run event id');
-      const appended = await runStore.appendRunEvent({
+      const appended = await runStore.commitRunEvent(transition?.(run) ?? run, {
         id: eventId,
         runId: run.id,
         roomId: run.roomId,
         channelId: run.channelId,
         agentId: run.agentId,
+        inputId: run.latestInput.id,
         recordedAt: this.wallNow(),
         event: structuredClone(event),
       });
-      run = {
-        ...run,
-        lastSequence: appended.entry.sequence,
-        updatedAt: appended.entry.recordedAt,
-      };
-      await runStore.saveRun(run);
+      run = appended.run;
       await this.options.runObserver?.publish(appended.entry);
       await liveObserver?.(appended.entry);
       return appended.entry;
@@ -1142,6 +1185,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
         input: structuredClone(run.latestInput),
         phase: this.requireState().phase,
         transcript,
+        signal: controller.signal,
       });
       for await (const event of this.options.registry.run(run.agentId, {
         ...context,
@@ -1158,8 +1202,8 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
           : { continuation: { requestId: continuation.requestId, token: continuation.token } }),
       })) {
         if (controller.signal.aborted) break;
-        await append(event);
         if (event.type === 'progress') {
+          await append(event);
           const presentation = await this.options.progressPresenter?.present({
             run: structuredClone(run),
             progress: structuredClone(event.progress),
@@ -1183,27 +1227,30 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
             });
           }
         } else if (event.type === 'assistant_output') {
+          await append(event);
           await handleOutput(event, true);
         } else if (event.type === 'checkpoint') {
-          run = { ...run, checkpoint: structuredClone(event.value) };
-          await runStore.saveRun(run);
+          await append(event, (current) => ({
+            ...current,
+            checkpoint: structuredClone(event.value),
+          }));
         } else if (event.type === 'input_requested') {
           if ([...buffers.values()].some((buffer) => !buffer.closed)) {
             throw new Error('room agent requested input with an open assistant output');
           }
-          run = {
-            ...run,
+          await append(event, (current) => ({
+            ...current,
             status: 'waiting_for_input',
             deadlineAt: undefined,
             continuation: {
               requestId: event.requestId,
               token: event.continuationToken,
             },
-          };
-          await runStore.saveRun(run);
+          }));
           waiting = true;
           break;
         } else if (event.type === 'decision') {
+          await append(event);
           for (const utterance of event.decision.utterances ?? []) {
             const outputId = this.options.createId();
             assertText(outputId, 'created room agent decision output id');
@@ -1230,27 +1277,21 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
             action = { subject: structuredClone(subject), action: structuredClone(event.decision.action) };
           }
         } else if (event.type === 'completed') {
+          if ([...buffers.values()].some((buffer) => !buffer.closed)) {
+            throw new Error('room agent run completed with an open assistant output');
+          }
+          await append(event, (current) => ({
+            ...current,
+            status: 'completed',
+            continuation: undefined,
+          }));
           completed = true;
           break;
         }
       }
 
       if (controller.signal.aborted) {
-        const deadline = controller.signal.reason === 'deadline_exceeded';
-        const status: RoomAgentRunStatus = deadline ? 'deadline_exceeded' : 'canceled';
-        const terminal: RoomAgentRunJournalEvent = deadline
-          ? { type: 'deadline_exceeded' }
-          : {
-            type: 'run_canceled',
-            reason: typeof controller.signal.reason === 'string'
-              ? controller.signal.reason
-              : 'canceled',
-          };
-        const latest = await runStore.loadRun(run.roomId, run.id);
-        if (latest !== undefined && !isTerminalRun(latest.status)) {
-          await this.finishRun(run, status, terminal, liveObserver);
-        }
-        const settled = await runStore.loadRun(run.roomId, run.id) ?? { ...run, status };
+        const settled = await this.settleAbortedRun(run, controller, liveObserver);
         return { status: settled.status, agentId: run.agentId, run: settled, turn: null };
       }
 
@@ -1261,15 +1302,19 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       if ([...buffers.values()].some((buffer) => !buffer.closed)) {
         throw new Error('room agent run completed with an open assistant output');
       }
-      if (!completed) await append({ type: 'completed' });
-      run = { ...run, status: 'completed', continuation: undefined };
-      await runStore.saveRun(run);
+      if (!completed) {
+        await append({ type: 'completed' }, (current) => ({
+          ...current,
+          status: 'completed',
+          continuation: undefined,
+        }));
+      }
       const turn = makeRunTurn(run.agentId, recordedUtterances, interactions, action);
       return { status: 'completed', agentId: run.agentId, run, turn };
     } catch (error) {
       if (controller.signal.aborted) {
-        const latest = await runStore.loadRun(run.roomId, run.id) ?? run;
-        return { status: latest.status, agentId: run.agentId, run: latest, turn: null };
+        const settled = await this.settleAbortedRun(run, controller, liveObserver);
+        return { status: settled.status, agentId: run.agentId, run: settled, turn: null };
       }
       await this.finishRun(
         run,
@@ -1280,12 +1325,13 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       throw error;
     } finally {
       if (timer !== undefined) clearTimeout(timer);
-      if (this.activeTurn === controller) this.activeTurn = undefined;
+      if (this.activeTurn?.controller === controller) this.activeTurn = undefined;
     }
   }
 
-  private async restoreOutputBuffers(runId: string): Promise<Map<string, OutputBuffer>> {
-    const events = await this.requireRunStore().loadRunEvents(this.options.roomId, runId);
+  private restoreOutputBuffers(
+    events: readonly RoomAgentRunJournalEntry[],
+  ): Map<string, OutputBuffer> {
     const buffers = new Map<string, OutputBuffer>();
     for (const entry of events) {
       if (entry.event.type !== 'assistant_output') continue;
@@ -1307,6 +1353,52 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     return buffers;
   }
 
+  /**
+   * The journal is the source of truth. If an isolate died after committing a
+   * final recorded output but before transcript append, repair that boundary
+   * idempotently without presenting the output again.
+   */
+  private async reconcileRecordedOutputs(
+    run: RoomAgentRunRecord,
+    events: readonly RoomAgentRunJournalEntry[],
+  ): Promise<void> {
+    const outputs = new Map<string, OutputBuffer & { inputId: string }>();
+    for (const entry of events) {
+      if (entry.event.type !== 'assistant_output') continue;
+      const event = entry.event;
+      const current = outputs.get(event.outputId) ?? {
+        text: '',
+        purpose: event.purpose ?? 'answer',
+        history: event.history ?? ((event.purpose ?? 'answer') === 'progress'
+          ? 'ephemeral'
+          : 'record'),
+        audience: event.audience,
+        interruptible: event.interruptible ?? true,
+        closed: false,
+        inputId: entry.inputId,
+      };
+      current.text += event.delta;
+      current.history = event.history ?? current.history;
+      current.closed = event.final === true;
+      current.inputId = entry.inputId;
+      outputs.set(event.outputId, current);
+    }
+    for (const [outputId, output] of outputs) {
+      if (!output.closed || output.history !== 'record') continue;
+      assertText(output.text, 'reconciled room agent output');
+      await this.options.store.appendTranscript({
+        id: `${run.id}:output:${outputId}`,
+        roomId: run.roomId,
+        channelId: run.channelId,
+        turnId: output.inputId,
+        direction: 'output',
+        endpoint: { kind: 'agent', id: run.agentId },
+        text: output.text,
+        modality: 'generated',
+      });
+    }
+  }
+
   private async finishRun(
     run: RoomAgentRunRecord,
     status: Extract<RoomAgentRunStatus, 'canceled' | 'deadline_exceeded' | 'failed'>,
@@ -1315,28 +1407,52 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     liveObserver?: RoomAgentRunInput['onEvent'],
   ): Promise<void> {
     const runStore = this.requireRunStore();
+    const current = await runStore.loadRun(run.roomId, run.id);
+    if (current === undefined) throw new Error(`unknown room agent run: ${run.id}`);
+    if (isTerminalRun(current.status)) return;
     const eventId = this.options.createId();
     assertText(eventId, 'created room agent terminal event id');
-    const appended = await runStore.appendRunEvent({
+    const appended = await runStore.commitRunEvent({
+      ...current,
+      status,
+      continuation: undefined,
+      ...(event.type === 'run_failed' ? { failureCode: event.code } : {}),
+    }, {
       id: eventId,
       runId: run.id,
       roomId: run.roomId,
       channelId: run.channelId,
       agentId: run.agentId,
+      inputId: current.latestInput.id,
       recordedAt: this.wallNow(),
       event,
     });
-    const settled: RoomAgentRunRecord = {
-      ...run,
-      status,
-      updatedAt: appended.entry.recordedAt,
-      lastSequence: appended.entry.sequence,
-      continuation: undefined,
-      ...(event.type === 'run_failed' ? { failureCode: event.code } : {}),
-    };
-    await runStore.saveRun(settled);
     await this.options.runObserver?.publish(appended.entry);
     await liveObserver?.(appended.entry);
+  }
+
+  private async settleAbortedRun(
+    run: RoomAgentRunRecord,
+    controller: AbortController,
+    liveObserver?: RoomAgentRunInput['onEvent'],
+  ): Promise<RoomAgentRunRecord> {
+    const deadline = controller.signal.reason === 'deadline_exceeded';
+    const status: Extract<RoomAgentRunStatus, 'canceled' | 'deadline_exceeded'> = deadline
+      ? 'deadline_exceeded'
+      : 'canceled';
+    const terminal: Extract<RoomAgentRunJournalEvent,
+      { type: 'run_canceled' | 'deadline_exceeded' }> = deadline
+      ? { type: 'deadline_exceeded' }
+      : {
+        type: 'run_canceled',
+        reason: typeof controller.signal.reason === 'string'
+          ? controller.signal.reason
+          : 'canceled',
+      };
+    await this.finishRun(run, status, terminal, liveObserver);
+    const settled = await this.requireRunStore().loadRun(run.roomId, run.id);
+    if (settled === undefined) throw new Error(`unknown room agent run: ${run.id}`);
+    return settled;
   }
 
   private requireRunStore(): RoomAgentRunStore {
@@ -1362,6 +1478,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
 
   private async admitInput(
     request: RoomAgentRuntimeInput,
+    runId?: string,
   ): Promise<{ duplicate: true } | { duplicate: false; controller: AbortController }> {
     const operation = this.intakeLane.then(async () => {
       const inputAppend = await this.options.store.appendTranscript({
@@ -1380,7 +1497,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       if (inputAppend.duplicate) return { duplicate: true } as const;
       await this.interrupt('superseded_by_new_input');
       const controller = new AbortController();
-      this.activeTurn = controller;
+      this.activeTurn = { controller, ...(runId === undefined ? {} : { runId }) };
       return { duplicate: false, controller } as const;
     });
     this.intakeLane = operation.then(() => undefined, () => undefined);

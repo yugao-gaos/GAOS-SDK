@@ -211,6 +211,33 @@ describe('room agents', () => {
     expect(respond).not.toHaveBeenCalled();
   });
 
+  it('applies the same routed-interaction validation before invoking a run driver', async () => {
+    const run = vi.fn(async function* () { yield { type: 'completed' as const }; });
+    const router = new RoomInteractionRouter({ createId: () => 'wrong-target-1' });
+    const interaction = router.create(
+      'room-1',
+      'agents:audience-1:merchant',
+      { kind: 'participant', id: 'audience-1' },
+      {
+        targets: [{ kind: 'agent', id: 'merchant' }],
+        disclosure: { kind: 'room' },
+        payload: { kind: 'message', text: 'Hello.', modality: 'text' },
+      },
+    );
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'guide', label: 'Guide', role: 'guide' },
+      driver: { run },
+    }]);
+
+    const events = registry.run('guide', {
+      ...baseContext,
+      input: roomAgentInputFromInteraction(interaction),
+      interaction,
+    }, { id: 'run-1', attempt: 1, resumed: false });
+    await expect(events.next()).rejects.toThrow('does not target agent');
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it('copies descriptor metadata across the driver and registry boundaries', async () => {
     const registry = new RoomAgentRegistry<Observation>([{
       descriptor: {

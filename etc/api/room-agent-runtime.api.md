@@ -71,9 +71,9 @@ interface GameAgentRule {
 // @public
 export class InMemoryRoomAgentRuntimeStore implements RoomAgentRuntimeStore, RoomAgentRunStore {
     // (undocumented)
-    appendRunEvent(draft: RoomAgentRunJournalDraft): Promise<RoomAgentRunJournalAppendResult>;
-    // (undocumented)
     appendTranscript(draft: RoomAgentTranscriptDraft): Promise<RoomAgentTranscriptAppendResult>;
+    // (undocumented)
+    commitRunEvent(nextRun: RoomAgentRunRecord, draft: RoomAgentRunJournalDraft): Promise<RoomAgentRunJournalAppendResult>;
     // (undocumented)
     createRun(run: RoomAgentRunRecord): Promise<{
         run: RoomAgentRunRecord;
@@ -359,6 +359,8 @@ export interface RoomAgentRunJournalAppendResult {
     duplicate: boolean;
     // (undocumented)
     entry: RoomAgentRunJournalEntry;
+    // (undocumented)
+    run: RoomAgentRunRecord;
 }
 
 // @public (undocumented)
@@ -374,6 +376,7 @@ export interface RoomAgentRunJournalEntry {
     event: RoomAgentRunJournalEvent;
     // (undocumented)
     id: string;
+    inputId: string;
     // (undocumented)
     recordedAt: number;
     // (undocumented)
@@ -478,8 +481,7 @@ export type RoomAgentRunStatus = 'active' | 'waiting_for_input' | 'completed' | 
 
 // @public
 export interface RoomAgentRunStore {
-    // (undocumented)
-    appendRunEvent(event: RoomAgentRunJournalDraft): Promise<RoomAgentRunJournalAppendResult>;
+    commitRunEvent(run: RoomAgentRunRecord, event: RoomAgentRunJournalDraft): Promise<RoomAgentRunJournalAppendResult>;
     // (undocumented)
     createRun(run: RoomAgentRunRecord): Promise<{
         run: RoomAgentRunRecord;
@@ -531,6 +533,7 @@ export interface RoomAgentRuntimeContextRequest {
     phase?: string;
     // (undocumented)
     roomId: string;
+    signal: AbortSignal;
     // (undocumented)
     transcript: readonly RoomAgentTranscriptEntry[];
 }
