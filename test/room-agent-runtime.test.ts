@@ -52,6 +52,75 @@ function idFactory(): () => string {
   return () => `runtime-${++next}`;
 }
 
+function assertPlainJson(value: unknown, path = 'value'): void {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new TypeError(`${path} must contain only plain JSON values`);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      if (!(index in value)) throw new TypeError(`${path} must contain only plain JSON values`);
+      assertPlainJson(value[index], `${path}[${index}]`);
+    }
+    return;
+  }
+  if (typeof value === 'object') {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new TypeError(`${path} must contain only plain JSON values`);
+    }
+    for (const [key, child] of Object.entries(value)) {
+      assertPlainJson(child, `${path}.${key}`);
+    }
+    return;
+  }
+  throw new TypeError(`${path} must contain only plain JSON values`);
+}
+
+class JsonStrictRunStore extends InMemoryRoomAgentRuntimeStore {
+  readonly persistedRuns: Array<{
+    operation: 'admitRunInput' | 'createRun' | 'saveRun' | 'commitRunEvent';
+    run: RoomAgentRunRecord;
+  }> = [];
+
+  private record(
+    operation: 'admitRunInput' | 'createRun' | 'saveRun' | 'commitRunEvent',
+    run: RoomAgentRunRecord,
+  ): void {
+    assertPlainJson(run, 'run');
+    this.persistedRuns.push({ operation, run: structuredClone(run) });
+  }
+
+  override async admitRunInput(
+    input: RoomAgentTranscriptDraft,
+    run: RoomAgentRunRecord,
+  ): Promise<RoomAgentRunAdmissionResult> {
+    this.record('admitRunInput', run);
+    return await super.admitRunInput(input, run);
+  }
+
+  override async createRun(
+    run: RoomAgentRunRecord,
+  ): Promise<{ run: RoomAgentRunRecord; duplicate: boolean }> {
+    this.record('createRun', run);
+    return await super.createRun(run);
+  }
+
+  override async saveRun(run: RoomAgentRunRecord): Promise<boolean> {
+    this.record('saveRun', run);
+    return await super.saveRun(run);
+  }
+
+  override async commitRunEvent(
+    run: RoomAgentRunRecord,
+    event: RoomAgentRunJournalDraft,
+  ): Promise<RoomAgentRunJournalAppendResult> {
+    this.record('commitRunEvent', run);
+    return await super.commitRunEvent(run, event);
+  }
+}
+
 function activeRecoveryRun(id: string, channelId: string): RoomAgentRunRecord {
   return {
     schema: 'gaos.room-agent-run.v1',
@@ -449,7 +518,7 @@ describe('room agent runtime', () => {
         },
       },
     }]);
-    const store = new InMemoryRoomAgentRuntimeStore();
+    const store = new JsonStrictRunStore();
     const runtime = new RoomAgentRuntime({
       roomId: 'room-1',
       registry,
@@ -543,7 +612,7 @@ describe('room agent runtime', () => {
         },
       },
     }]);
-    const store = new InMemoryRoomAgentRuntimeStore();
+    const store = new JsonStrictRunStore();
     const runtime = new RoomAgentRuntime({
       roomId: 'room-1', registry, store, runStore: store,
       contextSource: contextSource(), createId: idFactory(), fallbackAgentId: 'oracle',
@@ -560,11 +629,11 @@ describe('room agent runtime', () => {
       run: {
         attempt: 1,
         deadlineMs: 100,
-        deadlineAt: undefined,
         checkpoint: { path: ['gate'] },
         continuation: { requestId: 'gate-detail', token: 'continue-1' },
       },
     });
+    expect('deadlineAt' in first.run).toBe(false);
 
     // Human waiting time does not consume the next active attempt's budget.
     wallClock = 50_000;
@@ -577,6 +646,7 @@ describe('room agent runtime', () => {
       status: 'completed',
       run: { id: first.run.id, attempt: 2, deadlineMs: 100, deadlineAt: 50_100 },
     });
+    expect('continuation' in second.run).toBe(false);
     expect(invocations).toEqual([
       expect.objectContaining({ id: first.run.id, attempt: 1, resumed: false }),
       expect.objectContaining({
@@ -641,6 +711,42 @@ describe('room agent runtime', () => {
     });
   });
 
+  it('persists implicit completion and failure as recursively plain JSON records', async () => {
+    const store = new JsonStrictRunStore();
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'oracle', label: 'Oracle', role: 'character' },
+      driver: {
+        run: async function* ({ input }) {
+          if (input.id === 'failure') throw new Error('provider failed');
+          yield {
+            type: 'assistant_output',
+            outputId: 'answer',
+            delta: 'Finished without an explicit completion event.',
+            final: true,
+          } as const;
+        },
+      },
+    }]);
+    const runtime = new RoomAgentRuntime({
+      roomId: 'room-1', registry, store, runStore: store,
+      contextSource: contextSource(), createId: idFactory(), fallbackAgentId: 'oracle',
+    });
+
+    await expect(runtime.handleRunInput({
+      channelId: 'implicit',
+      input: { id: 'implicit', speakerId: 'visitor-1', text: 'Finish', modality: 'text' },
+    })).resolves.toMatchObject({ status: 'completed' });
+    await expect(runtime.handleRunInput({
+      channelId: 'failure',
+      input: { id: 'failure', speakerId: 'visitor-1', text: 'Fail', modality: 'text' },
+    })).rejects.toThrow('provider failed');
+    await expect(store.loadRunByInput('room-1', 'failure', 'failure')).resolves.toMatchObject({
+      status: 'failed',
+      failureCode: 'run_processing_failed',
+    });
+    expect(store.persistedRuns.some(({ operation }) => operation === 'commitRunEvent')).toBe(true);
+  });
+
   it('records cooperative cancellation and deadline expiry as replayable terminal states', async () => {
     const registry = new RoomAgentRegistry<Observation>([{
       descriptor: { id: 'oracle', label: 'Oracle', role: 'character' },
@@ -653,7 +759,7 @@ describe('room agent runtime', () => {
         },
       },
     }]);
-    const store = new InMemoryRoomAgentRuntimeStore();
+    const store = new JsonStrictRunStore();
     const runtime = new RoomAgentRuntime({
       roomId: 'room-1', registry, store, runStore: store,
       contextSource: contextSource(), createId: idFactory(), fallbackAgentId: 'oracle',
@@ -693,7 +799,7 @@ describe('room agent runtime', () => {
 
   it('restores a durable checkpoint into an explicitly resumed active run', async () => {
     const seen: RoomAgentRunContext<Observation>['run'][] = [];
-    const store = new InMemoryRoomAgentRuntimeStore();
+    const store = new JsonStrictRunStore();
     const registry = new RoomAgentRegistry<Observation>([{
       descriptor: { id: 'oracle', label: 'Oracle', role: 'character' },
       driver: {

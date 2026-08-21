@@ -651,6 +651,21 @@ function runInputKey(roomId: string, channelId: string, inputId: string): string
   return `${roomId}\u0000${channelId}\u0000${inputId}`;
 }
 
+type RoomAgentRunOmittableField =
+  | 'continuation'
+  | 'deadlineAt'
+  | 'deadlineMs'
+  | 'failureCode';
+
+function omitRunFields(
+  run: RoomAgentRunRecord,
+  ...fields: readonly RoomAgentRunOmittableField[]
+): RoomAgentRunRecord {
+  const result = { ...run };
+  for (const field of fields) delete result[field];
+  return result;
+}
+
 function assertRunRecord(run: RoomAgentRunRecord): void {
   if (run?.schema !== ROOM_AGENT_RUN_SCHEMA) {
     throw new TypeError('room agent run schema is unsupported');
@@ -1156,16 +1171,14 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       }
       const now = this.wallNow();
       run = {
-        ...open,
+        ...omitRunFields(open, 'continuation', 'deadlineAt', 'deadlineMs', 'failureCode'),
         latestInput: structuredClone(request.input),
         attempt: open.attempt + 1,
         status: 'active',
         updatedAt: now,
         ...(deadlineMs === undefined || deadlineMs === 0
-          ? { deadlineMs: undefined, deadlineAt: undefined }
+          ? {}
           : { deadlineMs, deadlineAt: now + deadlineMs }),
-        continuation: undefined,
-        failureCode: undefined,
       };
     } else {
       supersededRunId = open?.id;
@@ -1453,9 +1466,8 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
             throw new Error('room agent requested input with an open assistant output');
           }
           await append(event, (current) => ({
-            ...current,
+            ...omitRunFields(current, 'deadlineAt'),
             status: 'waiting_for_input',
-            deadlineAt: undefined,
             continuation: {
               requestId: event.requestId,
               token: event.continuationToken,
@@ -1500,9 +1512,8 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
             throw new Error('room agent run completed with an open assistant output');
           }
           await append(event, (current) => ({
-            ...current,
+            ...omitRunFields(current, 'continuation'),
             status: 'completed',
-            continuation: undefined,
           }));
           completed = true;
           break;
@@ -1523,9 +1534,8 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       }
       if (!completed) {
         await append({ type: 'completed' }, (current) => ({
-          ...current,
+          ...omitRunFields(current, 'continuation'),
           status: 'completed',
-          continuation: undefined,
         }));
       }
       const turn = makeRunTurn(run.agentId, recordedUtterances, interactions, action);
@@ -1632,9 +1642,8 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     const eventId = this.options.createId();
     assertText(eventId, 'created room agent terminal event id');
     const appended = await runStore.commitRunEvent({
-      ...current,
+      ...omitRunFields(current, 'continuation', 'failureCode'),
       status,
-      continuation: undefined,
       ...(event.type === 'run_failed' ? { failureCode: event.code } : {}),
     }, {
       id: eventId,
