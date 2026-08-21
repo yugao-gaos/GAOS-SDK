@@ -325,6 +325,83 @@ describe('RFC-012 checkpoint and compaction', () => {
     expect(restored.observe('solo')).toEqual(kernel.observe('solo'));
   });
 
+  it('restores directly through a protocol-only session view', () => {
+    const calls = {
+      init: 0,
+      sessionView: 0,
+      view: 0,
+      viewFor: 0,
+    };
+    const trackedReducer: TickReducer<null, State, SessionView> = {
+      init: () => {
+        calls.init++;
+        return { total: 0, actionsUsed: 0 };
+      },
+      advance: reducer.advance,
+      sessionView: (state) => {
+        calls.sessionView++;
+        return {
+          status: state.total >= 3 ? 'ended' : 'playing',
+          activeSeat: 'solo',
+        };
+      },
+      view: (state) => {
+        calls.view++;
+        return {
+          status: state.total >= 3 ? 'ended' : 'playing',
+          activeSeat: 'solo',
+        };
+      },
+      viewFor: (state) => {
+        calls.viewFor++;
+        return {
+          status: state.total >= 3 ? 'ended' : 'playing',
+          activeSeat: 'solo',
+        };
+      },
+      replayMetrics: reducer.replayMetrics,
+    };
+    const configured = { ...options(), reducer: trackedReducer };
+    const kernel = createSessionKernel(configured);
+    const checkpoint = kernel.checkpoint();
+    calls.init = 0;
+    calls.sessionView = 0;
+    calls.view = 0;
+    calls.viewFor = 0;
+
+    const restored = rehydrateKernelFromCheckpoint(
+      configured,
+      checkpoint,
+      [],
+    );
+
+    expect(restored.observe('solo')).toEqual({
+      status: 'playing',
+      activeSeat: 'solo',
+    });
+    expect(calls).toEqual({
+      init: 0,
+      sessionView: 1,
+      view: 0,
+      viewFor: 0,
+    });
+
+    expect(() => rehydrateKernelFromCheckpoint(
+      {
+        ...configured,
+        reducer: {
+          ...trackedReducer,
+          sessionView: () => ({
+            status: 'playing',
+            activeSeat: 'undeclared',
+          }),
+        },
+      },
+      checkpoint,
+      [],
+    )).toThrow(/undeclared seats/);
+  });
+
   it('restores signed interest scopes and their permanent identities', async () => {
     const pair = await generateSubmissionKeyPair();
     const seatKeys = [{

@@ -143,6 +143,12 @@ interface ReducerBase<
 > {
   init(level: TLevel, seed: number): TState;
   view(state: TState): TView;
+  /**
+   * Optional protocol-only projection. It must report the same status, stars,
+   * participation, and outcome as `view`, without constructing the product's
+   * full observation surface.
+   */
+  sessionView?(state: TState): SessionView;
   /** Optional per-seat observation. Absent means perfect information. */
   viewFor?(state: TState, seat: string): TView;
   /**
