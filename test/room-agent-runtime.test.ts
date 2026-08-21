@@ -52,6 +52,53 @@ function idFactory(): () => string {
   return () => `runtime-${++next}`;
 }
 
+function activeRecoveryRun(id: string, channelId: string): RoomAgentRunRecord {
+  return {
+    schema: 'gaos.room-agent-run.v1',
+    id,
+    roomId: 'room-1',
+    channelId,
+    agentId: 'oracle',
+    rootInputId: 'input-1',
+    latestInput: {
+      id: 'input-1', speakerId: 'visitor-1', text: 'Recover', modality: 'text',
+    },
+    attempt: 1,
+    status: 'active',
+    startedAt: 1,
+    updatedAt: 1,
+    lastSequence: 0,
+  };
+}
+
+async function seedRecoveryOutput(
+  store: InMemoryRoomAgentRuntimeStore,
+  run: RoomAgentRunRecord,
+  event: Extract<RoomAgentRunJournalDraft['event'], { type: 'assistant_output' }>,
+): Promise<void> {
+  await store.createRun(run);
+  await store.appendTranscript({
+    id: run.latestInput.id,
+    roomId: run.roomId,
+    channelId: run.channelId,
+    turnId: run.latestInput.id,
+    direction: 'input',
+    endpoint: { kind: 'participant', id: run.latestInput.speakerId },
+    text: run.latestInput.text,
+    modality: run.latestInput.modality,
+  });
+  await store.commitRunEvent(run, {
+    id: `${run.id}:crash-output`,
+    runId: run.id,
+    roomId: run.roomId,
+    channelId: run.channelId,
+    agentId: run.agentId,
+    inputId: run.latestInput.id,
+    recordedAt: 2,
+    event,
+  });
+}
+
 describe('room agent runtime', () => {
   it('routes explicit address, participant focus, phase policy, then fallback', async () => {
     const calls: string[] = [];
@@ -437,7 +484,9 @@ describe('room agent runtime', () => {
       type: 'assistant_output', purpose: 'progress', history: 'ephemeral', final: true,
     });
     expect(firstDelta.value?.event).toMatchObject({
-      type: 'assistant_output', outputId: 'answer-1', delta: 'The first ',
+      type: 'assistant_output',
+      outputId: 'gaos-output-attempt:1:driver:answer-1',
+      delta: 'The first ',
     });
     let settled = false;
     void execution.result.then(() => { settled = true; });
@@ -471,7 +520,7 @@ describe('room agent runtime', () => {
             yield { type: 'checkpoint', value: { path: ['gate'] } };
             yield {
               type: 'assistant_output',
-              outputId: 'follow-up',
+              outputId: 'message',
               delta: 'What is beyond the gate?',
               final: true,
               purpose: 'question',
@@ -485,7 +534,7 @@ describe('room agent runtime', () => {
           }
           yield {
             type: 'assistant_output',
-            outputId: 'interpretation',
+            outputId: 'message',
             delta: `You found ${context.input.text}.`,
             final: true,
           };
@@ -548,6 +597,14 @@ describe('room agent runtime', () => {
       'assistant_output',
       'completed',
     ]);
+    const outputIds = replay.events.flatMap(({ event }) => (
+      event.type === 'assistant_output' ? [event.outputId] : []
+    ));
+    expect(outputIds).toHaveLength(2);
+    expect(outputIds[0]).not.toBe(outputIds[1]);
+    const transcript = await store.loadTranscript('room-1', 'private');
+    expect(transcript.filter(({ direction }) => direction === 'output').map(({ text }) => text))
+      .toEqual(['What is beyond the gate?', 'You found a garden.']);
   });
 
   it('adapts legacy respond drivers to durable runs', async () => {
@@ -889,6 +946,149 @@ describe('room agent runtime', () => {
       { id: `${active.id}:output:answer-1`, text: 'Recovered answer.', turnId: 'input-1' },
     ]);
     expect(speak).not.toHaveBeenCalled();
+  });
+
+  it('suppresses a closed logical output when a recovery attempt re-yields it', async () => {
+    const store = new InMemoryRoomAgentRuntimeStore();
+    const active = activeRecoveryRun('run-closed-output', 'closed-output');
+    await seedRecoveryOutput(store, active, {
+      type: 'assistant_output',
+      outputId: 'gaos-output-attempt:1:driver:stable-answer',
+      delta: 'Already committed.',
+      final: true,
+      purpose: 'answer',
+      history: 'record',
+    });
+    await store.appendTranscript({
+      id: `${active.id}:output:gaos-output-attempt:1:driver:stable-answer`,
+      roomId: active.roomId,
+      channelId: active.channelId,
+      turnId: active.latestInput.id,
+      direction: 'output',
+      endpoint: { kind: 'agent', id: active.agentId },
+      text: 'Already committed.',
+      modality: 'generated',
+    });
+    const speak = vi.fn(async () => undefined);
+    const observed: RoomAgentRunJournalEntry[] = [];
+    const invocations: RoomAgentRunContext<Observation>['run'][] = [];
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'oracle', label: 'Oracle', role: 'character' },
+      driver: {
+        run: async function* (context) {
+          invocations.push(structuredClone(context.run));
+          yield {
+            type: 'assistant_output',
+            outputId: 'stable-answer',
+            delta: 'Already committed.',
+            final: true,
+            purpose: 'answer',
+            history: 'record',
+          };
+          yield {
+            type: 'assistant_output',
+            outputId: 'fresh-follow-up',
+            delta: 'A fresh follow-up.',
+            final: true,
+            purpose: 'question',
+            history: 'record',
+          };
+          yield { type: 'completed' };
+        },
+      },
+    }]);
+    const runtime = new RoomAgentRuntime({
+      roomId: active.roomId, registry, store, runStore: store,
+      contextSource: contextSource(), createId: idFactory(), fallbackAgentId: 'oracle',
+      speech: { speak },
+      runObserver: { publish: async (entry) => { observed.push(entry); } },
+    });
+
+    await expect(store.loadRun(active.roomId, active.id)).resolves.toMatchObject({
+      status: 'active', attempt: 1,
+    });
+    const result = await runtime.resumeRun(active.id);
+    expect(result).toMatchObject({ status: 'completed', run: { attempt: 2 } });
+    expect(result.turn?.utterances).toEqual([
+      expect.objectContaining({ text: 'A fresh follow-up.' }),
+    ]);
+    expect(invocations).toEqual([expect.objectContaining({ attempt: 2, resumed: true })]);
+    expect(speak).toHaveBeenCalledTimes(1);
+    expect(speak).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'A fresh follow-up.' }),
+      expect.any(AbortSignal),
+    );
+    expect(observed.map(({ event }) => event.type)).toEqual([
+      'assistant_output',
+      'completed',
+    ]);
+    const transcript = await store.loadTranscript(active.roomId, active.channelId);
+    expect(transcript.filter(({ direction }) => direction === 'output').map(({ text }) => text))
+      .toEqual(['Already committed.', 'A fresh follow-up.']);
+    const replay = await runtime.replayRun(active.id);
+    const outputs = replay.events.flatMap(({ event }) => (
+      event.type === 'assistant_output' ? [event] : []
+    ));
+    expect(outputs.map(({ delta }) => delta)).toEqual([
+      'Already committed.',
+      'A fresh follow-up.',
+    ]);
+  });
+
+  it('abandons an incomplete prior output before a recovery attempt streams it again', async () => {
+    const store = new InMemoryRoomAgentRuntimeStore();
+    const active = activeRecoveryRun('run-partial-output', 'partial-output');
+    await seedRecoveryOutput(store, active, {
+      type: 'assistant_output',
+      outputId: 'gaos-output-attempt:1:driver:stable-answer',
+      delta: 'Abandoned prefix. ',
+      purpose: 'answer',
+      history: 'record',
+    });
+    const speak = vi.fn(async () => undefined);
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'oracle', label: 'Oracle', role: 'character' },
+      driver: {
+        run: async function* () {
+          yield {
+            type: 'assistant_output',
+            outputId: 'stable-answer',
+            delta: 'Recovered whole answer.',
+            final: true,
+            purpose: 'answer',
+            history: 'record',
+          };
+          yield { type: 'completed' };
+        },
+      },
+    }]);
+    const runtime = new RoomAgentRuntime({
+      roomId: active.roomId, registry, store, runStore: store,
+      contextSource: contextSource(), createId: idFactory(), fallbackAgentId: 'oracle',
+      speech: { speak },
+    });
+
+    await expect(runtime.resumeRun(active.id)).resolves.toMatchObject({
+      status: 'completed',
+      turn: { utterances: [{ text: 'Recovered whole answer.' }] },
+    });
+    expect(speak).toHaveBeenCalledTimes(1);
+    expect(speak).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'Recovered whole answer.' }),
+      expect.any(AbortSignal),
+    );
+    const transcript = await store.loadTranscript(active.roomId, active.channelId);
+    expect(transcript.filter(({ direction }) => direction === 'output')).toEqual([
+      expect.objectContaining({ text: 'Recovered whole answer.' }),
+    ]);
+    const replay = await runtime.replayRun(active.id);
+    const outputs = replay.events.flatMap(({ event }) => (
+      event.type === 'assistant_output' ? [event] : []
+    ));
+    expect(outputs).toHaveLength(2);
+    expect(outputs[0]).toMatchObject({ delta: 'Abandoned prefix. ' });
+    expect(outputs[0]).not.toHaveProperty('final');
+    expect(outputs[0]?.outputId).not.toBe(outputs[1]?.outputId);
   });
 
   it('recovers an atomically admitted input after caller loss and deduplicates exact retry', async () => {

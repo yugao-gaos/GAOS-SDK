@@ -180,6 +180,12 @@ checkpoint after a host restart. `cancelRun()` and persisted epoch deadlines
 produce replayable terminal states. `replayRun()` returns ordered events without
 replaying speech, cues, actions, or provider calls.
 
+Driver `assistant_output.outputId` values are logical IDs local to an attempt.
+The runtime qualifies them with an opaque attempt namespace in journal and live
+events. On crash recovery, already-closed logical outputs are reconciled but not
+presented or recorded again; incomplete prior output remains replayable crash
+evidence but is abandoned before the resumed attempt begins streaming.
+
 ```ts
 import {
   InMemoryRoomAgentRuntimeStore,

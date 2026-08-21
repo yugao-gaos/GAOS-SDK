@@ -1221,8 +1221,17 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     let waiting = false;
     let completed = false;
     const replayedEvents = await runStore.loadRunEvents(this.options.roomId, run.id);
-    const buffers = this.restoreOutputBuffers(replayedEvents);
     await this.reconcileRecordedOutputs(run, replayedEvents);
+    const recoveredBuffers = this.restoreOutputBuffers(replayedEvents.filter(
+      (entry) => entry.inputId === run.latestInput.id,
+    ));
+    const closedRecoveredOutputIds = new Set([...recoveredBuffers]
+      .filter(([, buffer]) => buffer.closed)
+      .map(([outputId]) => logicalRunOutputId(outputId)));
+    // Output assembly is local to this invocation. Incomplete buffers from a
+    // prior attempt remain journal evidence but cannot contaminate or block
+    // the recovery attempt.
+    const buffers = new Map<string, OutputBuffer>();
     if (controller.signal.aborted) {
       try {
         const settled = await this.settleAbortedRun(run, controller, liveObserver);
@@ -1370,7 +1379,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
             const audience = clampRunAudience(descriptor, presentation.utterance.audience);
             await handleOutput({
               type: 'assistant_output',
-              outputId,
+              outputId: qualifyRunOutputId(run.attempt, 'runtime', outputId),
               delta: presentation.utterance.text,
               final: true,
               purpose: 'progress',
@@ -1380,8 +1389,13 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
             });
           }
         } else if (event.type === 'assistant_output') {
-          await append(event);
-          await handleOutput(event, true);
+          if (resumed && closedRecoveredOutputIds.has(event.outputId)) continue;
+          const scopedEvent = {
+            ...event,
+            outputId: qualifyRunOutputId(run.attempt, 'driver', event.outputId),
+          };
+          await append(scopedEvent);
+          await handleOutput(scopedEvent, true);
         } else if (event.type === 'checkpoint') {
           await append(event, (current) => ({
             ...current,
@@ -1409,7 +1423,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
             assertText(outputId, 'created room agent decision output id');
             await handleOutput({
               type: 'assistant_output',
-              outputId,
+              outputId: qualifyRunOutputId(run.attempt, 'runtime', outputId),
               delta: utterance.text,
               final: true,
               purpose: 'answer',
@@ -1715,6 +1729,28 @@ type DurableRunAdmission =
     controller: AbortController;
     continuation?: RoomAgentRunRecord['continuation'];
   };
+
+const RUN_OUTPUT_ATTEMPT_PREFIX = 'gaos-output-attempt:';
+
+/** Fixed-overhead, injective attempt namespace; consumers treat the result as opaque. */
+function qualifyRunOutputId(
+  attempt: number,
+  source: 'driver' | 'runtime',
+  outputId: string,
+): string {
+  return `${RUN_OUTPUT_ATTEMPT_PREFIX}${attempt}:${source}:${outputId}`;
+}
+
+/** Recover the driver-local ID from runtime-qualified or legacy journal output. */
+function logicalRunOutputId(outputId: string): string {
+  if (!outputId.startsWith(RUN_OUTPUT_ATTEMPT_PREFIX)) return outputId;
+  const separator = outputId.indexOf(':', RUN_OUTPUT_ATTEMPT_PREFIX.length);
+  if (separator < 0) return outputId;
+  const attempt = Number(outputId.slice(RUN_OUTPUT_ATTEMPT_PREFIX.length, separator));
+  if (!Number.isSafeInteger(attempt) || attempt < 1) return outputId;
+  const remainder = outputId.slice(separator + 1);
+  return remainder.startsWith('driver:') ? remainder.slice('driver:'.length) : outputId;
+}
 
 interface OutputBuffer {
   text: string;

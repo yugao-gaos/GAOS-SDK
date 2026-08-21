@@ -52,9 +52,12 @@ A streaming driver implements `run(context)` and yields `RoomAgentRunEvent`:
 - `decision` — normalized utterances, interactions, or one action proposal;
 - `completed` — explicit successful termination.
 
-`assistant_output` deltas sharing an `outputId` form one message. `final: true`
-closes it. Different output IDs are distinct assistant messages and may be
-answers, questions, or progress presentation.
+Within one driver invocation, `assistant_output` deltas sharing an `outputId`
+form one message and `final: true` closes it. Driver output IDs are logical and
+attempt-local. The runtime adds a collision-free attempt namespace before
+journaling or live delivery; consumers must treat that qualified ID as opaque.
+This lets a continuation reuse the same logical ID for a new message without
+joining it to the prior attempt.
 
 ```ts
 const driver = {
@@ -112,7 +115,13 @@ The journal is the source of truth for recorded assistant outputs. On resume,
 the runtime idempotently reconciles any closed `history: 'record'` output into
 the channel transcript before invoking the driver. This repairs an isolate loss
 between the journal commit and transcript append without re-speaking or
-otherwise re-presenting the output.
+otherwise re-presenting the output. If the recovery driver re-yields a logical
+ID already proven closed for the same input, the runtime suppresses it before
+journaling, live delivery, transcript recording, or speech. An incomplete
+prior-attempt output remains in the journal as crash evidence but is abandoned:
+it is excluded from current completion checks and cannot prefix a freshly
+streamed recovery output. A recovery driver uses the same logical ID when
+retrying the same message and a new logical ID for genuinely new output.
 
 Durability of the ledger does not serialize a JavaScript closure. After an
 isolate or process restart, the host calls `resumeRun()`. The driver is invoked
