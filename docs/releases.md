@@ -30,8 +30,9 @@ agent contracts. No separate v0.27 or v0.29 package was published.
   deterministic audience polls, and optional actor/seat-bound action proposals
   without weakening ordinary command authority.
 - The additive `./room-agent-runtime` surface handles final-text routing,
-  channel-partitioned transcript persistence, cancellation, one speech lane,
-  captions, operational events, and reconnect behind host adapters.
+  authenticated disclosure, channel-partitioned transcript persistence and
+  provider cancellation, one room-global speech lane, captions, operational
+  events, and reconnect behind host adapters.
 - The additive `./presentation-cues` surface carries ordered, idempotent
   product effects to browser and native renderers with acknowledgements,
   bounded replay repair, and emergency interruption.

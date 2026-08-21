@@ -17,9 +17,11 @@ checkpoint, deadline, cancellation state, and optional continuation request.
 The live API exposes each durably appended event immediately so voice, chat,
 browser, and native hosts can begin presentation while the task continues.
 
-The existing `RoomAgentRuntime.handleFinalInput()` behavior is unchanged.
-`handleRunInput()` and `startRun()` opt into the new lifecycle, and a legacy
-`respond()` driver is automatically adapted into one decision plus completion.
+The existing `RoomAgentRuntime.handleFinalInput()` one-turn lifecycle is
+unchanged. All runtime entry points share RFC-021's explicit authenticated
+disclosure input. `handleRunInput()` and `startRun()` opt into the new
+lifecycle, and a legacy `respond()` driver is automatically adapted into one
+decision plus completion.
 
 ## 2 — Ownership boundary
 
@@ -216,3 +218,7 @@ or only when `final` closes the message.
 8. Replaying events does not repeat speech, cues, actions, or provider calls.
 9. A continuation token correlates a waiting run; it is not authentication.
 10. Checkpoints contain only product-approved, serializable recovery state.
+11. A durable run persists its authenticated disclosure, and continuation or
+    idempotent retry cannot widen it under the same input identity.
+12. Admission, supersession, and cancellation are isolated by channel;
+    unrelated durable provider work remains active.
