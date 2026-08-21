@@ -125,8 +125,12 @@ export interface RoomAgentRunStore {
   ): Promise<RoomAgentRunAdmissionResult>;
   /** Recovery/import seam; fresh authenticated input uses `admitRunInput`. */
   createRun(run: RoomAgentRunRecord): Promise<{ run: RoomAgentRunRecord; duplicate: boolean }>;
-  /** Recovery-attempt metadata seam; event transitions use `commitRunEvent`. */
-  saveRun(run: RoomAgentRunRecord): Promise<void>;
+  /**
+   * Compare-and-set recovery-attempt metadata. Returns false if the stored run
+   * is no longer active with the same identity, input, and journal sequence,
+   * or if `run.attempt` is not exactly the next attempt.
+   */
+  saveRun(run: RoomAgentRunRecord): Promise<boolean>;
   loadRun(roomId: string, runId: string): Promise<RoomAgentRunRecord | undefined>;
   loadRunByInput(
     roomId: string,
@@ -517,12 +521,27 @@ export class InMemoryRoomAgentRuntimeStore implements RoomAgentRuntimeStore, Roo
     return { run: structuredClone(run), duplicate: false };
   }
 
-  async saveRun(run: RoomAgentRunRecord): Promise<void> {
+  async saveRun(run: RoomAgentRunRecord): Promise<boolean> {
     assertRunRecord(run);
     const key = `${run.roomId}\u0000${run.id}`;
-    if (!this.runs.has(key)) throw new Error(`unknown room agent run: ${run.id}`);
+    const current = this.runs.get(key);
+    if (current === undefined) throw new Error(`unknown room agent run: ${run.id}`);
+    if (run.status !== 'active') {
+      throw new Error('room agent recovery attempt must be active');
+    }
+    if (current.status !== 'active'
+      || run.channelId !== current.channelId
+      || run.agentId !== current.agentId
+      || run.rootInputId !== current.rootInputId
+      || canonicalJson(run.latestInput) !== canonicalJson(current.latestInput)
+      || run.startedAt !== current.startedAt
+      || run.attempt !== current.attempt + 1
+      || run.lastSequence !== current.lastSequence) {
+      return false;
+    }
     this.runs.set(key, structuredClone(run));
     this.runInputs.set(runInputKey(run.roomId, run.channelId, run.latestInput.id), run.id);
+    return true;
   }
 
   async loadRun(roomId: string, runId: string): Promise<RoomAgentRunRecord | undefined> {
@@ -941,91 +960,13 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
   async handleRunInput(request: RoomAgentRunInput): Promise<RoomAgentRunResult> {
     await this.initialize();
     this.assertRuntimeInput(request);
-    const runStore = this.requireRunStore();
-    const agentId = this.resolveAgent(request.input);
-    const duplicate = await runStore.loadRunByInput(
-      this.options.roomId,
-      request.channelId,
-      request.input.id,
+    const admission = await this.withIntakeLane(
+      async () => await this.admitDurableRunInput(request),
     );
-    if (duplicate !== undefined) {
-      const retried = await runStore.admitRunInput(
-        this.inputTranscriptDraft(request),
-        duplicate,
-      );
-      return {
-        status: 'duplicate',
-        agentId: retried.run.agentId,
-        run: retried.run,
-        turn: null,
-      };
-    }
-
-    const open = await runStore.loadOpenRun(this.options.roomId, request.channelId);
-    let continuation: RoomAgentRunRecord['continuation'];
-    let run: RoomAgentRunRecord;
-    let supersededRunId: string | undefined;
-    if (request.continuation !== undefined) {
-      if (open === undefined
-        || open.id !== request.continuation.runId
-        || open.status !== 'waiting_for_input'
-        || open.continuation?.token !== request.continuation.token) {
-        throw new Error('room agent continuation does not match a waiting run');
-      }
-    }
-    const continuesOpen = open?.status === 'waiting_for_input'
-      && open.agentId === agentId
-      && (request.continuation === undefined || request.continuation.runId === open.id);
-    if (continuesOpen && open !== undefined) {
-      continuation = open.continuation;
-      const deadlineMs = request.deadlineMs ?? open.deadlineMs ?? this.options.runDeadlineMs;
-      if (deadlineMs !== undefined
-        && (!Number.isFinite(deadlineMs) || deadlineMs < 0)) {
-        throw new RangeError('room agent run deadlineMs must be non-negative');
-      }
-      const now = this.wallNow();
-      run = {
-        ...open,
-        latestInput: structuredClone(request.input),
-        attempt: open.attempt + 1,
-        status: 'active',
-        updatedAt: now,
-        ...(deadlineMs === undefined || deadlineMs === 0
-          ? { deadlineMs: undefined, deadlineAt: undefined }
-          : { deadlineMs, deadlineAt: now + deadlineMs }),
-        continuation: undefined,
-        failureCode: undefined,
-      };
-    } else {
-      supersededRunId = open?.id;
-      const now = this.wallNow();
-      const deadlineMs = request.deadlineMs ?? this.options.runDeadlineMs;
-      if (deadlineMs !== undefined
-        && (!Number.isFinite(deadlineMs) || deadlineMs < 0)) {
-        throw new RangeError('room agent run deadlineMs must be non-negative');
-      }
-      const runId = this.options.createId();
-      assertText(runId, 'created room agent run id');
-      run = {
-        schema: ROOM_AGENT_RUN_SCHEMA,
-        id: runId,
-        roomId: this.options.roomId,
-        channelId: request.channelId,
-        agentId,
-        rootInputId: request.input.id,
-        latestInput: structuredClone(request.input),
-        attempt: 1,
-        status: 'active',
-        startedAt: now,
-        updatedAt: now,
-        ...(deadlineMs === undefined || deadlineMs === 0
-          ? {}
-          : { deadlineMs, deadlineAt: now + deadlineMs }),
-        lastSequence: 0,
-      };
-    }
-
-    const admission = await runStore.admitRunInput(this.inputTranscriptDraft(request), run);
+    // Admissions already queued behind this one finish their cancellation and
+    // controller handoff before an older run can enter provider work. The run
+    // itself still executes outside the intake lane.
+    await this.intakeLane;
     if (admission.duplicate) {
       return {
         status: 'duplicate',
@@ -1034,17 +975,10 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
         turn: null,
       };
     }
-    run = admission.run;
-    if (supersededRunId !== undefined) {
-      await this.cancelRun(supersededRunId, 'superseded_by_new_input');
-    }
-    await this.interrupt('superseded_by_new_input');
-    const controller = new AbortController();
-    this.activeTurn = { controller, runId: run.id };
     return await this.executeRun(
-      run,
-      controller,
-      continuation,
+      admission.run,
+      admission.controller,
+      admission.continuation,
       false,
       request.onEvent,
     );
@@ -1088,7 +1022,14 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       attempt: stored.attempt + 1,
       updatedAt: this.wallNow(),
     };
-    await runStore.saveRun(run);
+    const acquired = await runStore.saveRun(run);
+    if (!acquired) {
+      controller.abort('resume_ownership_lost');
+      if (this.activeTurn?.controller === controller) this.activeTurn = undefined;
+      const current = await runStore.loadRun(this.options.roomId, runId);
+      if (current === undefined) throw new Error(`unknown room agent run: ${runId}`);
+      return { status: current.status, agentId: current.agentId, run: current, turn: null };
+    }
     return await this.executeRun(run, controller, undefined, true);
   }
 
@@ -1165,6 +1106,104 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     throw new Error('room agent runtime could not resolve a visible agent');
   }
 
+  private async admitDurableRunInput(
+    request: RoomAgentRunInput,
+  ): Promise<DurableRunAdmission> {
+    const runStore = this.requireRunStore();
+    const agentId = this.resolveAgent(request.input);
+    const duplicate = await runStore.loadRunByInput(
+      this.options.roomId,
+      request.channelId,
+      request.input.id,
+    );
+    if (duplicate !== undefined) {
+      const retried = await runStore.admitRunInput(
+        this.inputTranscriptDraft(request),
+        duplicate,
+      );
+      return { duplicate: true, run: retried.run };
+    }
+
+    const open = await runStore.loadOpenRun(this.options.roomId, request.channelId);
+    let continuation: RoomAgentRunRecord['continuation'];
+    let run: RoomAgentRunRecord;
+    let supersededRunId: string | undefined;
+    if (request.continuation !== undefined) {
+      if (open === undefined
+        || open.id !== request.continuation.runId
+        || open.status !== 'waiting_for_input'
+        || open.continuation?.token !== request.continuation.token) {
+        throw new Error('room agent continuation does not match a waiting run');
+      }
+    }
+    const continuesOpen = open?.status === 'waiting_for_input'
+      && open.agentId === agentId
+      && (request.continuation === undefined || request.continuation.runId === open.id);
+    if (continuesOpen && open !== undefined) {
+      continuation = open.continuation;
+      const deadlineMs = request.deadlineMs ?? open.deadlineMs ?? this.options.runDeadlineMs;
+      if (deadlineMs !== undefined
+        && (!Number.isFinite(deadlineMs) || deadlineMs < 0)) {
+        throw new RangeError('room agent run deadlineMs must be non-negative');
+      }
+      const now = this.wallNow();
+      run = {
+        ...open,
+        latestInput: structuredClone(request.input),
+        attempt: open.attempt + 1,
+        status: 'active',
+        updatedAt: now,
+        ...(deadlineMs === undefined || deadlineMs === 0
+          ? { deadlineMs: undefined, deadlineAt: undefined }
+          : { deadlineMs, deadlineAt: now + deadlineMs }),
+        continuation: undefined,
+        failureCode: undefined,
+      };
+    } else {
+      supersededRunId = open?.id;
+      const now = this.wallNow();
+      const deadlineMs = request.deadlineMs ?? this.options.runDeadlineMs;
+      if (deadlineMs !== undefined
+        && (!Number.isFinite(deadlineMs) || deadlineMs < 0)) {
+        throw new RangeError('room agent run deadlineMs must be non-negative');
+      }
+      const runId = this.options.createId();
+      assertText(runId, 'created room agent run id');
+      run = {
+        schema: ROOM_AGENT_RUN_SCHEMA,
+        id: runId,
+        roomId: this.options.roomId,
+        channelId: request.channelId,
+        agentId,
+        rootInputId: request.input.id,
+        latestInput: structuredClone(request.input),
+        attempt: 1,
+        status: 'active',
+        startedAt: now,
+        updatedAt: now,
+        ...(deadlineMs === undefined || deadlineMs === 0
+          ? {}
+          : { deadlineMs, deadlineAt: now + deadlineMs }),
+        lastSequence: 0,
+      };
+    }
+
+    const admission = await runStore.admitRunInput(this.inputTranscriptDraft(request), run);
+    if (admission.duplicate) return { duplicate: true, run: admission.run };
+    if (supersededRunId !== undefined) {
+      await this.cancelRun(supersededRunId, 'superseded_by_new_input');
+    }
+    await this.interrupt('superseded_by_new_input');
+    const controller = new AbortController();
+    this.activeTurn = { controller, runId: admission.run.id };
+    return {
+      duplicate: false,
+      run: admission.run,
+      controller,
+      ...(continuation === undefined ? {} : { continuation }),
+    };
+  }
+
   private async executeRun(
     initialRun: RoomAgentRunRecord,
     controller: AbortController,
@@ -1182,6 +1221,14 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     const replayedEvents = await runStore.loadRunEvents(this.options.roomId, run.id);
     const buffers = this.restoreOutputBuffers(replayedEvents);
     await this.reconcileRecordedOutputs(run, replayedEvents);
+    if (controller.signal.aborted) {
+      try {
+        const settled = await this.settleAbortedRun(run, controller, liveObserver);
+        return { status: settled.status, agentId: run.agentId, run: settled, turn: null };
+      } finally {
+        if (this.activeTurn?.controller === controller) this.activeTurn = undefined;
+      }
+    }
     const deadlineRemaining = run.deadlineAt === undefined
       ? undefined
       : run.deadlineAt - this.wallNow();
@@ -1599,7 +1646,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
   private async admitInput(
     request: RoomAgentRuntimeInput,
   ): Promise<{ duplicate: true } | { duplicate: false; controller: AbortController }> {
-    const operation = this.intakeLane.then(async () => {
+    return await this.withIntakeLane(async () => {
       const inputAppend = await this.options.store.appendTranscript({
         id: request.input.id,
         roomId: this.options.roomId,
@@ -1619,8 +1666,12 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       this.activeTurn = { controller };
       return { duplicate: false, controller } as const;
     });
-    this.intakeLane = operation.then(() => undefined, () => undefined);
-    return await operation;
+  }
+
+  private async withIntakeLane<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.intakeLane.then(operation);
+    this.intakeLane = queued.then(() => undefined, () => undefined);
+    return await queued;
   }
 
   private requireState(): RoomAgentRuntimeState {
@@ -1653,6 +1704,15 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     });
   }
 }
+
+type DurableRunAdmission =
+  | { duplicate: true; run: RoomAgentRunRecord }
+  | {
+    duplicate: false;
+    run: RoomAgentRunRecord;
+    controller: AbortController;
+    continuation?: RoomAgentRunRecord['continuation'];
+  };
 
 interface OutputBuffer {
   text: string;

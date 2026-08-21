@@ -989,4 +989,164 @@ describe('room agent runtime', () => {
       run: { lastSequence: second.run.lastSequence },
     });
   });
+
+  it('serializes concurrent same-channel admission without holding the lane for execution', async () => {
+    class PausingFirstAdmissionStore extends InMemoryRoomAgentRuntimeStore {
+      private admissionCount = 0;
+      private releaseFirst!: () => void;
+      readonly firstCommitted = new Promise<void>((resolve) => {
+        this.releaseFirst = resolve;
+      });
+      private continueFirst!: () => void;
+      private readonly firstMayReturn = new Promise<void>((resolve) => {
+        this.continueFirst = resolve;
+      });
+
+      override async admitRunInput(
+        input: RoomAgentTranscriptDraft,
+        run: RoomAgentRunRecord,
+      ): Promise<RoomAgentRunAdmissionResult> {
+        const admitted = await super.admitRunInput(input, run);
+        this.admissionCount += 1;
+        if (this.admissionCount === 1) {
+          this.releaseFirst();
+          await this.firstMayReturn;
+        }
+        return admitted;
+      }
+
+      allowFirstToReturn(): void {
+        this.continueFirst();
+      }
+    }
+
+    let releaseLatest!: () => void;
+    const latestWork = new Promise<void>((resolve) => { releaseLatest = resolve; });
+    const store = new PausingFirstAdmissionStore();
+    const driverEntries: string[] = [];
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'oracle', label: 'Oracle', role: 'character' },
+      driver: {
+        run: async function* ({ input, signal }) {
+          driverEntries.push(input.text);
+          yield { type: 'progress', progress: { stage: input.text } };
+          if (input.text === 'Latest') {
+            await latestWork;
+            if (!signal?.aborted) yield { type: 'completed' };
+            return;
+          }
+          await new Promise<void>((resolve) => {
+            signal?.addEventListener('abort', () => resolve(), { once: true });
+          });
+        },
+      },
+    }]);
+    const runtime = new RoomAgentRuntime({
+      roomId: 'room-1', registry, store, runStore: store,
+      contextSource: contextSource(), createId: idFactory(), fallbackAgentId: 'oracle',
+    });
+    const first = runtime.startRun({
+      channelId: 'same-channel',
+      input: { id: 'input-first', speakerId: 'visitor-1', text: 'First', modality: 'text' },
+    });
+    await store.firstCommitted;
+    const latest = runtime.startRun({
+      channelId: 'same-channel',
+      input: { id: 'input-latest', speakerId: 'visitor-1', text: 'Latest', modality: 'text' },
+    });
+    store.allowFirstToReturn();
+
+    await expect(latest.events[Symbol.asyncIterator]().next()).resolves.toMatchObject({
+      value: { event: { type: 'progress', progress: { stage: 'Latest' } } },
+    });
+    expect(driverEntries).toEqual(['Latest']);
+    const firstRun = await store.loadRunByInput('room-1', 'same-channel', 'input-first');
+    const latestRun = await store.loadRunByInput('room-1', 'same-channel', 'input-latest');
+    expect(firstRun).toMatchObject({ status: 'canceled' });
+    expect(latestRun).toMatchObject({ status: 'active' });
+    await expect(store.loadOpenRun('room-1', 'same-channel')).resolves.toMatchObject({
+      id: latestRun?.id,
+    });
+
+    releaseLatest();
+    await expect(first.result).resolves.toMatchObject({ status: 'canceled' });
+    await expect(latest.result).resolves.toMatchObject({ status: 'completed' });
+    const transcript = await store.loadTranscript('room-1', 'same-channel');
+    expect(transcript.filter(({ direction }) => direction === 'input').map(({ id }) => id)).toEqual([
+      'input-first',
+      'input-latest',
+    ]);
+    await expect(runtime.replayRun(firstRun!.id)).resolves.toMatchObject({
+      run: { status: 'canceled' },
+      events: [expect.objectContaining({ event: { type: 'run_canceled', reason: 'superseded_by_new_input' } })],
+    });
+  });
+
+  it('does not revive a run canceled while a recovery attempt is acquiring ownership', async () => {
+    class PausingRecoveryStore extends InMemoryRoomAgentRuntimeStore {
+      private markSaveEntered!: () => void;
+      readonly saveEntered = new Promise<void>((resolve) => {
+        this.markSaveEntered = resolve;
+      });
+      private continueSave!: () => void;
+      private readonly saveMayContinue = new Promise<void>((resolve) => {
+        this.continueSave = resolve;
+      });
+
+      override async saveRun(run: RoomAgentRunRecord): Promise<boolean> {
+        this.markSaveEntered();
+        await this.saveMayContinue;
+        return await super.saveRun(run);
+      }
+
+      allowSaveToContinue(): void {
+        this.continueSave();
+      }
+    }
+
+    const store = new PausingRecoveryStore();
+    const active: RoomAgentRunRecord = {
+      schema: 'gaos.room-agent-run.v1',
+      id: 'run-resume-cancel-race',
+      roomId: 'room-1',
+      channelId: 'private',
+      agentId: 'oracle',
+      rootInputId: 'input-1',
+      latestInput: {
+        id: 'input-1', speakerId: 'visitor-1', text: 'Resume me', modality: 'text',
+      },
+      attempt: 1,
+      status: 'active',
+      startedAt: 1,
+      updatedAt: 1,
+      lastSequence: 0,
+    };
+    await store.createRun(active);
+    const driver = vi.fn(async function* () { yield { type: 'completed' as const }; });
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'oracle', label: 'Oracle', role: 'character' },
+      driver: { run: driver },
+    }]);
+    const runtime = new RoomAgentRuntime({
+      roomId: 'room-1', registry, store, runStore: store,
+      contextSource: contextSource(), createId: idFactory(), fallbackAgentId: 'oracle',
+    });
+
+    const resumed = runtime.resumeRun(active.id);
+    await store.saveEntered;
+    await expect(runtime.cancelRun(active.id, 'canceled_during_resume')).resolves.toBe(true);
+    store.allowSaveToContinue();
+
+    await expect(resumed).resolves.toMatchObject({
+      status: 'canceled',
+      run: { id: active.id, status: 'canceled', attempt: 1 },
+    });
+    await expect(runtime.replayRun(active.id)).resolves.toMatchObject({
+      run: { status: 'canceled', attempt: 1 },
+      events: [expect.objectContaining({
+        event: { type: 'run_canceled', reason: 'canceled_during_resume' },
+      })],
+    });
+    expect(driver).not.toHaveBeenCalled();
+  });
 });

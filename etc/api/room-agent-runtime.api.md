@@ -94,7 +94,7 @@ export class InMemoryRoomAgentRuntimeStore implements RoomAgentRuntimeStore, Roo
     // (undocumented)
     loadTranscript(roomId: string, channelId: string): Promise<readonly RoomAgentTranscriptEntry[]>;
     // (undocumented)
-    saveRun(run: RoomAgentRunRecord): Promise<void>;
+    saveRun(run: RoomAgentRunRecord): Promise<boolean>;
     // (undocumented)
     saveState(state: RoomAgentRuntimeState): Promise<void>;
 }
@@ -507,7 +507,7 @@ export interface RoomAgentRunStore {
     loadRunByInput(roomId: string, channelId: string, inputId: string): Promise<RoomAgentRunRecord | undefined>;
     // (undocumented)
     loadRunEvents(roomId: string, runId: string): Promise<readonly RoomAgentRunJournalEntry[]>;
-    saveRun(run: RoomAgentRunRecord): Promise<void>;
+    saveRun(run: RoomAgentRunRecord): Promise<boolean>;
 }
 
 // @public
