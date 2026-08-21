@@ -1230,6 +1230,27 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     let completed = false;
     const replayedEvents = await runStore.loadRunEvents(this.options.roomId, run.id);
     await this.reconcileRecordedOutputs(run, replayedEvents);
+    const usedOutputIds = new Set(replayedEvents.flatMap(({ event }) => (
+      event.type === 'assistant_output' ? [event.outputId] : []
+    )));
+    const deliveryOutputIds: Record<'driver' | 'runtime', Map<string, string>> = {
+      driver: new Map(),
+      runtime: new Map(),
+    };
+    const allocateOutputId = (origin: 'driver' | 'runtime', logicalOutputId: string): string => {
+      const existing = deliveryOutputIds[origin].get(logicalOutputId);
+      if (existing !== undefined) return existing;
+      const base = baseRunOutputId(run.attempt, origin, logicalOutputId);
+      let candidate = base;
+      let collision = 0;
+      while (usedOutputIds.has(candidate)) {
+        collision += 1;
+        candidate = `${RUN_OUTPUT_COLLISION_PREFIX}${collision}:${base}`;
+      }
+      usedOutputIds.add(candidate);
+      deliveryOutputIds[origin].set(logicalOutputId, candidate);
+      return candidate;
+    };
     const closedRecoveredOutputIds = new Set(replayedEvents.flatMap((entry) => {
       const event = entry.event;
       return entry.inputId === run.latestInput.id
@@ -1395,7 +1416,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
             const audience = clampRunAudience(descriptor, presentation.utterance.audience);
             await handleOutput({
               type: 'assistant_output',
-              outputId: qualifyRunOutputId(run.attempt, 'runtime', outputId),
+              outputId: allocateOutputId('runtime', outputId),
               delivery: {
                 origin: 'runtime',
                 attempt: run.attempt,
@@ -1413,7 +1434,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
           if (resumed && closedRecoveredOutputIds.has(event.outputId)) continue;
           const scopedEvent = {
             ...event,
-            outputId: qualifyRunOutputId(run.attempt, 'driver', event.outputId),
+            outputId: allocateOutputId('driver', event.outputId),
             delivery: {
               origin: 'driver' as const,
               attempt: run.attempt,
@@ -1449,7 +1470,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
             assertText(outputId, 'created room agent decision output id');
             await handleOutput({
               type: 'assistant_output',
-              outputId: qualifyRunOutputId(run.attempt, 'runtime', outputId),
+              outputId: allocateOutputId('runtime', outputId),
               delivery: {
                 origin: 'runtime',
                 attempt: run.attempt,
@@ -1762,9 +1783,10 @@ type DurableRunAdmission =
   };
 
 const RUN_OUTPUT_ATTEMPT_PREFIX = 'gaos-output-attempt:';
+const RUN_OUTPUT_COLLISION_PREFIX = 'gaos-output-collision:';
 
-/** Fixed-overhead, injective attempt namespace; consumers treat the result as opaque. */
-function qualifyRunOutputId(
+/** Deterministic delivery-ID base; executeRun escapes collisions before use. */
+function baseRunOutputId(
   attempt: number,
   source: 'driver' | 'runtime',
   outputId: string,

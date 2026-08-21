@@ -54,11 +54,13 @@ A streaming driver implements `run(context)` and yields `RoomAgentRunEvent`:
 
 Within one driver invocation, `assistant_output` deltas sharing an `outputId`
 form one message and `final: true` closes it. Driver output IDs are logical and
-attempt-local. The runtime adds a collision-free attempt namespace before
-journaling or live delivery; consumers must treat that qualified ID as opaque.
-This lets a continuation reuse the same logical ID for a new message without
-joining it to the prior attempt. Journaled outputs also carry runtime-owned
-`delivery` metadata with the origin, attempt, and driver-local logical ID.
+attempt-local. Before journaling or live delivery, the runtime allocates an
+opaque delivery ID that is unique against every output ID already in the run
+journal, deterministically escaping legacy collisions. Consumers must neither
+construct nor interpret that ID. This lets a continuation reuse the same
+logical ID for a new message without joining it to the prior attempt. Journaled
+outputs also carry runtime-owned `delivery` metadata with the origin, attempt,
+and driver-local logical ID.
 
 ```ts
 const driver = {

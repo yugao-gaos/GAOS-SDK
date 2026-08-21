@@ -174,7 +174,7 @@ export type RoomAgentRunEvent =
   | { type: 'progress'; progress: RoomAgentRunProgress }
   | {
     type: 'assistant_output';
-    /** Driver-local logical ID; durable runtime delivery qualifies it by attempt. */
+    /** Driver-local logical ID; durable runtime delivery replaces it with an opaque ID. */
     outputId: string;
     delta: string;
     final?: boolean;

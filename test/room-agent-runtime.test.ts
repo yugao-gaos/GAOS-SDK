@@ -1050,29 +1050,72 @@ describe('room agent runtime', () => {
   it.each([
     {
       label: 'driver-shaped',
-      legacyOutputId: 'gaos-output-attempt:1:driver:stable-answer',
+      legacyOutputIds: ['gaos-output-attempt:1:driver:stable-answer'],
       resumedLogicalId: 'stable-answer',
+      expectedOutputId: 'gaos-output-attempt:2:driver:stable-answer',
     },
     {
       label: 'runtime-shaped',
-      legacyOutputId: 'gaos-output-attempt:1:runtime:stable-answer',
+      legacyOutputIds: ['gaos-output-attempt:1:runtime:stable-answer'],
       resumedLogicalId: 'gaos-output-attempt:1:runtime:stable-answer',
+      expectedOutputId:
+        'gaos-output-attempt:2:driver:gaos-output-attempt:1:runtime:stable-answer',
+    },
+    {
+      label: 'exact next-attempt collision',
+      legacyOutputIds: ['gaos-output-attempt:2:driver:stable-answer'],
+      resumedLogicalId: 'stable-answer',
+      expectedOutputId:
+        'gaos-output-collision:1:gaos-output-attempt:2:driver:stable-answer',
+    },
+    {
+      label: 'chained next-attempt collisions',
+      legacyOutputIds: [
+        'gaos-output-attempt:2:driver:stable-answer',
+        'gaos-output-collision:1:gaos-output-attempt:2:driver:stable-answer',
+      ],
+      resumedLogicalId: 'stable-answer',
+      expectedOutputId:
+        'gaos-output-collision:2:gaos-output-attempt:2:driver:stable-answer',
     },
   ])('does not suppress a $label legacy output ID without delivery metadata', async ({
     label,
-    legacyOutputId,
+    legacyOutputIds,
     resumedLogicalId,
+    expectedOutputId,
   }) => {
     const store = new InMemoryRoomAgentRuntimeStore();
     const active = activeRecoveryRun(`run-legacy-${label}`, `legacy-${label}`);
     await seedRecoveryOutput(store, active, {
       type: 'assistant_output',
-      outputId: legacyOutputId,
-      delta: 'Legacy committed output.',
+      outputId: legacyOutputIds[0]!,
+      delta: 'Legacy committed output 1.',
       final: true,
       purpose: 'answer',
       history: 'record',
     });
+    let stored = await store.loadRun(active.roomId, active.id);
+    if (stored === undefined) throw new Error('seeded recovery run is missing');
+    for (const [index, outputId] of legacyOutputIds.slice(1).entries()) {
+      const appended = await store.commitRunEvent(stored, {
+        id: `${active.id}:legacy-output:${index + 2}`,
+        runId: active.id,
+        roomId: active.roomId,
+        channelId: active.channelId,
+        agentId: active.agentId,
+        inputId: active.latestInput.id,
+        recordedAt: index + 3,
+        event: {
+          type: 'assistant_output',
+          outputId,
+          delta: `Legacy committed output ${index + 2}.`,
+          final: true,
+          purpose: 'answer',
+          history: 'record',
+        },
+      });
+      stored = appended.run;
+    }
     const registry = new RoomAgentRegistry<Observation>([{
       descriptor: { id: 'oracle', label: 'Oracle', role: 'character' },
       driver: {
@@ -1100,15 +1143,19 @@ describe('room agent runtime', () => {
     });
     const transcript = await store.loadTranscript(active.roomId, active.channelId);
     expect(transcript.filter(({ direction }) => direction === 'output').map(({ text }) => text))
-      .toEqual(['Legacy committed output.', 'Regenerated output.']);
+      .toEqual([
+        ...legacyOutputIds.map((_, index) => `Legacy committed output ${index + 1}.`),
+        'Regenerated output.',
+      ]);
     const replay = await runtime.replayRun(active.id);
     const outputs = replay.events.flatMap(({ event }) => (
       event.type === 'assistant_output' ? [event] : []
     ));
-    expect(outputs).toHaveLength(2);
-    expect(outputs[0]?.outputId).not.toBe(outputs[1]?.outputId);
+    expect(outputs).toHaveLength(legacyOutputIds.length + 1);
+    expect(new Set(outputs.map(({ outputId }) => outputId)).size).toBe(outputs.length);
+    expect(outputs.at(-1)?.outputId).toBe(expectedOutputId);
     expect(outputs.map(({ delivery }) => delivery)).toEqual([
-      undefined,
+      ...legacyOutputIds.map(() => undefined),
       { origin: 'driver', attempt: 2, logicalOutputId: resumedLogicalId },
     ]);
   });
