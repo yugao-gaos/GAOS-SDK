@@ -4,8 +4,10 @@ import {
   RoomAgentRuntime,
   type RoomAgentRuntimeContextSource,
   type RoomAgentRuntimeEvent,
+  type RoomAgentRunAdmissionResult,
   type RoomAgentRunJournalEntry,
   type RoomAgentRunRecord,
+  type RoomAgentTranscriptDraft,
   type RoomCaptionEvent,
   type RoomSpeechRequest,
 } from '../src/room-agent-runtime.js';
@@ -885,5 +887,106 @@ describe('room agent runtime', () => {
       { id: `${active.id}:output:answer-1`, text: 'Recovered answer.', turnId: 'input-1' },
     ]);
     expect(speak).not.toHaveBeenCalled();
+  });
+
+  it('recovers an atomically admitted input after caller loss and deduplicates exact retry', async () => {
+    class EvictingAdmissionStore extends InMemoryRoomAgentRuntimeStore {
+      private evict = true;
+
+      override async admitRunInput(
+        input: RoomAgentTranscriptDraft,
+        run: RoomAgentRunRecord,
+      ): Promise<RoomAgentRunAdmissionResult> {
+        const admitted = await super.admitRunInput(input, run);
+        if (this.evict) {
+          this.evict = false;
+          throw new Error('simulated eviction after admission commit');
+        }
+        return admitted;
+      }
+    }
+
+    const store = new EvictingAdmissionStore();
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'oracle', label: 'Oracle', role: 'character' },
+      driver: { run: async function* () { yield { type: 'completed' }; } },
+    }]);
+    const options = {
+      roomId: 'room-1',
+      registry,
+      store,
+      runStore: store,
+      contextSource: contextSource(),
+      createId: idFactory(),
+      fallbackAgentId: 'oracle',
+    };
+    const request = {
+      channelId: 'atomic-admission',
+      input: {
+        id: 'input-atomic',
+        speakerId: 'visitor-1',
+        text: 'Commit me exactly once',
+        modality: 'text' as const,
+      },
+    };
+    const interrupted = new RoomAgentRuntime(options);
+    await expect(interrupted.handleRunInput(request)).rejects.toThrow('simulated eviction');
+
+    const admitted = await store.loadRunByInput('room-1', request.channelId, request.input.id);
+    expect(admitted).toMatchObject({ status: 'active', latestInput: request.input });
+    await expect(store.loadTranscript('room-1', request.channelId)).resolves.toHaveLength(1);
+
+    const recovered = new RoomAgentRuntime(options);
+    await expect(recovered.handleRunInput(request)).resolves.toMatchObject({
+      status: 'duplicate',
+      run: { id: admitted?.id, status: 'active' },
+    });
+    await expect(store.loadTranscript('room-1', request.channelId)).resolves.toHaveLength(1);
+    await expect(recovered.resumeRun(admitted!.id)).resolves.toMatchObject({ status: 'completed' });
+  });
+
+  it('accepts an identical event retry before checking its stale proposed sequence', async () => {
+    const store = new InMemoryRoomAgentRuntimeStore();
+    const run: RoomAgentRunRecord = {
+      schema: 'gaos.room-agent-run.v1',
+      id: 'run-event-retry',
+      roomId: 'room-1',
+      channelId: 'private',
+      agentId: 'oracle',
+      rootInputId: 'input-1',
+      latestInput: {
+        id: 'input-1', speakerId: 'visitor-1', text: 'Retry events', modality: 'text',
+      },
+      attempt: 1,
+      status: 'active',
+      startedAt: 1,
+      updatedAt: 1,
+      lastSequence: 0,
+    };
+    await store.createRun(run);
+    const firstDraft = {
+      id: 'event-1',
+      runId: run.id,
+      roomId: run.roomId,
+      channelId: run.channelId,
+      agentId: run.agentId,
+      inputId: run.latestInput.id,
+      recordedAt: 2,
+      event: { type: 'progress' as const, progress: { stage: 'first' } },
+    };
+    const first = await store.commitRunEvent(run, firstDraft);
+    const second = await store.commitRunEvent(first.run, {
+      ...firstDraft,
+      id: 'event-2',
+      recordedAt: 3,
+      event: { type: 'progress', progress: { stage: 'second' } },
+    });
+
+    const retried = await store.commitRunEvent(run, firstDraft);
+    expect(retried).toMatchObject({
+      duplicate: true,
+      entry: { id: 'event-1', sequence: 1 },
+      run: { lastSequence: second.run.lastSequence },
+    });
   });
 });

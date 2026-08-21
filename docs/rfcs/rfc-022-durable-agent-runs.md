@@ -91,6 +91,13 @@ so existing host adapters remain source-compatible. A production host writes:
 3. the latest full checkpoint on the run record; and
 4. an input-to-run index for retry-safe admission.
 
+`admitRunInput()` writes the authenticated input transcript boundary, the new
+or continued active run, and its input-to-run index in one transaction. If the
+caller or isolate disappears immediately after commit, an exact retry returns
+the same recoverable run with `duplicate: true`; a mismatched reuse of the input
+ID is rejected. `createRun()` and `saveRun()` are recovery/import seams and are
+not used for fresh input admission.
+
 Journal sequence is per run and begins at one. `commitRunEvent()` appends an
 event and persists its resulting run state (sequence, checkpoint, waiting, or
 terminal transition) in one host transaction. Delivery to `runObserver`, the

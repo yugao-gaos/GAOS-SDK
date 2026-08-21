@@ -107,9 +107,25 @@ export interface RoomAgentRunJournalAppendResult {
   duplicate: boolean;
 }
 
+export interface RoomAgentRunAdmissionResult {
+  run: RoomAgentRunRecord;
+  transcript: RoomAgentTranscriptEntry;
+  duplicate: boolean;
+}
+
 /** Durable hosts implement these rows in SQLite or an equivalent ordered store. */
 export interface RoomAgentRunStore {
+  /**
+   * Atomically persist an authenticated input transcript boundary, the new or
+   * continued run, and the retry-safe input-to-run index.
+   */
+  admitRunInput(
+    input: RoomAgentTranscriptDraft,
+    run: RoomAgentRunRecord,
+  ): Promise<RoomAgentRunAdmissionResult>;
+  /** Recovery/import seam; fresh authenticated input uses `admitRunInput`. */
   createRun(run: RoomAgentRunRecord): Promise<{ run: RoomAgentRunRecord; duplicate: boolean }>;
+  /** Recovery-attempt metadata seam; event transitions use `commitRunEvent`. */
   saveRun(run: RoomAgentRunRecord): Promise<void>;
   loadRun(roomId: string, runId: string): Promise<RoomAgentRunRecord | undefined>;
   loadRunByInput(
@@ -310,6 +326,27 @@ function transcriptFingerprint(entry: RoomAgentTranscriptDraft): string {
   return canonicalJson(entry);
 }
 
+function assertTranscriptDraft(draft: RoomAgentTranscriptDraft): void {
+  assertText(draft.id, 'room transcript id');
+  assertText(draft.roomId, 'room transcript roomId');
+  assertText(draft.channelId, 'room transcript channelId');
+  assertText(draft.turnId, 'room transcript turnId');
+  assertText(draft.endpoint.id, 'room transcript endpoint id');
+  assertText(draft.text, 'room transcript text');
+  if (!['participant', 'agent', 'service', 'watcher'].includes(draft.endpoint.kind)) {
+    throw new TypeError('room transcript endpoint kind is unsupported');
+  }
+  if (draft.direction !== 'input' && draft.direction !== 'output') {
+    throw new TypeError('room transcript direction is unsupported');
+  }
+  if (!['speech', 'text', 'generated'].includes(draft.modality)) {
+    throw new TypeError('room transcript modality is unsupported');
+  }
+  if ((draft.direction === 'input') !== (draft.modality !== 'generated')) {
+    throw new TypeError('room transcript direction and modality do not match');
+  }
+}
+
 function visibleTo(descriptor: RoomAgentDescriptor, input: RoomAgentInput): boolean {
   if ((input.speakerKind ?? 'participant') !== 'participant') return true;
   return descriptor.visibility === undefined
@@ -349,24 +386,7 @@ export class InMemoryRoomAgentRuntimeStore implements RoomAgentRuntimeStore, Roo
   async appendTranscript(
     draft: RoomAgentTranscriptDraft,
   ): Promise<RoomAgentTranscriptAppendResult> {
-    assertText(draft.id, 'room transcript id');
-    assertText(draft.roomId, 'room transcript roomId');
-    assertText(draft.channelId, 'room transcript channelId');
-    assertText(draft.turnId, 'room transcript turnId');
-    assertText(draft.endpoint.id, 'room transcript endpoint id');
-    assertText(draft.text, 'room transcript text');
-    if (!['participant', 'agent', 'service', 'watcher'].includes(draft.endpoint.kind)) {
-      throw new TypeError('room transcript endpoint kind is unsupported');
-    }
-    if (draft.direction !== 'input' && draft.direction !== 'output') {
-      throw new TypeError('room transcript direction is unsupported');
-    }
-    if (!['speech', 'text', 'generated'].includes(draft.modality)) {
-      throw new TypeError('room transcript modality is unsupported');
-    }
-    if ((draft.direction === 'input') !== (draft.modality !== 'generated')) {
-      throw new TypeError('room transcript direction and modality do not match');
-    }
+    assertTranscriptDraft(draft);
     const key = `${draft.roomId}\u0000${draft.channelId}`;
     const idKey = `${key}\u0000${draft.id}`;
     const fingerprint = transcriptFingerprint(draft);
@@ -394,6 +414,83 @@ export class InMemoryRoomAgentRuntimeStore implements RoomAgentRuntimeStore, Roo
   ): Promise<readonly RoomAgentTranscriptEntry[]> {
     const entries = this.transcripts.get(`${roomId}\u0000${channelId}`) ?? [];
     return structuredClone(entries);
+  }
+
+  async admitRunInput(
+    input: RoomAgentTranscriptDraft,
+    run: RoomAgentRunRecord,
+  ): Promise<RoomAgentRunAdmissionResult> {
+    assertTranscriptDraft(input);
+    assertRunRecord(run);
+    const transcriptKey = `${input.roomId}\u0000${input.channelId}`;
+    const transcriptIdKey = `${transcriptKey}\u0000${input.id}`;
+    const fingerprint = transcriptFingerprint(input);
+    const existingTranscript = this.transcriptIds.get(transcriptIdKey);
+    if (existingTranscript !== undefined && existingTranscript.fingerprint !== fingerprint) {
+      throw new Error(`room transcript id was reused: ${input.id}`);
+    }
+    const inputKey = runInputKey(run.roomId, run.channelId, run.latestInput.id);
+    const existingRunId = this.runInputs.get(inputKey);
+    if (existingRunId !== undefined) {
+      const existingRun = this.runs.get(`${run.roomId}\u0000${existingRunId}`);
+      if (existingRun === undefined || existingTranscript === undefined) {
+        throw new Error('room agent run admission index is corrupt');
+      }
+      return {
+        run: structuredClone(existingRun),
+        transcript: structuredClone(existingTranscript.entry),
+        duplicate: true,
+      };
+    }
+
+    if (input.direction !== 'input'
+      || input.id !== run.latestInput.id
+      || input.turnId !== run.latestInput.id
+      || input.roomId !== run.roomId
+      || input.channelId !== run.channelId
+      || input.endpoint.kind !== (run.latestInput.speakerKind ?? 'participant')
+      || input.endpoint.id !== run.latestInput.speakerId
+      || input.text !== run.latestInput.text
+      || input.modality !== run.latestInput.modality) {
+      throw new Error('room agent run admission input does not match the run');
+    }
+    if (run.status !== 'active') {
+      throw new Error('room agent admitted run must be active');
+    }
+
+    const runKey = `${run.roomId}\u0000${run.id}`;
+    const currentRun = this.runs.get(runKey);
+    if (currentRun === undefined) {
+      if (run.lastSequence !== 0) {
+        throw new Error('new room agent run admission must start at sequence zero');
+      }
+    } else if (currentRun.status !== 'waiting_for_input'
+      || run.rootInputId !== currentRun.rootInputId
+      || run.attempt !== currentRun.attempt + 1
+      || run.lastSequence !== currentRun.lastSequence) {
+      throw new Error('continued room agent run admission is stale');
+    }
+
+    const entries = this.transcripts.get(transcriptKey) ?? [];
+    const transcript = existingTranscript?.entry ?? {
+      ...structuredClone(input),
+      sequence: entries.length + 1,
+    };
+    const settledRun = structuredClone(run);
+    // All mutations are synchronous; durable adapters perform these writes in
+    // one database transaction.
+    if (existingTranscript === undefined) {
+      entries.push(transcript);
+      this.transcripts.set(transcriptKey, entries);
+      this.transcriptIds.set(transcriptIdKey, { fingerprint, entry: transcript });
+    }
+    this.runs.set(runKey, settledRun);
+    this.runInputs.set(inputKey, settledRun.id);
+    return {
+      run: structuredClone(settledRun),
+      transcript: structuredClone(transcript),
+      duplicate: false,
+    };
   }
 
   async createRun(
@@ -465,16 +562,6 @@ export class InMemoryRoomAgentRuntimeStore implements RoomAgentRuntimeStore, Roo
     const key = `${draft.roomId}\u0000${draft.runId}`;
     const currentRun = this.runs.get(key);
     if (currentRun === undefined) throw new Error(`unknown room agent run: ${draft.runId}`);
-    if (nextRun.id !== draft.runId
-      || nextRun.roomId !== draft.roomId
-      || nextRun.channelId !== draft.channelId
-      || nextRun.agentId !== draft.agentId
-      || nextRun.latestInput.id !== draft.inputId) {
-      throw new Error('room agent run transition does not match its event');
-    }
-    if (nextRun.lastSequence !== currentRun.lastSequence) {
-      throw new Error('room agent run transition is stale');
-    }
     const fingerprint = canonicalJson(draft);
     const idKey = `${key}\u0000${draft.id}`;
     const existing = this.runEventIds.get(idKey);
@@ -487,6 +574,16 @@ export class InMemoryRoomAgentRuntimeStore implements RoomAgentRuntimeStore, Roo
         run: structuredClone(currentRun),
         duplicate: true,
       };
+    }
+    if (nextRun.id !== draft.runId
+      || nextRun.roomId !== draft.roomId
+      || nextRun.channelId !== draft.channelId
+      || nextRun.agentId !== draft.agentId
+      || nextRun.latestInput.id !== draft.inputId) {
+      throw new Error('room agent run transition does not match its event');
+    }
+    if (nextRun.lastSequence !== currentRun.lastSequence) {
+      throw new Error('room agent run transition is stale');
     }
     const events = this.runEvents.get(key) ?? [];
     const entry: RoomAgentRunJournalEntry = {
@@ -852,12 +949,22 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       request.input.id,
     );
     if (duplicate !== undefined) {
-      return { status: 'duplicate', agentId: duplicate.agentId, run: duplicate, turn: null };
+      const retried = await runStore.admitRunInput(
+        this.inputTranscriptDraft(request),
+        duplicate,
+      );
+      return {
+        status: 'duplicate',
+        agentId: retried.run.agentId,
+        run: retried.run,
+        turn: null,
+      };
     }
 
     const open = await runStore.loadOpenRun(this.options.roomId, request.channelId);
     let continuation: RoomAgentRunRecord['continuation'];
     let run: RoomAgentRunRecord;
+    let supersededRunId: string | undefined;
     if (request.continuation !== undefined) {
       if (open === undefined
         || open.id !== request.continuation.runId
@@ -890,7 +997,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
         failureCode: undefined,
       };
     } else {
-      if (open !== undefined) await this.cancelRun(open.id, 'superseded_by_new_input');
+      supersededRunId = open?.id;
       const now = this.wallNow();
       const deadlineMs = request.deadlineMs ?? this.options.runDeadlineMs;
       if (deadlineMs !== undefined
@@ -918,28 +1025,25 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       };
     }
 
-    const admission = await this.admitInput(request, run.id);
+    const admission = await runStore.admitRunInput(this.inputTranscriptDraft(request), run);
     if (admission.duplicate) {
-      const existing = await runStore.loadRunByInput(
-        this.options.roomId,
-        request.channelId,
-        request.input.id,
-      );
-      if (existing === undefined) {
-        throw new Error('room agent input predates the durable run journal');
-      }
-      return { status: 'duplicate', agentId: existing.agentId, run: existing, turn: null };
+      return {
+        status: 'duplicate',
+        agentId: admission.run.agentId,
+        run: admission.run,
+        turn: null,
+      };
     }
-    if (continuesOpen) await runStore.saveRun(run);
-    else {
-      const created = await runStore.createRun(run);
-      if (created.duplicate) {
-        return { status: 'duplicate', agentId: created.run.agentId, run: created.run, turn: null };
-      }
+    run = admission.run;
+    if (supersededRunId !== undefined) {
+      await this.cancelRun(supersededRunId, 'superseded_by_new_input');
     }
+    await this.interrupt('superseded_by_new_input');
+    const controller = new AbortController();
+    this.activeTurn = { controller, runId: run.id };
     return await this.executeRun(
       run,
-      admission.controller,
+      controller,
       continuation,
       false,
       request.onEvent,
@@ -1476,9 +1580,24 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     }
   }
 
+  private inputTranscriptDraft(request: RoomAgentRuntimeInput): RoomAgentTranscriptDraft {
+    return {
+      id: request.input.id,
+      roomId: this.options.roomId,
+      channelId: request.channelId,
+      turnId: request.input.id,
+      direction: 'input',
+      endpoint: {
+        kind: request.input.speakerKind ?? 'participant',
+        id: request.input.speakerId,
+      },
+      text: request.input.text,
+      modality: request.input.modality,
+    };
+  }
+
   private async admitInput(
     request: RoomAgentRuntimeInput,
-    runId?: string,
   ): Promise<{ duplicate: true } | { duplicate: false; controller: AbortController }> {
     const operation = this.intakeLane.then(async () => {
       const inputAppend = await this.options.store.appendTranscript({
@@ -1497,7 +1616,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       if (inputAppend.duplicate) return { duplicate: true } as const;
       await this.interrupt('superseded_by_new_input');
       const controller = new AbortController();
-      this.activeTurn = { controller, ...(runId === undefined ? {} : { runId }) };
+      this.activeTurn = { controller };
       return { duplicate: false, controller } as const;
     });
     this.intakeLane = operation.then(() => undefined, () => undefined);

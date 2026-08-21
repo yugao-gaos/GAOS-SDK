@@ -71,6 +71,8 @@ interface GameAgentRule {
 // @public
 export class InMemoryRoomAgentRuntimeStore implements RoomAgentRuntimeStore, RoomAgentRunStore {
     // (undocumented)
+    admitRunInput(input: RoomAgentTranscriptDraft, run: RoomAgentRunRecord): Promise<RoomAgentRunAdmissionResult>;
+    // (undocumented)
     appendTranscript(draft: RoomAgentTranscriptDraft): Promise<RoomAgentTranscriptAppendResult>;
     // (undocumented)
     commitRunEvent(nextRun: RoomAgentRunRecord, draft: RoomAgentRunJournalDraft): Promise<RoomAgentRunJournalAppendResult>;
@@ -287,6 +289,16 @@ class RoomAgentRegistry<TObservation = unknown, TKnowledge = unknown> {
 type RoomAgentRole = 'guide' | 'character' | 'referee' | 'custom';
 
 // @public (undocumented)
+export interface RoomAgentRunAdmissionResult {
+    // (undocumented)
+    duplicate: boolean;
+    // (undocumented)
+    run: RoomAgentRunRecord;
+    // (undocumented)
+    transcript: RoomAgentTranscriptEntry;
+}
+
+// @public (undocumented)
 interface RoomAgentRunContext<TObservation = unknown, TKnowledge = unknown> extends RoomAgentContext<TObservation, TKnowledge> {
     // (undocumented)
     run: RoomAgentRunInvocation;
@@ -481,8 +493,8 @@ export type RoomAgentRunStatus = 'active' | 'waiting_for_input' | 'completed' | 
 
 // @public
 export interface RoomAgentRunStore {
+    admitRunInput(input: RoomAgentTranscriptDraft, run: RoomAgentRunRecord): Promise<RoomAgentRunAdmissionResult>;
     commitRunEvent(run: RoomAgentRunRecord, event: RoomAgentRunJournalDraft): Promise<RoomAgentRunJournalAppendResult>;
-    // (undocumented)
     createRun(run: RoomAgentRunRecord): Promise<{
         run: RoomAgentRunRecord;
         duplicate: boolean;
@@ -495,7 +507,6 @@ export interface RoomAgentRunStore {
     loadRunByInput(roomId: string, channelId: string, inputId: string): Promise<RoomAgentRunRecord | undefined>;
     // (undocumented)
     loadRunEvents(roomId: string, runId: string): Promise<readonly RoomAgentRunJournalEntry[]>;
-    // (undocumented)
     saveRun(run: RoomAgentRunRecord): Promise<void>;
 }
 

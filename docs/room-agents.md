@@ -136,6 +136,10 @@ pauses for another answer, implement the driver's `run()` method and provide a
 durable `RoomAgentRunStore`. This is additive: existing `respond()` drivers and
 `handleFinalInput()` keep their original one-turn behavior, while
 `handleRunInput()` adapts either kind of driver into a durable run.
+The store's `admitRunInput()` transaction commits the input transcript, run,
+and retry index together; `commitRunEvent()` similarly commits each event with
+its resulting run transition. An exact retry therefore finds the recoverable
+run instead of an orphan transcript boundary.
 
 ```ts
 const runtime = new RoomAgentRuntime({
