@@ -675,24 +675,7 @@ export class RoomAgentRegistry<TObservation = unknown, TKnowledge = unknown> {
     assertContext(context);
     const registration = this.registrations.get(id);
     if (registration === undefined) throw new Error(`unknown room agent: ${id}`);
-    if (context.interaction !== undefined) {
-      const interaction = context.interaction;
-      if (interaction.roomId !== context.roomId) {
-        throw new Error('room interaction does not belong to the agent room');
-      }
-      if (interaction.id !== context.input.id) {
-        throw new Error('room interaction does not match the agent input');
-      }
-      if (interaction.source.id !== context.input.speakerId
-        || interaction.source.kind !== (context.input.speakerKind ?? 'participant')) {
-        throw new Error('room interaction source does not match the agent input');
-      }
-      if (!interaction.targets.some((target) => (
-        target.kind === 'agent' && target.id === id
-      ))) {
-        throw new Error(`room interaction does not target agent: ${id}`);
-      }
-    }
+    assertInteractionContext(id, context);
     const linked = linkedAbortController(context.signal);
     registration.active.add(linked.controller);
     try {
@@ -746,6 +729,7 @@ export class RoomAgentRegistry<TObservation = unknown, TKnowledge = unknown> {
     }
     const registration = this.registrations.get(id);
     if (registration === undefined) throw new Error(`unknown room agent: ${id}`);
+    assertInteractionContext(id, context);
     const linked = linkedAbortController(context.signal);
     registration.active.add(linked.controller);
     try {
@@ -803,6 +787,29 @@ export class RoomAgentRegistry<TObservation = unknown, TKnowledge = unknown> {
       controller.abort(new Error('room agent registration changed'));
     }
     registration.active.clear();
+  }
+}
+
+function assertInteractionContext<TObservation, TKnowledge>(
+  id: string,
+  context: Omit<RoomAgentContext<TObservation, TKnowledge>, 'agent'>,
+): void {
+  if (context.interaction === undefined) return;
+  const interaction = context.interaction;
+  if (interaction.roomId !== context.roomId) {
+    throw new Error('room interaction does not belong to the agent room');
+  }
+  if (interaction.id !== context.input.id) {
+    throw new Error('room interaction does not match the agent input');
+  }
+  if (interaction.source.id !== context.input.speakerId
+    || interaction.source.kind !== (context.input.speakerKind ?? 'participant')) {
+    throw new Error('room interaction source does not match the agent input');
+  }
+  if (!interaction.targets.some((target) => (
+    target.kind === 'agent' && target.id === id
+  ))) {
+    throw new Error(`room interaction does not target agent: ${id}`);
   }
 }
 

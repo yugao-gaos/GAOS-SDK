@@ -71,9 +71,11 @@ interface GameAgentRule {
 // @public
 export class InMemoryRoomAgentRuntimeStore implements RoomAgentRuntimeStore, RoomAgentRunStore {
     // (undocumented)
-    appendRunEvent(draft: RoomAgentRunJournalDraft): Promise<RoomAgentRunJournalAppendResult>;
+    admitRunInput(input: RoomAgentTranscriptDraft, run: RoomAgentRunRecord): Promise<RoomAgentRunAdmissionResult>;
     // (undocumented)
     appendTranscript(draft: RoomAgentTranscriptDraft): Promise<RoomAgentTranscriptAppendResult>;
+    // (undocumented)
+    commitRunEvent(nextRun: RoomAgentRunRecord, draft: RoomAgentRunJournalDraft): Promise<RoomAgentRunJournalAppendResult>;
     // (undocumented)
     createRun(run: RoomAgentRunRecord): Promise<{
         run: RoomAgentRunRecord;
@@ -92,7 +94,7 @@ export class InMemoryRoomAgentRuntimeStore implements RoomAgentRuntimeStore, Roo
     // (undocumented)
     loadTranscript(roomId: string, channelId: string): Promise<readonly RoomAgentTranscriptEntry[]>;
     // (undocumented)
-    saveRun(run: RoomAgentRunRecord): Promise<void>;
+    saveRun(run: RoomAgentRunRecord): Promise<boolean>;
     // (undocumented)
     saveState(state: RoomAgentRuntimeState): Promise<void>;
 }
@@ -287,6 +289,16 @@ class RoomAgentRegistry<TObservation = unknown, TKnowledge = unknown> {
 type RoomAgentRole = 'guide' | 'character' | 'referee' | 'custom';
 
 // @public (undocumented)
+export interface RoomAgentRunAdmissionResult {
+    // (undocumented)
+    duplicate: boolean;
+    // (undocumented)
+    run: RoomAgentRunRecord;
+    // (undocumented)
+    transcript: RoomAgentTranscriptEntry;
+}
+
+// @public (undocumented)
 interface RoomAgentRunContext<TObservation = unknown, TKnowledge = unknown> extends RoomAgentContext<TObservation, TKnowledge> {
     // (undocumented)
     run: RoomAgentRunInvocation;
@@ -359,6 +371,8 @@ export interface RoomAgentRunJournalAppendResult {
     duplicate: boolean;
     // (undocumented)
     entry: RoomAgentRunJournalEntry;
+    // (undocumented)
+    run: RoomAgentRunRecord;
 }
 
 // @public (undocumented)
@@ -374,6 +388,7 @@ export interface RoomAgentRunJournalEntry {
     event: RoomAgentRunJournalEvent;
     // (undocumented)
     id: string;
+    inputId: string;
     // (undocumented)
     recordedAt: number;
     // (undocumented)
@@ -478,9 +493,8 @@ export type RoomAgentRunStatus = 'active' | 'waiting_for_input' | 'completed' | 
 
 // @public
 export interface RoomAgentRunStore {
-    // (undocumented)
-    appendRunEvent(event: RoomAgentRunJournalDraft): Promise<RoomAgentRunJournalAppendResult>;
-    // (undocumented)
+    admitRunInput(input: RoomAgentTranscriptDraft, run: RoomAgentRunRecord): Promise<RoomAgentRunAdmissionResult>;
+    commitRunEvent(run: RoomAgentRunRecord, event: RoomAgentRunJournalDraft): Promise<RoomAgentRunJournalAppendResult>;
     createRun(run: RoomAgentRunRecord): Promise<{
         run: RoomAgentRunRecord;
         duplicate: boolean;
@@ -493,8 +507,7 @@ export interface RoomAgentRunStore {
     loadRunByInput(roomId: string, channelId: string, inputId: string): Promise<RoomAgentRunRecord | undefined>;
     // (undocumented)
     loadRunEvents(roomId: string, runId: string): Promise<readonly RoomAgentRunJournalEntry[]>;
-    // (undocumented)
-    saveRun(run: RoomAgentRunRecord): Promise<void>;
+    saveRun(run: RoomAgentRunRecord): Promise<boolean>;
 }
 
 // @public
@@ -531,6 +544,7 @@ export interface RoomAgentRuntimeContextRequest {
     phase?: string;
     // (undocumented)
     roomId: string;
+    signal: AbortSignal;
     // (undocumented)
     transcript: readonly RoomAgentTranscriptEntry[];
 }
