@@ -3,7 +3,8 @@
   "git_user": "yugao-gaos <yu.gao@gaos.ca>",
   "session_id": "01a01550-ce4b-7503-86fa-196d5f5b5be1",
   "branch": "orch/attempt/codex-review-room-agent-implementation",
-  "status": "claimed",
+  "status": "tested",
   "claimed_at": "2026-08-21T20:47:50.850Z",
-  "lease_until": "2026-08-21T21:47:50.850Z"
+  "lease_until": "2026-08-21T21:47:50.850Z",
+  "completed_at": "2026-08-21T20:54:38.745Z"
 }
