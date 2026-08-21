@@ -1438,6 +1438,7 @@ export interface SessionKernelOptions<TLevel, TState, TCommand extends JsonValue
 export interface SessionLimits {
     checkpointInterval?: number;
     maxCatchUpTicks?: number;
+    maxCheckpointObjects?: number;
     maxExtensionBytes?: number;
     maxFutureTicks?: number;
     maxOpenCommitmentsPerSeat?: number;

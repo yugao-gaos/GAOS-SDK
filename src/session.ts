@@ -107,6 +107,8 @@ export interface SessionLimits {
   maxExtensionBytes?: number;
   /** Resolved ticks between audit checkpoint events. */
   checkpointInterval?: number;
+  /** Maximum distinct objects in one immutable checkpoint graph. */
+  maxCheckpointObjects?: number;
   /** Maximum unresolved commitments retained for one seat. */
   maxOpenCommitmentsPerSeat?: number;
 }
@@ -914,6 +916,7 @@ const DEFAULT_LIMITS = Object.freeze({
   receiptRetention: 64,
   maxExtensionBytes: 65_536,
   checkpointInterval: 1,
+  maxCheckpointObjects: 100_000,
   maxOpenCommitmentsPerSeat: 64,
 });
 const utf8Encoder = new TextEncoder();
@@ -950,7 +953,11 @@ function isReplayTickTimeoutPolicy(value: unknown): value is ReplayTickTimeoutPo
     && Object.keys(value).every((key) => key === 'mode' || key === 'windowTicks');
 }
 
-function deepFreeze<T>(value: T, maximumObjects = 100_000): T {
+function deepFreeze<T>(
+  value: T,
+  maximumObjects = 100_000,
+  label = 'prepared value',
+): T {
   if (value === null || typeof value !== 'object') return value;
   const pending: object[] = [value];
   const visited = new WeakSet<object>();
@@ -961,7 +968,7 @@ function deepFreeze<T>(value: T, maximumObjects = 100_000): T {
     visited.add(current);
     visitedObjects++;
     if (visitedObjects > maximumObjects) {
-      throw new RangeError('prepared value exceeds the deep-freeze object limit');
+      throw new RangeError(`${label} exceeds the deep-freeze object limit`);
     }
     for (const child of Object.values(current)) {
       if (child !== null && typeof child === 'object') pending.push(child);
@@ -1398,6 +1405,8 @@ class SessionKernelImpl<
       receiptRetention: options.limits?.receiptRetention ?? DEFAULT_LIMITS.receiptRetention,
       maxExtensionBytes: options.limits?.maxExtensionBytes ?? DEFAULT_LIMITS.maxExtensionBytes,
       checkpointInterval: options.limits?.checkpointInterval ?? DEFAULT_LIMITS.checkpointInterval,
+      maxCheckpointObjects: options.limits?.maxCheckpointObjects
+        ?? DEFAULT_LIMITS.maxCheckpointObjects,
       maxOpenCommitmentsPerSeat: options.limits?.maxOpenCommitmentsPerSeat
         ?? DEFAULT_LIMITS.maxOpenCommitmentsPerSeat,
     };
@@ -3525,12 +3534,16 @@ class SessionKernelImpl<
       retentionFloor: this.compactedRetentionFloor,
       stateDigest: this.digestState(this.live),
     };
-    return deepFreeze({
-      ...withoutIntegrity,
-      integrityDigest: checkpointIntegrityDigest(
-        withoutIntegrity as Omit<KernelCheckpoint, 'integrityDigest'>,
-      ),
-    });
+    return deepFreeze(
+      {
+        ...withoutIntegrity,
+        integrityDigest: checkpointIntegrityDigest(
+          withoutIntegrity as Omit<KernelCheckpoint, 'integrityDigest'>,
+        ),
+      },
+      this.limits.maxCheckpointObjects,
+      'checkpoint',
+    );
   }
 
   compact(

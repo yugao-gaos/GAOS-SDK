@@ -125,7 +125,138 @@ function submission(
   };
 }
 
+function countDistinctObjects(value: unknown): number {
+  if (value === null || typeof value !== 'object') return 0;
+  const pending: object[] = [value];
+  const visited = new WeakSet<object>();
+  let count = 0;
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    count++;
+    for (const child of Object.values(current)) {
+      if (child !== null && typeof child === 'object') pending.push(child);
+    }
+  }
+  return count;
+}
+
 describe('RFC-012 checkpoint and compaction', () => {
+  it('uses a separate object budget for checkpoints larger than prepared values', () => {
+    interface LargeState {
+      entries: JsonValue[];
+      visible: boolean;
+    }
+    const largeReducer: TickReducer<null, LargeState, SessionView> = {
+      init: () => ({
+        entries: Array.from({ length: 100_001 }, () => ({})),
+        visible: false,
+      }),
+      advance: (state) => ({ ...state, visible: true }),
+      view: (state) => ({
+        status: 'playing',
+        ...(state.visible ? { entries: state.entries } : {}),
+      }),
+      replayMetrics: () => ({ actionsUsed: 0 }),
+    };
+    const {
+      reducer: _reducer,
+      stateIsolation: _stateIsolation,
+      checkpointCodec: _checkpointCodec,
+      ...baseOptions
+    } = options();
+    const kernel = createSessionKernel({
+      ...baseOptions,
+      reducer: largeReducer,
+      cadence: { mode: 'ticks', rate: createTickRate(1) },
+      limits: {
+        checkpointInterval: 1,
+        maxCheckpointObjects: 101_000,
+      },
+    });
+
+    const checkpoint = kernel.checkpoint();
+
+    expect(countDistinctObjects(checkpoint)).toBeGreaterThan(100_000);
+    expect(Object.isFrozen(checkpoint.reducerState)).toBe(true);
+    expect(() => kernel.prepareAdvance(0))
+      .toThrow(/prepared value exceeds the deep-freeze object limit/);
+  });
+
+  it('accepts the exact checkpoint object bound and rejects one object above it', () => {
+    expect(() => createSessionKernel({
+      ...options(),
+      limits: { checkpointInterval: 1, maxCheckpointObjects: 0 },
+    })).toThrow(/maxCheckpointObjects has an invalid bound/);
+
+    const probe = createSessionKernel({
+      ...options(),
+      limits: { checkpointInterval: 1, maxCheckpointObjects: 1_000 },
+    }).checkpoint();
+    const exactObjectCount = countDistinctObjects(probe);
+
+    expect(() => createSessionKernel({
+      ...options(),
+      limits: {
+        checkpointInterval: 1,
+        maxCheckpointObjects: exactObjectCount,
+      },
+    }).checkpoint()).not.toThrow();
+    expect(() => createSessionKernel({
+      ...options(),
+      limits: {
+        checkpointInterval: 1,
+        maxCheckpointObjects: exactObjectCount - 1,
+      },
+    }).checkpoint()).toThrow(/checkpoint exceeds the deep-freeze object limit/);
+  });
+
+  it('counts shared checkpoint objects once and rejects cyclic codec output', () => {
+    const sharedCodec = {
+      id: 'tests.shared-state',
+      version: '1',
+      encode: (): JsonValue => {
+        const shared: JsonValue = { marker: true };
+        return { entries: Array<JsonValue>(1_000).fill(shared) };
+      },
+      decode: (value: JsonValue): State => value as unknown as State,
+    };
+    const probe = createSessionKernel({
+      ...options(),
+      checkpointCodec: sharedCodec,
+      limits: { checkpointInterval: 1, maxCheckpointObjects: 2_000 },
+    }).checkpoint();
+    const exactObjectCount = countDistinctObjects(probe);
+    const sharedEntries = (probe.reducerState as { entries: JsonValue[] }).entries;
+    expect(sharedEntries[0]).toBe(sharedEntries.at(-1));
+
+    expect(() => createSessionKernel({
+      ...options(),
+      checkpointCodec: sharedCodec,
+      limits: {
+        checkpointInterval: 1,
+        maxCheckpointObjects: exactObjectCount,
+      },
+    }).checkpoint()).not.toThrow();
+
+    const cyclicCodec = {
+      id: 'tests.cyclic-state',
+      version: '1',
+      encode: (): JsonValue => {
+        const cyclic = {} as { self?: JsonValue };
+        cyclic.self = cyclic as JsonValue;
+        return cyclic as JsonValue;
+      },
+      decode: (value: JsonValue): State => value as unknown as State,
+    };
+    expect(() => createSessionKernel({
+      ...options(),
+      checkpointCodec: cyclicCodec,
+      limits: { checkpointInterval: 1, maxCheckpointObjects: 2_000 },
+    }).checkpoint()).toThrow(/checkpoint reducerState\.self must not contain cycles/);
+  });
+
   it('uses a versioned product codec for non-JSON reducer state', () => {
     interface SetState {
       values: Set<number>;
