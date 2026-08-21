@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/implement-gaos-durable-agent-runs-and-progress",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "codex-mcp-18048-62de8721d39900a1f59454c97a32c604",
+  "branch": "orch/attempt/codex-implement-gaos-durable-agent-runs-and-progress",
+  "status": "claimed",
+  "claimed_at": "2026-08-21T03:20:52.159Z",
+  "lease_until": "2026-08-21T04:20:52.159Z"
+}
