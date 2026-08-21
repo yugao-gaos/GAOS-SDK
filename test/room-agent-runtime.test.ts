@@ -4,6 +4,8 @@ import {
   RoomAgentRuntime,
   type RoomAgentRuntimeContextSource,
   type RoomAgentRuntimeEvent,
+  type RoomAgentRunJournalEntry,
+  type RoomAgentRunRecord,
   type RoomCaptionEvent,
   type RoomSpeechRequest,
 } from '../src/room-agent-runtime.js';
@@ -11,6 +13,7 @@ import {
   RoomAgentRegistry,
   type GameAgentManifest,
   type RoomAgentContext,
+  type RoomAgentRunContext,
 } from '../src/room-agent.js';
 
 interface Observation {
@@ -359,5 +362,310 @@ describe('room agent runtime', () => {
         { text: 'Welcome back.' },
       ],
     });
+  });
+
+  it('streams durable progress and multiple outputs before completion without recording filler', async () => {
+    let release!: () => void;
+    const work = new Promise<void>((resolve) => { release = resolve; });
+    const globallyObserved: RoomAgentRunJournalEntry[] = [];
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'oracle', label: 'Oracle', role: 'character' },
+      driver: {
+        run: async function* () {
+          yield { type: 'progress', progress: { stage: 'research', current: 1, total: 2 } };
+          yield {
+            type: 'assistant_output',
+            outputId: 'answer-1',
+            delta: 'The first ',
+            purpose: 'answer',
+          };
+          await work;
+          yield {
+            type: 'assistant_output',
+            outputId: 'answer-1',
+            delta: 'answer.',
+            final: true,
+            purpose: 'answer',
+          };
+          yield {
+            type: 'assistant_output',
+            outputId: 'question-1',
+            delta: 'What do you notice?',
+            final: true,
+            purpose: 'question',
+          };
+          yield { type: 'completed' };
+        },
+      },
+    }]);
+    const store = new InMemoryRoomAgentRuntimeStore();
+    const runtime = new RoomAgentRuntime({
+      roomId: 'room-1',
+      registry,
+      store,
+      runStore: store,
+      contextSource: contextSource(),
+      createId: idFactory(),
+      fallbackAgentId: 'oracle',
+      runObserver: { publish: async (entry) => { globallyObserved.push(entry); } },
+      progressPresenter: {
+        present: async ({ progress }) => ({
+          utterance: { text: `Working on ${progress.stage}.` },
+        }),
+      },
+    });
+
+    const execution = runtime.startRun({
+      channelId: 'private:visitor-1:oracle',
+      input: {
+        id: 'input-1', speakerId: 'visitor-1', text: 'Guide me', modality: 'text',
+      },
+    });
+    const iterator = execution.events[Symbol.asyncIterator]();
+    const progress = await iterator.next();
+    const filler = await iterator.next();
+    const firstDelta = await iterator.next();
+
+    expect(progress.value?.event).toEqual({
+      type: 'progress', progress: { stage: 'research', current: 1, total: 2 },
+    });
+    expect(filler.value?.event).toMatchObject({
+      type: 'assistant_output', purpose: 'progress', history: 'ephemeral', final: true,
+    });
+    expect(firstDelta.value?.event).toMatchObject({
+      type: 'assistant_output', outputId: 'answer-1', delta: 'The first ',
+    });
+    let settled = false;
+    void execution.result.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    release();
+
+    const result = await execution.result;
+    expect(result).toMatchObject({
+      status: 'completed',
+      turn: { utterances: [{ text: 'The first answer.' }, { text: 'What do you notice?' }] },
+    });
+    const transcript = await store.loadTranscript('room-1', 'private:visitor-1:oracle');
+    expect(transcript.map(({ text }) => text)).toEqual([
+      'Guide me',
+      'The first answer.',
+      'What do you notice?',
+    ]);
+    expect(globallyObserved.map(({ sequence }) => sequence)).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it('continues one waiting run across inputs with its checkpoint and token', async () => {
+    const invocations: Array<RoomAgentRunContext<Observation>['run']> = [];
+    let wallClock = 1_000;
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'oracle', label: 'Oracle', role: 'character' },
+      driver: {
+        run: async function* (context) {
+          invocations.push(structuredClone(context.run));
+          if (context.run.attempt === 1) {
+            yield { type: 'checkpoint', value: { path: ['gate'] } };
+            yield {
+              type: 'assistant_output',
+              outputId: 'follow-up',
+              delta: 'What is beyond the gate?',
+              final: true,
+              purpose: 'question',
+            };
+            yield {
+              type: 'input_requested',
+              requestId: 'gate-detail',
+              continuationToken: 'continue-1',
+            };
+            return;
+          }
+          yield {
+            type: 'assistant_output',
+            outputId: 'interpretation',
+            delta: `You found ${context.input.text}.`,
+            final: true,
+          };
+          yield { type: 'completed' };
+        },
+      },
+    }]);
+    const store = new InMemoryRoomAgentRuntimeStore();
+    const runtime = new RoomAgentRuntime({
+      roomId: 'room-1', registry, store, runStore: store,
+      contextSource: contextSource(), createId: idFactory(), fallbackAgentId: 'oracle',
+      wallNow: () => wallClock,
+    });
+
+    const first = await runtime.handleRunInput({
+      channelId: 'private',
+      deadlineMs: 100,
+      input: { id: 'input-1', speakerId: 'visitor-1', text: 'A gate', modality: 'text' },
+    });
+    expect(first).toMatchObject({
+      status: 'waiting_for_input',
+      run: {
+        attempt: 1,
+        deadlineMs: 100,
+        deadlineAt: undefined,
+        checkpoint: { path: ['gate'] },
+        continuation: { requestId: 'gate-detail', token: 'continue-1' },
+      },
+    });
+
+    // Human waiting time does not consume the next active attempt's budget.
+    wallClock = 50_000;
+    const second = await runtime.handleRunInput({
+      channelId: 'private',
+      continuation: { runId: first.run.id, token: 'continue-1' },
+      input: { id: 'input-2', speakerId: 'visitor-1', text: 'a garden', modality: 'speech' },
+    });
+    expect(second).toMatchObject({
+      status: 'completed',
+      run: { id: first.run.id, attempt: 2, deadlineMs: 100, deadlineAt: 50_100 },
+    });
+    expect(invocations).toEqual([
+      expect.objectContaining({ id: first.run.id, attempt: 1, resumed: false }),
+      expect.objectContaining({
+        id: first.run.id,
+        attempt: 2,
+        resumed: false,
+        checkpoint: { path: ['gate'] },
+        continuation: { requestId: 'gate-detail', token: 'continue-1' },
+      }),
+    ]);
+    const replay = await runtime.replayRun(first.run.id);
+    expect(replay.events.map(({ sequence }) => sequence)).toEqual(
+      replay.events.map((_, index) => index + 1),
+    );
+    expect(replay.events.map(({ event }) => event.type)).toEqual([
+      'checkpoint',
+      'assistant_output',
+      'input_requested',
+      'assistant_output',
+      'completed',
+    ]);
+  });
+
+  it('adapts legacy respond drivers to durable runs', async () => {
+    const store = new InMemoryRoomAgentRuntimeStore();
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'guide', label: 'Guide', role: 'guide' },
+      driver: { respond: async () => ({ utterances: [{ text: 'Legacy answer.' }] }) },
+    }]);
+    const runtime = new RoomAgentRuntime({
+      roomId: 'room-1', registry, store, runStore: store,
+      contextSource: contextSource(), createId: idFactory(), fallbackAgentId: 'guide',
+    });
+    const result = await runtime.handleRunInput({
+      channelId: 'public',
+      input: { id: 'input-1', speakerId: 'visitor-1', text: 'Hello', modality: 'text' },
+    });
+    expect(result).toMatchObject({
+      status: 'completed',
+      turn: { utterances: [{ text: 'Legacy answer.' }] },
+    });
+    await expect(runtime.replayRun(result.run.id)).resolves.toMatchObject({
+      events: [
+        { event: { type: 'decision' } },
+        { event: { type: 'assistant_output', history: 'record' } },
+        { event: { type: 'completed' } },
+      ],
+    });
+  });
+
+  it('records cooperative cancellation and deadline expiry as replayable terminal states', async () => {
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'oracle', label: 'Oracle', role: 'character' },
+      driver: {
+        run: async function* ({ signal }) {
+          yield { type: 'progress', progress: { stage: 'waiting' } };
+          await new Promise<void>((resolve) => {
+            signal?.addEventListener('abort', () => resolve(), { once: true });
+          });
+        },
+      },
+    }]);
+    const store = new InMemoryRoomAgentRuntimeStore();
+    const runtime = new RoomAgentRuntime({
+      roomId: 'room-1', registry, store, runStore: store,
+      contextSource: contextSource(), createId: idFactory(), fallbackAgentId: 'oracle',
+    });
+    const execution = runtime.startRun({
+      channelId: 'cancel',
+      input: { id: 'cancel-1', speakerId: 'visitor-1', text: 'Stop', modality: 'text' },
+    });
+    const iterator = execution.events[Symbol.asyncIterator]();
+    const started = await iterator.next();
+    const runId = started.value?.runId;
+    expect(runId).toBeTypeOf('string');
+    await expect(runtime.cancelRun(runId!, 'user_stopped')).resolves.toBe(true);
+    await expect(execution.result).resolves.toMatchObject({ status: 'canceled' });
+    await expect(runtime.replayRun(runId!)).resolves.toMatchObject({
+      run: { status: 'canceled' },
+      events: [
+        { event: { type: 'progress' } },
+        { event: { type: 'run_canceled', reason: 'user_stopped' } },
+      ],
+    });
+
+    const deadline = await runtime.handleRunInput({
+      channelId: 'deadline',
+      deadlineMs: 5,
+      input: { id: 'deadline-1', speakerId: 'visitor-1', text: 'Wait', modality: 'text' },
+    });
+    expect(deadline.status).toBe('deadline_exceeded');
+    await expect(runtime.replayRun(deadline.run.id)).resolves.toMatchObject({
+      run: { status: 'deadline_exceeded' },
+      events: [
+        { event: { type: 'progress' } },
+        { event: { type: 'deadline_exceeded' } },
+      ],
+    });
+  });
+
+  it('restores a durable checkpoint into an explicitly resumed active run', async () => {
+    const seen: RoomAgentRunContext<Observation>['run'][] = [];
+    const store = new InMemoryRoomAgentRuntimeStore();
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'oracle', label: 'Oracle', role: 'character' },
+      driver: {
+        run: async function* (context) {
+          seen.push(structuredClone(context.run));
+          yield { type: 'completed' };
+        },
+      },
+    }]);
+    const active: RoomAgentRunRecord = {
+      schema: 'gaos.room-agent-run.v1',
+      id: 'run-recovery',
+      roomId: 'room-1',
+      channelId: 'private',
+      agentId: 'oracle',
+      rootInputId: 'input-1',
+      latestInput: {
+        id: 'input-1', speakerId: 'visitor-1', text: 'Recover', modality: 'text',
+      },
+      attempt: 1,
+      status: 'active',
+      startedAt: 1,
+      updatedAt: 1,
+      lastSequence: 0,
+      checkpoint: { completed: ['observe'] },
+    };
+    await store.createRun(active);
+    const runtime = new RoomAgentRuntime({
+      roomId: 'room-1', registry, store, runStore: store,
+      contextSource: contextSource(), createId: idFactory(), fallbackAgentId: 'oracle',
+    });
+
+    await expect(runtime.resumeRun(active.id)).resolves.toMatchObject({
+      status: 'completed', run: { attempt: 2 },
+    });
+    expect(seen).toEqual([expect.objectContaining({
+      id: active.id,
+      attempt: 2,
+      resumed: true,
+      checkpoint: { completed: ['observe'] },
+    })]);
   });
 });

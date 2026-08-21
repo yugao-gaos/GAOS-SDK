@@ -129,6 +129,53 @@ the host's database or Durable Object. A `RoomAgentRuntimeContextSource`
 receives only the requested channel transcript and resolves product-owned
 model memory, scoped observations, prompts, and legal actions.
 
+## Long-running and multi-turn work
+
+For a task that reports progress, streams more than one assistant message, or
+pauses for another answer, implement the driver's `run()` method and provide a
+durable `RoomAgentRunStore`. This is additive: existing `respond()` drivers and
+`handleFinalInput()` keep their original one-turn behavior, while
+`handleRunInput()` adapts either kind of driver into a durable run.
+
+```ts
+const runtime = new RoomAgentRuntime({
+  roomId: 'room-42',
+  registry,
+  store,
+  runStore: store,
+  contextSource: buildScopedContext,
+  createId: crypto.randomUUID,
+  fallbackAgentId: 'guide',
+  runObserver: uiOrCueBridge,
+  progressPresenter: optionalProductSpeechPolicy,
+});
+
+const execution = runtime.startRun({
+  channelId: 'private:visitor-7:guide',
+  input: finalInput,
+});
+
+for await (const entry of execution.events) {
+  // Forward durable progress or assistant deltas while work is still running.
+}
+const result = await execution.result;
+```
+
+Progress is structured public lifecycle state, not hidden model reasoning.
+The SDK does not select a filler style. A product may ignore progress, render
+UI only, trigger a prerecorded cue, use deterministic copy, or generate a
+short fresh line from the verified progress snapshot. Presenter utterances are
+ephemeral by default and therefore do not enter the durable channel transcript
+or later model history unless the product explicitly selects `record`.
+
+An `input_requested` event durably changes the run to `waiting_for_input`.
+The next input on the same channel continues that run, or a client can echo the
+run ID and continuation token for strict correlation. `checkpoint` supplies
+product-owned recovery state; `resumeRun()` invokes the driver again with that
+checkpoint after a host restart. `cancelRun()` and persisted epoch deadlines
+produce replayable terminal states. `replayRun()` returns ordered events without
+replaying speech, cues, actions, or provider calls.
+
 ```ts
 import {
   InMemoryRoomAgentRuntimeStore,
@@ -166,5 +213,7 @@ current runtime state and only that channel's transcript.
 Use the companion [presentation cue bridge](./presentation-cues.md) when a
 room agent must drive ordered browser, Godot, Unity, or native effects.
 
-The governing requirements, release gates, and package plan are recorded in
-[RFC-021](./rfcs/rfc-021-room-agents.md).
+The base room-agent requirements and package plan are recorded in
+[RFC-021](./rfcs/rfc-021-room-agents.md). Durable runs, progress presentation,
+streaming, and continuation are governed by
+[RFC-022](./rfcs/rfc-022-durable-agent-runs.md).
