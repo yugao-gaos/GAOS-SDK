@@ -1188,11 +1188,13 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       };
     }
 
-    const admission = await runStore.admitRunInput(this.inputTranscriptDraft(request), run);
-    if (admission.duplicate) return { duplicate: true, run: admission.run };
     if (supersededRunId !== undefined) {
+      // Close the old durable run before admitting its replacement so a loss
+      // at either boundary cannot leave two open runs on the channel.
       await this.cancelRun(supersededRunId, 'superseded_by_new_input');
     }
+    const admission = await runStore.admitRunInput(this.inputTranscriptDraft(request), run);
+    if (admission.duplicate) return { duplicate: true, run: admission.run };
     await this.interrupt('superseded_by_new_input');
     const controller = new AbortController();
     this.activeTurn = { controller, runId: admission.run.id };

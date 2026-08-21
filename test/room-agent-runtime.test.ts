@@ -5,6 +5,8 @@ import {
   type RoomAgentRuntimeContextSource,
   type RoomAgentRuntimeEvent,
   type RoomAgentRunAdmissionResult,
+  type RoomAgentRunJournalAppendResult,
+  type RoomAgentRunJournalDraft,
   type RoomAgentRunJournalEntry,
   type RoomAgentRunRecord,
   type RoomAgentTranscriptDraft,
@@ -943,6 +945,180 @@ describe('room agent runtime', () => {
     });
     await expect(store.loadTranscript('room-1', request.channelId)).resolves.toHaveLength(1);
     await expect(recovered.resumeRun(admitted!.id)).resolves.toMatchObject({ status: 'completed' });
+  });
+
+  it('retries supersession after loss between old-run cancellation and new admission', async () => {
+    class CrashAfterCancellationStore extends InMemoryRoomAgentRuntimeStore {
+      private crash = true;
+
+      override async commitRunEvent(
+        run: RoomAgentRunRecord,
+        event: RoomAgentRunJournalDraft,
+      ): Promise<RoomAgentRunJournalAppendResult> {
+        const committed = await super.commitRunEvent(run, event);
+        if (this.crash
+          && event.event.type === 'run_canceled'
+          && event.event.reason === 'superseded_by_new_input') {
+          this.crash = false;
+          throw new Error('simulated loss after old-run cancellation');
+        }
+        return committed;
+      }
+    }
+
+    const store = new CrashAfterCancellationStore();
+    const oldRun: RoomAgentRunRecord = {
+      schema: 'gaos.room-agent-run.v1',
+      id: 'old-run-before-admit',
+      roomId: 'room-1',
+      channelId: 'supersession-before-admit',
+      agentId: 'oracle',
+      rootInputId: 'old-input',
+      latestInput: {
+        id: 'old-input', speakerId: 'visitor-1', text: 'Old work', modality: 'text',
+      },
+      attempt: 1,
+      status: 'active',
+      startedAt: 1,
+      updatedAt: 1,
+      lastSequence: 0,
+    };
+    await store.createRun(oldRun);
+    const driverEntries: string[] = [];
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'oracle', label: 'Oracle', role: 'character' },
+      driver: {
+        run: async function* ({ input }) {
+          driverEntries.push(input.text);
+          yield {
+            type: 'input_requested',
+            requestId: 'replacement-wait',
+            continuationToken: 'replacement-token',
+          };
+        },
+      },
+    }]);
+    const options = {
+      roomId: 'room-1', registry, store, runStore: store,
+      contextSource: contextSource(), createId: idFactory(), fallbackAgentId: 'oracle',
+    };
+    const request = {
+      channelId: oldRun.channelId,
+      input: {
+        id: 'replacement-input',
+        speakerId: 'visitor-1',
+        text: 'Replacement work',
+        modality: 'text' as const,
+      },
+    };
+
+    const interrupted = new RoomAgentRuntime(options);
+    await expect(interrupted.handleRunInput(request)).rejects.toThrow(
+      'simulated loss after old-run cancellation',
+    );
+    await expect(store.loadRun(oldRun.roomId, oldRun.id)).resolves.toMatchObject({
+      status: 'canceled',
+    });
+    await expect(store.loadRunByInput(
+      oldRun.roomId,
+      oldRun.channelId,
+      request.input.id,
+    )).resolves.toBeUndefined();
+    await expect(store.loadOpenRun(oldRun.roomId, oldRun.channelId)).resolves.toBeUndefined();
+    expect(driverEntries).toEqual([]);
+
+    const recovered = new RoomAgentRuntime(options);
+    const retried = await recovered.handleRunInput(request);
+    expect(retried).toMatchObject({ status: 'waiting_for_input' });
+    await expect(store.loadOpenRun(oldRun.roomId, oldRun.channelId)).resolves.toMatchObject({
+      id: retried.run.id,
+      status: 'waiting_for_input',
+    });
+    expect(driverEntries).toEqual(['Replacement work']);
+    await expect(store.loadTranscript(oldRun.roomId, oldRun.channelId)).resolves.toMatchObject([
+      { id: request.input.id, direction: 'input' },
+    ]);
+  });
+
+  it('deduplicates supersession retry after loss following new admission commit', async () => {
+    class CrashAfterNewAdmissionStore extends InMemoryRoomAgentRuntimeStore {
+      private crash = true;
+
+      override async admitRunInput(
+        input: RoomAgentTranscriptDraft,
+        run: RoomAgentRunRecord,
+      ): Promise<RoomAgentRunAdmissionResult> {
+        const admitted = await super.admitRunInput(input, run);
+        if (this.crash && input.id === 'replacement-input') {
+          this.crash = false;
+          throw new Error('simulated loss after new-run admission');
+        }
+        return admitted;
+      }
+    }
+
+    const store = new CrashAfterNewAdmissionStore();
+    const oldRun: RoomAgentRunRecord = {
+      schema: 'gaos.room-agent-run.v1',
+      id: 'old-run-after-admit',
+      roomId: 'room-1',
+      channelId: 'supersession-after-admit',
+      agentId: 'oracle',
+      rootInputId: 'old-input',
+      latestInput: {
+        id: 'old-input', speakerId: 'visitor-1', text: 'Old work', modality: 'text',
+      },
+      attempt: 1,
+      status: 'active',
+      startedAt: 1,
+      updatedAt: 1,
+      lastSequence: 0,
+    };
+    await store.createRun(oldRun);
+    const driver = vi.fn(async function* () { yield { type: 'completed' as const }; });
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'oracle', label: 'Oracle', role: 'character' },
+      driver: { run: driver },
+    }]);
+    const options = {
+      roomId: 'room-1', registry, store, runStore: store,
+      contextSource: contextSource(), createId: idFactory(), fallbackAgentId: 'oracle',
+    };
+    const request = {
+      channelId: oldRun.channelId,
+      input: {
+        id: 'replacement-input',
+        speakerId: 'visitor-1',
+        text: 'Replacement work',
+        modality: 'text' as const,
+      },
+    };
+
+    const interrupted = new RoomAgentRuntime(options);
+    await expect(interrupted.handleRunInput(request)).rejects.toThrow(
+      'simulated loss after new-run admission',
+    );
+    const admitted = await store.loadRunByInput(
+      oldRun.roomId,
+      oldRun.channelId,
+      request.input.id,
+    );
+    expect(admitted).toMatchObject({ status: 'active' });
+    await expect(store.loadRun(oldRun.roomId, oldRun.id)).resolves.toMatchObject({
+      status: 'canceled',
+    });
+
+    const recovered = new RoomAgentRuntime(options);
+    await expect(recovered.handleRunInput(request)).resolves.toMatchObject({
+      status: 'duplicate',
+      run: { id: admitted?.id, status: 'active' },
+    });
+    await expect(store.loadOpenRun(oldRun.roomId, oldRun.channelId)).resolves.toMatchObject({
+      id: admitted?.id,
+      status: 'active',
+    });
+    await expect(store.loadTranscript(oldRun.roomId, oldRun.channelId)).resolves.toHaveLength(1);
+    expect(driver).not.toHaveBeenCalled();
   });
 
   it('accepts an identical event retry before checking its stale proposed sequence', async () => {
