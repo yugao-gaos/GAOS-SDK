@@ -720,12 +720,25 @@ export function createReplayArtifact<TLevel>(
     result: level.result,
     ...(level.extensions === undefined ? {} : { extensions: level.extensions }),
   }));
+  const declaredControls = input.systemActions ?? [];
+  const namesControl = (row: unknown): boolean => {
+    if (!isRecord(row)) return false;
+    return declaredControls.includes(row['wireId'] as string)
+      || declaredControls.includes(row['canonicalId'] as string);
+  };
+  const usesHostControl = declaredControls.length > 0
+    && ((input.actions ?? []).some(namesControl)
+      || (input.records ?? []).some((record) => namesControl(record)
+        || (isRecord(record) && Array.isArray(record['inputs'])
+          && record['inputs'].some(namesControl))));
   const header: ReplayHeader<TLevel> = {
     kind: 'header',
     format: GAOS_REPLAY_FORMAT_ID,
     // Emit the lowest version that covers what this transcript actually uses,
-    // so adding a capability does not strand readers of older artifacts.
-    formatVersion: input.systemActions?.length
+    // so adding a capability does not strand readers of older artifacts. A
+    // declared roster is not enough on its own: a session that could restart
+    // but never did is still an ordinary artifact.
+    formatVersion: usesHostControl
       ? GAOS_REPLAY_FORMAT_VERSION
       : input.records?.some((record) => record.kind === 'interaction')
         ? GAOS_REPLAY_INTERACTION_FORMAT_VERSION
@@ -735,7 +748,7 @@ export function createReplayArtifact<TLevel>(
     seed: input.seed,
     seedPolicy,
     perm: [...input.perm],
-    ...(input.systemActions?.length ? { systemActions: [...input.systemActions] } : {}),
+    ...(usesHostControl ? { systemActions: [...input.systemActions!] } : {}),
     levels,
     totals: input.totals ?? replayTotals(levels),
     ...(input.visibility === undefined ? {} : { visibility: input.visibility }),

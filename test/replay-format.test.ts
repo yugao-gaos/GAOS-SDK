@@ -446,3 +446,26 @@ describe('host controls', () => {
     expect(plain.header.systemActions).toBeUndefined();
   });
 });
+
+describe('host control version follows usage', () => {
+  const game: ReplayGameRef = { id: 'grid', version: '1', adapter: { id: 'a', version: '1' } };
+
+  it('stays on the older version when a declared control is never used', () => {
+    // A session that could restart but never did is an ordinary artifact, and
+    // must stay readable by anything that predates host controls.
+    const unused = createReplayArtifact({
+      sessionId: 'no-restart',
+      game,
+      seed: 7,
+      perm: [0],
+      systemActions: ['Restart'],
+      levels: [{
+        id: 'level-a', version: 1, level: { id: 'level-a', goal: 1 },
+        result: { status: 'won', stars: 3, actionsUsed: 1 },
+      }],
+      actions: [{ n: 0, levelIndex: 0, wireId: 'Action 1', canonicalId: 'Action 1' }],
+    });
+    expect(unused.header.formatVersion).toBe('1.3');
+    expect(unused.header.systemActions).toBeUndefined();
+  });
+});
