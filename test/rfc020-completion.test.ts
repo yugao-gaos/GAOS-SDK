@@ -6,7 +6,7 @@ import {
   type CommandSubmission,
 } from '../src/protocol.js';
 import {
-  GAOS_REPLAY_FORMAT_VERSION,
+  GAOS_REPLAY_INTERACTION_FORMAT_VERSION,
   recheckReplayArtifact,
   type TickReducer,
   type TickView,
@@ -260,7 +260,9 @@ describe('RFC-020 unified command effects', () => {
     expect(recovered.observe('red')).toEqual(kernel.observe('red'));
 
     const replay = finalizeReplay(transcript, { perm: [0] });
-    expect(replay.header.formatVersion).toBe(GAOS_REPLAY_FORMAT_VERSION);
+    // Interactions need 1.4; the artifact stays there because it uses no host
+    // control, so a reader of 1.4 is not stranded by a later capability.
+    expect(replay.header.formatVersion).toBe(GAOS_REPLAY_INTERACTION_FORMAT_VERSION);
     expect(replay.records?.map((record) => record.kind)).toEqual([
       'interaction',
       'resolution',

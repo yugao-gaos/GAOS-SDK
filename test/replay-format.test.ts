@@ -376,3 +376,73 @@ describe('portable GAOS replay JSONL', () => {
     expect(() => serializeReplayJsonl(surrogate)).toThrow(/unpaired surrogates/);
   });
 });
+
+describe('host controls', () => {
+  const game: ReplayGameRef = { id: 'grid', version: '1', adapter: { id: 'a', version: '1' } };
+
+  const artifact = (systemActions?: readonly string[]) => createReplayArtifact({
+    sessionId: 'restart-run',
+    game,
+    seed: 7,
+    perm: [0, 1],
+    ...(systemActions ? { systemActions } : {}),
+    levels: [{
+      id: 'level-a',
+      version: 1,
+      level: { id: 'level-a', goal: 1 },
+      result: { status: 'won', stars: 3, actionsUsed: 2 },
+    }],
+    actions: [
+      { n: 0, levelIndex: 0, wireId: 'Action 1', canonicalId: 'Action 1' },
+      // A restart changes world state but is never permuted, so it names
+      // itself on both sides instead of indexing the alphabet.
+      { n: 1, levelIndex: 0, wireId: 'Restart', canonicalId: 'Restart' },
+    ],
+  });
+
+  it('accepts a declared control and records the version that carries it', () => {
+    const declared = artifact(['Restart']);
+    expect(declared.header.formatVersion).toBe('1.5');
+    expect(declared.header.systemActions).toEqual(['Restart']);
+    expect(() => validateReplayArtifact(declared)).not.toThrow();
+  });
+
+  it('rejects a control the header never declared', () => {
+    expect(() => artifact()).toThrow(ReplayFormatError);
+  });
+
+  it('rejects a control that disagrees with itself across wire and canonical', () => {
+    const build = () => createReplayArtifact({
+      sessionId: 'restart-run',
+      game,
+      seed: 7,
+      perm: [0, 1],
+      systemActions: ['Restart'],
+      levels: [{
+        id: 'level-a', version: 1, level: { id: 'level-a', goal: 1 },
+        result: { status: 'won', stars: 3, actionsUsed: 2 },
+      }],
+      actions: [
+        { n: 0, levelIndex: 0, wireId: 'Action 1', canonicalId: 'Action 1' },
+        { n: 1, levelIndex: 0, wireId: 'Restart', canonicalId: 'Action 2' },
+      ],
+    });
+    expect(build).toThrow(/declared host control/);
+  });
+
+  it('leaves an artifact without controls on its older version', () => {
+    const plain = createReplayArtifact({
+      sessionId: 'plain-run',
+      game,
+      seed: 7,
+      perm: [0],
+      levels: [{
+        id: 'level-a', version: 1, level: { id: 'level-a', goal: 1 },
+        result: { status: 'won', stars: 3, actionsUsed: 1 },
+      }],
+      actions: [{ n: 0, levelIndex: 0, wireId: 'Action 1', canonicalId: 'Action 1' }],
+    });
+    expect(plain.header.formatVersion).toBe('1.3');
+    expect(plain.header.systemActions).toBeUndefined();
+  });
+});

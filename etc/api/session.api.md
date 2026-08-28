@@ -257,7 +257,10 @@ const GAOS_REPLAY_ENDED_FORMAT_VERSION: "1.3";
 const GAOS_REPLAY_FORMAT_ID: "gaos.replay";
 
 // @public
-const GAOS_REPLAY_FORMAT_VERSION: "1.4";
+const GAOS_REPLAY_FORMAT_VERSION: "1.5";
+
+// @public
+const GAOS_REPLAY_INTERACTION_FORMAT_VERSION: "1.4";
 
 // @public
 const GAOS_REPLAY_LEGACY_FORMAT_VERSION: "1.0";
@@ -832,7 +835,7 @@ interface ReplayExtension {
 }
 
 // @public (undocumented)
-type ReplayFormatVersion = typeof GAOS_REPLAY_LEGACY_FORMAT_VERSION | typeof GAOS_REPLAY_UNSIGNED_FORMAT_VERSION | typeof GAOS_REPLAY_SIGNED_FORMAT_VERSION | typeof GAOS_REPLAY_ENDED_FORMAT_VERSION | typeof GAOS_REPLAY_FORMAT_VERSION;
+type ReplayFormatVersion = typeof GAOS_REPLAY_LEGACY_FORMAT_VERSION | typeof GAOS_REPLAY_UNSIGNED_FORMAT_VERSION | typeof GAOS_REPLAY_SIGNED_FORMAT_VERSION | typeof GAOS_REPLAY_ENDED_FORMAT_VERSION | typeof GAOS_REPLAY_INTERACTION_FORMAT_VERSION | typeof GAOS_REPLAY_FORMAT_VERSION;
 
 // @public
 export interface ReplayGameRef {
@@ -868,6 +871,7 @@ interface ReplayHeader<TLevel> {
     // (undocumented)
     sessionId: string;
     signaturePolicy?: JsonObject | SubmissionSignaturePolicy;
+    systemActions?: readonly string[];
     timeoutPolicy?: JsonObject | ReplayTickTimeoutPolicy;
     // (undocumented)
     totals: ReplayTotals;

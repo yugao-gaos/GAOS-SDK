@@ -44,8 +44,18 @@ import {
 
 /** Stable identifier carried by every SDK-owned portable replay. */
 export const GAOS_REPLAY_FORMAT_ID = 'gaos.replay' as const;
-/** Current schema version; adds ordered reducer-backed interactions. */
-export const GAOS_REPLAY_FORMAT_VERSION = '1.4' as const;
+/** Adds ordered reducer-backed interactions. */
+export const GAOS_REPLAY_INTERACTION_FORMAT_VERSION = '1.4' as const;
+/**
+ * Current schema version; adds replayable host controls.
+ *
+ * A host control is a semantic command that changes world state but sits
+ * outside the permuted `Action N` alphabet — Restart is the first. Earlier
+ * versions could not record one: every action id had to parse as `Action N`
+ * within the permutation, so a transcript containing a restart failed its own
+ * validator and the run could never be published.
+ */
+export const GAOS_REPLAY_FORMAT_VERSION = '1.5' as const;
 /** Adds replayable open-session termination. */
 export const GAOS_REPLAY_ENDED_FORMAT_VERSION = '1.3' as const;
 /** Signed submission and per-seat audit-chain compatibility version. */
@@ -59,6 +69,7 @@ export type ReplayFormatVersion =
   | typeof GAOS_REPLAY_UNSIGNED_FORMAT_VERSION
   | typeof GAOS_REPLAY_SIGNED_FORMAT_VERSION
   | typeof GAOS_REPLAY_ENDED_FORMAT_VERSION
+  | typeof GAOS_REPLAY_INTERACTION_FORMAT_VERSION
   | typeof GAOS_REPLAY_FORMAT_VERSION;
 /** Media type used by downloads, object storage, and module manifests. */
 export const GAOS_REPLAY_MIME = 'application/vnd.gaos.replay+jsonl' as const;
@@ -155,6 +166,12 @@ export interface ReplayHeader<TLevel> {
   signaturePolicy?: JsonObject | SubmissionSignaturePolicy;
   /** Opaque in v1.1; v1.2 assigns tick-bounded timeout semantics. */
   timeoutPolicy?: JsonObject | ReplayTickTimeoutPolicy;
+  /**
+   * Semantic host controls this session could accept, e.g. `Restart`. They are
+   * never permuted, so an action row naming one is checked against this roster
+   * instead of the `Action N` alphabet. Requires formatVersion 1.5.
+   */
+  systemActions?: readonly string[];
   /** Host, creator, agent, signing, or benchmark metadata. */
   extensions?: JsonObject;
 }
@@ -366,6 +383,8 @@ export interface CreateReplayArtifactInput<TLevel> {
   seatKeys?: readonly ReplaySeatIntegrityReservation[];
   signaturePolicy?: JsonObject | SubmissionSignaturePolicy;
   timeoutPolicy?: JsonObject | ReplayTickTimeoutPolicy;
+  /** Semantic host controls this session could accept (see ReplayHeader). */
+  systemActions?: readonly string[];
   extensions?: JsonObject;
 }
 
@@ -557,17 +576,38 @@ function isGroupedReplayVersion(value: unknown): boolean {
   return value === GAOS_REPLAY_UNSIGNED_FORMAT_VERSION
     || value === GAOS_REPLAY_SIGNED_FORMAT_VERSION
     || value === GAOS_REPLAY_ENDED_FORMAT_VERSION
+    || value === GAOS_REPLAY_INTERACTION_FORMAT_VERSION
     || value === GAOS_REPLAY_FORMAT_VERSION;
 }
 
 function hasV12IntegritySemantics(value: unknown): boolean {
   return value === GAOS_REPLAY_SIGNED_FORMAT_VERSION
     || value === GAOS_REPLAY_ENDED_FORMAT_VERSION
+    || value === GAOS_REPLAY_INTERACTION_FORMAT_VERSION
     || value === GAOS_REPLAY_FORMAT_VERSION;
+}
+
+/** Interactions arrived in 1.4 and are still carried by every later version. */
+function supportsInteractions(value: unknown): boolean {
+  return value === GAOS_REPLAY_INTERACTION_FORMAT_VERSION
+    || value === GAOS_REPLAY_FORMAT_VERSION;
+}
+
+/** A declared host control is exempt from the `Action N` alphabet. */
+function isDeclaredHostControl(header: Record<string, unknown>, value: unknown): boolean {
+  if (typeof value !== 'string' || !supportsHostControls(header['formatVersion'])) return false;
+  const declared = header['systemActions'];
+  return Array.isArray(declared) && declared.includes(value);
+}
+
+/** Host controls outside the action alphabet arrived in 1.5. */
+function supportsHostControls(value: unknown): boolean {
+  return value === GAOS_REPLAY_FORMAT_VERSION;
 }
 
 function supportsEndedResult(value: unknown): boolean {
   return value === GAOS_REPLAY_ENDED_FORMAT_VERSION
+    || value === GAOS_REPLAY_INTERACTION_FORMAT_VERSION
     || value === GAOS_REPLAY_FORMAT_VERSION;
 }
 
@@ -683,14 +723,19 @@ export function createReplayArtifact<TLevel>(
   const header: ReplayHeader<TLevel> = {
     kind: 'header',
     format: GAOS_REPLAY_FORMAT_ID,
-    formatVersion: input.records?.some((record) => record.kind === 'interaction')
+    // Emit the lowest version that covers what this transcript actually uses,
+    // so adding a capability does not strand readers of older artifacts.
+    formatVersion: input.systemActions?.length
       ? GAOS_REPLAY_FORMAT_VERSION
-      : GAOS_REPLAY_ENDED_FORMAT_VERSION,
+      : input.records?.some((record) => record.kind === 'interaction')
+        ? GAOS_REPLAY_INTERACTION_FORMAT_VERSION
+        : GAOS_REPLAY_ENDED_FORMAT_VERSION,
     sessionId: input.sessionId,
     game: input.game,
     seed: input.seed,
     seedPolicy,
     perm: [...input.perm],
+    ...(input.systemActions?.length ? { systemActions: [...input.systemActions] } : {}),
     levels,
     totals: input.totals ?? replayTotals(levels),
     ...(input.visibility === undefined ? {} : { visibility: input.visibility }),
@@ -770,13 +815,28 @@ export function validateReplayArtifact(value: unknown): string[] {
     'seatKeys',
     'signaturePolicy',
     'timeoutPolicy',
+    'systemActions',
     'extensions',
   ], 'header', problems);
+  const declaredControls = header['systemActions'];
+  if (declaredControls !== undefined) {
+    if (!Array.isArray(declaredControls)
+      || declaredControls.length === 0
+      || declaredControls.some((id) => typeof id !== 'string' || id.length === 0)) {
+      problems.push('header.systemActions must be a non-empty array of non-empty strings');
+    } else if (declaredControls.some((id) => /^Action ([1-9]\d*)$/.test(id as string))) {
+      problems.push('header.systemActions must not name alphabet actions');
+    }
+    if (!supportsHostControls(header['formatVersion'])) {
+      problems.push(`header.systemActions requires formatVersion ${GAOS_REPLAY_FORMAT_VERSION}`);
+    }
+  }
   if (header['kind'] !== 'header') problems.push('header.kind must be header');
   if (header['format'] !== GAOS_REPLAY_FORMAT_ID) {
     problems.push(`header.format must be ${GAOS_REPLAY_FORMAT_ID}`);
   }
   if (header['formatVersion'] !== GAOS_REPLAY_FORMAT_VERSION
+    && header['formatVersion'] !== GAOS_REPLAY_INTERACTION_FORMAT_VERSION
     && header['formatVersion'] !== GAOS_REPLAY_ENDED_FORMAT_VERSION
     && header['formatVersion'] !== GAOS_REPLAY_SIGNED_FORMAT_VERSION
     && header['formatVersion'] !== GAOS_REPLAY_UNSIGNED_FORMAT_VERSION
@@ -785,7 +845,8 @@ export function validateReplayArtifact(value: unknown): string[] {
       `header.formatVersion must be ${GAOS_REPLAY_LEGACY_FORMAT_VERSION}`
       + `, ${GAOS_REPLAY_UNSIGNED_FORMAT_VERSION}, `
       + `${GAOS_REPLAY_SIGNED_FORMAT_VERSION}, `
-      + `${GAOS_REPLAY_ENDED_FORMAT_VERSION}, or ${GAOS_REPLAY_FORMAT_VERSION}`,
+      + `${GAOS_REPLAY_ENDED_FORMAT_VERSION}, `
+      + `${GAOS_REPLAY_INTERACTION_FORMAT_VERSION}, or ${GAOS_REPLAY_FORMAT_VERSION}`,
     );
   }
   if (header['formatVersion'] === GAOS_REPLAY_LEGACY_FORMAT_VERSION
@@ -1056,10 +1117,23 @@ export function validateReplayArtifact(value: unknown): string[] {
       } else {
         previousLevelIndex = action['levelIndex'];
       }
+      const hostControl = isDeclaredHostControl(header, action['wireId'])
+        || isDeclaredHostControl(header, action['canonicalId']);
       const parseActionId = (field: 'wireId' | 'canonicalId'): number | undefined => {
         const value = action[field];
         if (typeof value !== 'string') {
           problems.push(`action ${String(action['n'])} ${field} must use Action N syntax`);
+          return undefined;
+        }
+        // A host control is never permuted, so both ids must name the same
+        // declared control and neither indexes the alphabet.
+        if (hostControl) {
+          if (!isDeclaredHostControl(header, value)) {
+            problems.push(
+              `action ${String(action['n'])} ${field} must be the same declared `
+              + 'host control on both sides',
+            );
+          }
           return undefined;
         }
         const match = /^Action ([1-9]\d*)$/.exec(value);
@@ -1268,8 +1342,20 @@ export function validateReplayArtifact(value: unknown): string[] {
           wireId: undefined,
           canonicalId: undefined,
         };
+        // A declared host control names itself on both sides and indexes no
+        // alphabet slot, so it skips the permutation cross-check below.
+        const control = isDeclaredHostControl(header, candidate['wireId'])
+          || isDeclaredHostControl(header, candidate['canonicalId']);
         for (const field of ['wireId', 'canonicalId'] as const) {
           const id = candidate[field];
+          if (control) {
+            if (!isDeclaredHostControl(header, id)) {
+              problems.push(
+                `${label} ${field} must be the same declared host control on both sides`,
+              );
+            }
+            continue;
+          }
           const match = typeof id === 'string' ? /^Action ([1-9]\d*)$/.exec(id) : null;
           const number = match ? Number(match[1]) : Number.NaN;
           if (!Number.isSafeInteger(number) || number < 1 || number > permutation.length) {
@@ -1617,9 +1703,10 @@ export function validateReplayArtifact(value: unknown): string[] {
             record['submissionId'],
             `interaction ${index}`,
           );
-          if (header['formatVersion'] !== GAOS_REPLAY_FORMAT_VERSION) {
+          if (!supportsInteractions(header['formatVersion'])) {
             problems.push(
-              `interaction ${index} requires formatVersion ${GAOS_REPLAY_FORMAT_VERSION}`,
+              `interaction ${index} requires formatVersion `
+              + `${GAOS_REPLAY_INTERACTION_FORMAT_VERSION} or later`,
             );
           }
           if (!validNonNegativeInteger(record['tick'])
