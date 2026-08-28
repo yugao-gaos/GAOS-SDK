@@ -726,6 +726,12 @@ export interface SeatSignatureInput {
 
 export interface FinalizeOptions {
   perm: number[];
+  /**
+   * Semantic host controls this session could accept, e.g. `Restart`. They are
+   * never permuted, so the artifact checks an action naming one against this
+   * roster instead of the `Action N` alphabet.
+   */
+  systemActions?: readonly string[];
   visibility?: TranscriptVisibility;
   extensions?: JsonObject;
   /** Opt in to projecting advisory session-event times into replay records. */
@@ -4584,6 +4590,7 @@ export function finalizeReplay<TLevel>(
       : { dmath: structuredClone(transcript.header.dmath) as unknown as JsonValue }),
   };
   return createReplayArtifact<TLevel>({
+    ...(options.systemActions?.length ? { systemActions: options.systemActions } : {}),
     sessionId: transcript.header.sessionId,
     game: transcript.header.game,
     seed: transcript.header.seed,
@@ -4732,6 +4739,7 @@ export function finalizeRunReplay<TLevel>(
       : { dmath: structuredClone(first.header.dmath) as unknown as JsonValue }),
   };
   return createReplayArtifact<TLevel>({
+    ...(options.systemActions?.length ? { systemActions: options.systemActions } : {}),
     sessionId: first.header.sessionId,
     game: first.header.game,
     seed: options.seed,

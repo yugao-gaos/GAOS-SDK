@@ -231,6 +231,7 @@ export interface FinalizeOptions {
     includeHostTime?: boolean;
     // (undocumented)
     perm: number[];
+    systemActions?: readonly string[];
     // (undocumented)
     visibility?: TranscriptVisibility;
 }
