@@ -4698,6 +4698,9 @@ export function finalizeRunReplay<TLevel>(
     }
     const segment = finalizeReplay(transcript, {
       perm: options.perm,
+      // Each segment validates on its own, so it needs the same roster as the
+      // composed run or a level containing a host control fails here first.
+      ...(options.systemActions?.length ? { systemActions: options.systemActions } : {}),
       ...(options.visibility === undefined ? {} : { visibility: options.visibility }),
       ...(options.includeHostTime === undefined
         ? {}
