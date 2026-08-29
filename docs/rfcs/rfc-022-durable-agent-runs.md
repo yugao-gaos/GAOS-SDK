@@ -155,6 +155,14 @@ durable conversation transcript or later model history. A product must opt in
 with `history: 'record'` when progress wording is semantically important to
 future turns. Ordinary answers and questions default to `record`.
 
+Long provider silence may be bridged with the optional
+`waitWithRoomAgentProgress()` driver helper. The product supplies a finite list
+of consecutive delays and maps each timing rung to a truthful `progress`
+event. The SDK supplies neither a default cadence nor filler wording, and the
+helper never carries model scratchpad, reasoning tokens, invented milestones,
+or estimated completion. It stops silently on abort and returns a completed
+provider value as soon as that value is available.
+
 ## 6 — Multi-turn continuation
 
 `input_requested` changes the run to `waiting_for_input` and stores its request

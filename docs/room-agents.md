@@ -185,6 +185,36 @@ short fresh line from the verified progress snapshot. Presenter utterances are
 ephemeral by default and therefore do not enter the durable channel transcript
 or later model history unless the product explicitly selects `record`.
 
+Drivers that begin provider work before another truthful milestone is
+available can opt into a bounded silence ladder with
+`waitWithRoomAgentProgress()`. The helper contains no wording and has no
+default cadence: the product supplies consecutive delays, converts each rung
+into an ordinary structured `progress` event, and leaves its existing
+`progressPresenter` to choose text, audio, or no presentation at all.
+
+```ts
+const pending = understandVisitor(input, signal);
+yield { type: 'progress', progress: { stage: 'understanding' } };
+for await (const entry of waitWithRoomAgentProgress(pending, {
+  delaysMs: [6_000, 3_000, 6_000],
+  signal,
+})) {
+  if (entry.type === 'progress') {
+    yield {
+      type: 'progress',
+      progress: { stage: 'understanding', current: entry.rung, unit: 'rung' },
+    };
+  } else {
+    understanding = entry.value;
+  }
+}
+```
+
+The first provider result wins immediately, timers are cleared, and abort ends
+the ladder silently even when the underlying provider has not settled. A
+product can emit an immediate progress event before the helper, as above, then
+use the delay list for later silence-based reminders.
+
 An `input_requested` event durably changes the run to `waiting_for_input`.
 The next input from the same authenticated speaker on the same channel and
 agent continues that run, or a client can echo the run ID and continuation
