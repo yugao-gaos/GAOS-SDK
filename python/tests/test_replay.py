@@ -11,6 +11,7 @@ from gaos_sdk import (
     GAOS_REPLAY_DERIVED_SEEDS,
     GAOS_REPLAY_FORMAT_ID,
     GAOS_REPLAY_ENDED_FORMAT_VERSION,
+    GAOS_REPLAY_INTERACTION_FORMAT_VERSION,
     GAOS_REPLAY_LEGACY_FORMAT_VERSION,
     GAOS_REPLAY_FORMAT_VERSION,
     GAOS_REPLAY_UNSIGNED_FORMAT_VERSION,
@@ -117,7 +118,9 @@ def test_v13_ended_fixture_round_trips_and_conforms_to_schema():
 
 def test_v14_interaction_conforms_to_schema_and_canonical_validation():
     artifact = parse_replay_jsonl(ENDED_FIXTURE.read_text(encoding="utf-8"))
-    artifact["header"]["formatVersion"] = GAOS_REPLAY_FORMAT_VERSION
+    artifact["header"]["formatVersion"] = (
+        GAOS_REPLAY_INTERACTION_FORMAT_VERSION
+    )
     interaction = {
         "kind": "interaction",
         "n": 0,
@@ -142,6 +145,68 @@ def test_v14_interaction_conforms_to_schema_and_canonical_validation():
         "canonicalCommand does not match command" in problem
         for problem in validate_replay_artifact(artifact)
     )
+
+
+def test_v15_host_controls_validate_in_actions_and_grouped_inputs():
+    artifact = parse_replay_jsonl(FIXTURE.read_text(encoding="utf-8"))
+    artifact["header"].update({
+        "formatVersion": GAOS_REPLAY_FORMAT_VERSION,
+        "systemActions": ["Restart", "Reset"],
+    })
+    inputs = [
+        {"wireId": "Restart", "canonicalId": "Restart"},
+        {"wireId": "Action 2", "canonicalId": "Action 2", "index": 2},
+    ]
+    artifact["actions"] = [
+        {
+            **replay_input,
+            "kind": "action",
+            "n": index,
+            "levelIndex": 0,
+            "tick": 0,
+        }
+        for index, replay_input in enumerate(inputs)
+    ]
+    artifact["records"] = [{
+        "kind": "resolution",
+        "n": 0,
+        "levelIndex": 0,
+        "tick": 0,
+        "inputs": inputs,
+        "cause": "complete",
+    }]
+
+    assert validate_replay_artifact(artifact) == []
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    Draft202012Validator(schema).validate(artifact)
+    assert parse_replay_jsonl(serialize_replay_jsonl(artifact)) == artifact
+
+    mismatched = copy.deepcopy(artifact)
+    mismatched["actions"][0]["canonicalId"] = "Reset"
+    mismatched["records"][0]["inputs"][0]["canonicalId"] = "Reset"
+    assert any(
+        "same declared host control" in problem
+        for problem in validate_replay_artifact(mismatched)
+    )
+
+    undeclared = copy.deepcopy(artifact)
+    undeclared["header"].pop("systemActions")
+    assert any(
+        "must be within Action 1..2" in problem
+        for problem in validate_replay_artifact(undeclared)
+    )
+    assert list(Draft202012Validator(schema).iter_errors(undeclared))
+
+    historical = copy.deepcopy(artifact)
+    historical["header"]["formatVersion"] = (
+        GAOS_REPLAY_INTERACTION_FORMAT_VERSION
+    )
+    historical["header"].pop("systemActions")
+    assert any(
+        "must be within Action 1..2" in problem
+        for problem in validate_replay_artifact(historical)
+    )
+    assert list(Draft202012Validator(schema).iter_errors(historical))
 
 
 def test_v11_grouped_resolution_round_trips_and_projects_actions():
