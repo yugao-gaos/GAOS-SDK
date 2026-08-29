@@ -19,7 +19,8 @@ from .signatures import (
 )
 
 GAOS_REPLAY_FORMAT_ID = "gaos.replay"
-GAOS_REPLAY_FORMAT_VERSION = "1.4"
+GAOS_REPLAY_INTERACTION_FORMAT_VERSION = "1.4"
+GAOS_REPLAY_FORMAT_VERSION = "1.5"
 GAOS_REPLAY_ENDED_FORMAT_VERSION = "1.3"
 GAOS_REPLAY_SIGNED_FORMAT_VERSION = "1.2"
 GAOS_REPLAY_UNSIGNED_FORMAT_VERSION = "1.1"
@@ -86,14 +87,45 @@ def _is_grouped_version(value: Any) -> bool:
         GAOS_REPLAY_UNSIGNED_FORMAT_VERSION,
         GAOS_REPLAY_SIGNED_FORMAT_VERSION,
         GAOS_REPLAY_ENDED_FORMAT_VERSION,
+        GAOS_REPLAY_INTERACTION_FORMAT_VERSION,
         GAOS_REPLAY_FORMAT_VERSION,
     )
+
 
 def _has_v12_integrity_semantics(value: Any) -> bool:
     return value in (
         GAOS_REPLAY_SIGNED_FORMAT_VERSION,
         GAOS_REPLAY_ENDED_FORMAT_VERSION,
+        GAOS_REPLAY_INTERACTION_FORMAT_VERSION,
         GAOS_REPLAY_FORMAT_VERSION,
+    )
+
+
+def _supports_interactions(value: Any) -> bool:
+    return value in (
+        GAOS_REPLAY_INTERACTION_FORMAT_VERSION,
+        GAOS_REPLAY_FORMAT_VERSION,
+    )
+
+
+def _supports_ended_result(value: Any) -> bool:
+    return value in (
+        GAOS_REPLAY_ENDED_FORMAT_VERSION,
+        GAOS_REPLAY_INTERACTION_FORMAT_VERSION,
+        GAOS_REPLAY_FORMAT_VERSION,
+    )
+
+
+def _is_declared_host_control(
+    header: dict[str, Any],
+    value: Any,
+) -> bool:
+    declared = header.get("systemActions")
+    return (
+        header.get("formatVersion") == GAOS_REPLAY_FORMAT_VERSION
+        and isinstance(value, str)
+        and isinstance(declared, list)
+        and value in declared
     )
 
 
@@ -246,10 +278,51 @@ def _reject_unknown(
     ]
 
 
+def _validate_action_ids(
+    candidate: dict[str, Any],
+    label: str,
+    permutation: list[int],
+    header: dict[str, Any],
+) -> list[str]:
+    host_control = (
+        _is_declared_host_control(header, candidate.get("wireId"))
+        or _is_declared_host_control(header, candidate.get("canonicalId"))
+    )
+    if host_control:
+        if (
+            _is_declared_host_control(header, candidate.get("wireId"))
+            and _is_declared_host_control(header, candidate.get("canonicalId"))
+            and candidate.get("wireId") == candidate.get("canonicalId")
+        ):
+            return []
+        return [f"{label} action ids must name the same declared host control"]
+
+    problems: list[str] = []
+    parsed_ids: dict[str, int] = {}
+    for field in ("wireId", "canonicalId"):
+        value = candidate.get(field)
+        match = _ACTION_ID.fullmatch(value) if isinstance(value, str) else None
+        action_id = int(match.group(1)) if match else 0
+        if not match or not 1 <= action_id <= len(permutation):
+            problems.append(
+                f"{label} {field} must be within Action 1..{len(permutation)}"
+            )
+        else:
+            parsed_ids[field] = action_id - 1
+    if (
+        "wireId" in parsed_ids
+        and "canonicalId" in parsed_ids
+        and permutation[parsed_ids["wireId"]] != parsed_ids["canonicalId"]
+    ):
+        problems.append(f"{label} action ids contradict the replay permutation")
+    return problems
+
+
 def _validate_resolution_input(
     candidate: Any,
     label: str,
     permutation: list[int],
+    header: dict[str, Any],
     *,
     action_record: bool = False,
 ) -> list[str]:
@@ -279,23 +352,7 @@ def _validate_resolution_input(
     if action_record:
         allowed.update({"kind", "n", "levelIndex", "tick", "hostTime"})
     problems = _reject_unknown(candidate, allowed, label)
-    parsed_ids: dict[str, int] = {}
-    for field in ("wireId", "canonicalId"):
-        value = candidate.get(field)
-        match = _ACTION_ID.fullmatch(value) if isinstance(value, str) else None
-        action_id = int(match.group(1)) if match else 0
-        if not match or not 1 <= action_id <= len(permutation):
-            problems.append(
-                f"{label} {field} must be within Action 1..{len(permutation)}"
-            )
-        else:
-            parsed_ids[field] = action_id - 1
-    if (
-        "wireId" in parsed_ids
-        and "canonicalId" in parsed_ids
-        and permutation[parsed_ids["wireId"]] != parsed_ids["canonicalId"]
-    ):
-        problems.append(f"{label} action ids contradict the replay permutation")
+    problems.extend(_validate_action_ids(candidate, label, permutation, header))
     for field in ("x", "y", "index"):
         if field in candidate and not _valid_safe_integer(candidate[field]):
             problems.append(f"{label} {field} must be a safe integer")
@@ -474,10 +531,32 @@ def validate_replay_artifact(value: Any) -> list[str]:
             "seatKeys",
             "signaturePolicy",
             "timeoutPolicy",
+            "systemActions",
             "extensions",
         },
         "header",
     ))
+    declared_controls = header.get("systemActions")
+    if "systemActions" in header:
+        if (
+            not isinstance(declared_controls, list)
+            or not declared_controls
+            or any(
+                not isinstance(control, str) or not control
+                for control in declared_controls
+            )
+        ):
+            problems.append(
+                "header.systemActions must be a non-empty array of "
+                "non-empty strings"
+            )
+        elif any(_ACTION_ID.fullmatch(control) for control in declared_controls):
+            problems.append("header.systemActions must not name alphabet actions")
+        if header.get("formatVersion") != GAOS_REPLAY_FORMAT_VERSION:
+            problems.append(
+                "header.systemActions requires formatVersion "
+                f"{GAOS_REPLAY_FORMAT_VERSION}"
+            )
     if header.get("kind") != "header":
         problems.append("header.kind must be header")
     if header.get("format") != GAOS_REPLAY_FORMAT_ID:
@@ -487,6 +566,7 @@ def validate_replay_artifact(value: Any) -> list[str]:
         GAOS_REPLAY_UNSIGNED_FORMAT_VERSION,
         GAOS_REPLAY_SIGNED_FORMAT_VERSION,
         GAOS_REPLAY_ENDED_FORMAT_VERSION,
+        GAOS_REPLAY_INTERACTION_FORMAT_VERSION,
         GAOS_REPLAY_FORMAT_VERSION,
     ):
         problems.append(
@@ -494,7 +574,8 @@ def validate_replay_artifact(value: Any) -> list[str]:
             f"{GAOS_REPLAY_LEGACY_FORMAT_VERSION}, "
             f"{GAOS_REPLAY_UNSIGNED_FORMAT_VERSION}, "
             f"{GAOS_REPLAY_SIGNED_FORMAT_VERSION}, "
-            f"{GAOS_REPLAY_ENDED_FORMAT_VERSION}, or "
+            f"{GAOS_REPLAY_ENDED_FORMAT_VERSION}, "
+            f"{GAOS_REPLAY_INTERACTION_FORMAT_VERSION}, or "
             f"{GAOS_REPLAY_FORMAT_VERSION}"
         )
     if (
@@ -673,10 +754,7 @@ def validate_replay_artifact(value: Any) -> list[str]:
                 ))
                 allowed_statuses = (
                     ("won", "failed", "ended")
-                    if header.get("formatVersion") in (
-                        GAOS_REPLAY_ENDED_FORMAT_VERSION,
-                        GAOS_REPLAY_FORMAT_VERSION,
-                    )
+                    if _supports_ended_result(header.get("formatVersion"))
                     else ("won", "failed")
                 )
                 if result.get("status") not in allowed_statuses:
@@ -803,26 +881,12 @@ def validate_replay_artifact(value: Any) -> list[str]:
             else:
                 previous_level_index = level_index
 
-            parsed_ids: dict[str, int] = {}
-            for field in ("wireId", "canonicalId"):
-                candidate = action.get(field)
-                match = _ACTION_ID.fullmatch(candidate) if isinstance(candidate, str) else None
-                action_id = int(match.group(1)) if match else 0
-                if not match or not 1 <= action_id <= len(permutation):
-                    problems.append(
-                        f"action {_message_value(number)} {field} must be within Action 1..{len(permutation)}"
-                    )
-                else:
-                    parsed_ids[field] = action_id - 1
-            if (
-                "wireId" in parsed_ids
-                and "canonicalId" in parsed_ids
-                and permutation[parsed_ids["wireId"]] != parsed_ids["canonicalId"]
-            ):
-                problems.append(
-                    f"action {_message_value(number)}: wire {action.get('wireId')} to "
-                    f"{action.get('canonicalId')} contradicts the replay permutation"
-                )
+            problems.extend(_validate_action_ids(
+                action,
+                f"action {_message_value(number)}",
+                permutation,
+                header,
+            ))
 
             for field in ("x", "y", "index", "tick"):
                 if field in action and not _valid_safe_integer(action[field]):
@@ -1102,6 +1166,7 @@ def validate_replay_artifact(value: Any) -> list[str]:
                         record,
                         f"record {index} action",
                         permutation,
+                        header,
                         action_record=True,
                     ))
                     if _has_v12_integrity_semantics(header.get("formatVersion")):
@@ -1129,6 +1194,7 @@ def validate_replay_artifact(value: Any) -> list[str]:
                                 replay_input,
                                 f"resolution {index} input {input_index}",
                                 permutation,
+                                header,
                             ))
                             if (
                                 _has_v12_integrity_semantics(
@@ -1155,6 +1221,7 @@ def validate_replay_artifact(value: Any) -> list[str]:
                                 system_input,
                                 f"resolution {index} systemInput",
                                 permutation,
+                                header,
                             ))
                             if (
                                 _has_v12_integrity_semantics(
@@ -1277,10 +1344,12 @@ def validate_replay_artifact(value: Any) -> list[str]:
                         record.get("submissionId"),
                         f"interaction {index}",
                     )
-                    if header.get("formatVersion") != GAOS_REPLAY_FORMAT_VERSION:
+                    if not _supports_interactions(
+                        header.get("formatVersion")
+                    ):
                         problems.append(
                             f"interaction {index} requires formatVersion "
-                            f"{GAOS_REPLAY_FORMAT_VERSION}"
+                            f"{GAOS_REPLAY_INTERACTION_FORMAT_VERSION} or later"
                         )
                     for field in ("tick", "cursor"):
                         if not _valid_non_negative_integer(record.get(field)):

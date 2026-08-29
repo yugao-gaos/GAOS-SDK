@@ -287,7 +287,16 @@ describe('RFC-016 release gate', () => {
       stdout: (text) => { output += text; },
       stderr: () => undefined,
     })).toBe(0);
-    expect(JSON.parse(output).manifest.schema).toBe('gaos.verifier-kit.v1');
+    const manifest = JSON.parse(output).manifest;
+    expect(manifest.schema).toBe('gaos.verifier-kit.v1');
+    expect(manifest.replayFormats).toEqual([
+      'gaos.replay@1.0',
+      'gaos.replay@1.1',
+      'gaos.replay@1.2',
+      'gaos.replay@1.3',
+      'gaos.replay@1.4',
+      'gaos.replay@1.5',
+    ]);
     expect(readFileSync(join(directory, 'demo.gaos-verifier')).length).toBeGreaterThan(0);
   });
 });
