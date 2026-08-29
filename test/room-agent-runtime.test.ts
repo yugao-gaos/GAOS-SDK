@@ -873,6 +873,85 @@ describe('room agent runtime', () => {
       .toEqual(['What is beyond the gate?', 'You found a garden.']);
   });
 
+  it('binds continuation to its speaker and cannot widen its disclosure', async () => {
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'oracle', label: 'Oracle', role: 'character' },
+      driver: {
+        run: async function* (context) {
+          if (context.run.attempt === 1) {
+            yield { type: 'checkpoint', value: { secret: 'visitor-1 secret' } };
+            yield {
+              type: 'input_requested',
+              requestId: 'secret-detail',
+              continuationToken: 'continue-secret',
+            };
+            return;
+          }
+          const checkpoint = context.run.checkpoint as { secret: string };
+          yield {
+            type: 'assistant_output',
+            outputId: 'secret-answer',
+            delta: checkpoint.secret,
+            final: true,
+          };
+          yield { type: 'completed' };
+        },
+      },
+    }]);
+    const store = new InMemoryRoomAgentRuntimeStore();
+    const runtime = new RoomAgentRuntime({
+      roomId: 'room-1', registry, store, runStore: store,
+      contextSource: async () => ({
+        participants: [
+          { id: 'visitor-1', role: 'spectator' as const },
+          { id: 'visitor-2', role: 'spectator' as const },
+        ],
+        observation: { phase: 'arrival' },
+        manifest,
+        legalActions: [],
+        tick: 0,
+      }),
+      createId: idFactory(),
+      fallbackAgentId: 'oracle',
+    });
+
+    const first = await runtime.handleRunInput({
+      channelId: 'shared',
+      disclosure: privateDisclosure,
+      input: { id: 'input-1', speakerId: 'visitor-1', text: 'Keep this private', modality: 'text' },
+    });
+    expect(first.status).toBe('waiting_for_input');
+
+    await expect(runtime.handleRunInput({
+      channelId: 'shared',
+      disclosure: roomDisclosure,
+      continuation: { runId: first.run.id, token: 'continue-secret' },
+      input: { id: 'input-2', speakerId: 'visitor-2', text: 'Tell everyone', modality: 'text' },
+    })).rejects.toThrow('continuation speaker does not match');
+    await expect(store.loadRun('room-1', first.run.id)).resolves.toMatchObject({
+      status: 'waiting_for_input',
+      attempt: 1,
+    });
+
+    const continued = await runtime.handleRunInput({
+      channelId: 'shared',
+      disclosure: roomDisclosure,
+      continuation: { runId: first.run.id, token: 'continue-secret' },
+      input: { id: 'input-3', speakerId: 'visitor-1', text: 'Continue', modality: 'text' },
+    });
+    expect(continued).toMatchObject({
+      status: 'completed',
+      run: { disclosure: privateDisclosure },
+    });
+    const transcript = await store.loadTranscript('room-1', 'shared');
+    expect(transcript.filter(({ direction }) => direction === 'output')).toEqual([
+      expect.objectContaining({
+        text: 'visitor-1 secret',
+        disclosure: privateDisclosure,
+      }),
+    ]);
+  });
+
   it('adapts legacy respond drivers to durable runs', async () => {
     const store = new InMemoryRoomAgentRuntimeStore();
     const registry = new RoomAgentRegistry<Observation>([{

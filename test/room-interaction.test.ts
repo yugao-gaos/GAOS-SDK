@@ -155,7 +155,7 @@ describe('room interaction routing', () => {
     )).toThrow('target is not disclosed');
   });
 
-  it('serializes independent deliveries through one FIFO queue', async () => {
+  it('serializes same-channel deliveries through one FIFO queue', async () => {
     const router = new RoomInteractionRouter({ createId: idFactory() });
     const order: string[] = [];
     let release!: () => void;
@@ -186,6 +186,42 @@ describe('room interaction routing', () => {
       'end:interaction-1',
       'start:interaction-2',
       'end:interaction-2',
+    ]);
+  });
+
+  it('runs unrelated channel lanes concurrently', async () => {
+    const router = new RoomInteractionRouter({ createId: idFactory() });
+    const order: string[] = [];
+    let release!: () => void;
+    router.register({ kind: 'agent', id: 'guide' }, async (envelope) => {
+      order.push(`start:${envelope.channelId}`);
+      if (envelope.channelId === 'private:p1') {
+        await new Promise<void>((resolve) => { release = resolve; });
+      }
+      order.push(`end:${envelope.channelId}`);
+    });
+    const draft = {
+      targets: [{ kind: 'agent' as const, id: 'guide' }],
+      disclosure: { kind: 'room' as const },
+      payload: { kind: 'message' as const, text: 'Hello.', modality: 'text' as const },
+    };
+
+    const first = router.dispatch(router.create(
+      'room-1', 'private:p1', { kind: 'participant', id: 'p1' }, draft,
+    ));
+    await vi.waitFor(() => expect(order).toEqual(['start:private:p1']));
+    const second = router.dispatch(router.create(
+      'room-1', 'private:p2', { kind: 'participant', id: 'p2' }, draft,
+    ));
+    await vi.waitFor(() => expect(order).toContain('end:private:p2'));
+    release();
+    await Promise.all([first, second]);
+
+    expect(order).toEqual([
+      'start:private:p1',
+      'start:private:p2',
+      'end:private:p2',
+      'end:private:p1',
     ]);
   });
 
@@ -266,6 +302,13 @@ describe('room agent services', () => {
         input: { region: 'north' },
       },
     })).rejects.toThrow('service call id was reused');
+    await expect(services.invoke(agent, {
+      ...envelope,
+      id: 'interaction-2',
+      channelId: 'public',
+      disclosure: { kind: 'room' },
+      cause: { rootId: 'interaction-2', hop: 0 },
+    })).rejects.toThrow('service call id was reused');
   });
 });
 
@@ -296,6 +339,69 @@ describe('room interaction watchers', () => {
     }]);
     await expect(watchers.raiseCommitted(context)).resolves.toEqual([]);
     expect(onCommitted).toHaveBeenCalledOnce();
+  });
+
+  it('coalesces concurrent delivery of one committed room revision', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const onCommitted = vi.fn(async () => {
+      await gate;
+      return [{
+        targets: [{ kind: 'agent' as const, id: 'guide' }],
+        payload: { kind: 'event' as const, topic: 'round.started' },
+      }];
+    });
+    const watchers = new RoomInteractionWatcherRegistry([{ id: 'rounds', onCommitted }]);
+    const context = {
+      roomId: 'room-1',
+      observation: { round: 2 },
+      tick: 8,
+      transitionRevision: 7,
+    };
+
+    const first = watchers.raiseCommitted(context);
+    await vi.waitFor(() => expect(onCommitted).toHaveBeenCalledOnce());
+    const retry = watchers.raiseCommitted(context);
+    await Promise.resolve();
+    expect(onCommitted).toHaveBeenCalledOnce();
+    release();
+
+    await expect(first).resolves.toHaveLength(1);
+    await expect(retry).resolves.toEqual([]);
+    expect(onCommitted).toHaveBeenCalledOnce();
+  });
+
+  it('shares concurrent watcher failures and allows a later retry', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const onCommitted = vi.fn(async () => {
+      if (onCommitted.mock.calls.length === 1) {
+        await gate;
+        throw new Error('watcher failed');
+      }
+      return [];
+    });
+    const watchers = new RoomInteractionWatcherRegistry([{ id: 'rounds', onCommitted }]);
+    const context = {
+      roomId: 'room-1',
+      observation: { round: 2 },
+      tick: 8,
+      transitionRevision: 7,
+    };
+
+    const first = watchers.raiseCommitted(context);
+    await vi.waitFor(() => expect(onCommitted).toHaveBeenCalledOnce());
+    const concurrent = watchers.raiseCommitted(context);
+    release();
+    await expect(first).rejects.toThrow('watcher failed');
+    await expect(concurrent).rejects.toThrow('watcher failed');
+    expect(onCommitted).toHaveBeenCalledOnce();
+
+    await expect(watchers.raiseCommitted(context)).resolves.toEqual([{
+      watcherId: 'rounds',
+      drafts: [],
+    }]);
+    expect(onCommitted).toHaveBeenCalledTimes(2);
   });
 });
 
