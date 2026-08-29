@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/release-gaos-sdk-v1.0.0",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "release-v1-0-0-worker-20260829",
+  "branch": "orch/attempt/codex-release-gaos-sdk-v1.0.0",
+  "status": "claimed",
+  "claimed_at": "2026-08-29T15:24:19.390Z",
+  "lease_until": "2026-08-29T16:24:19.390Z"
+}
