@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/review-semantic-replay-host-controls",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "root-replay-host-control-20260829-review",
+  "branch": "orch/attempt/codex-review-semantic-replay-host-controls",
+  "status": "claimed",
+  "claimed_at": "2026-08-29T14:01:08.278Z",
+  "lease_until": "2026-08-29T15:01:08.278Z"
+}
