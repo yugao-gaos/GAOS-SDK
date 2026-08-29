@@ -3,7 +3,8 @@
   "git_user": "yugao-gaos <yu.gao@gaos.ca>",
   "session_id": "root-release-pr-20260829",
   "branch": "orch/attempt/codex-push-v1.0-release-candidate-and-verify-protected-branch-ci",
-  "status": "claimed",
+  "status": "tested",
   "claimed_at": "2026-08-29T10:46:04.005Z",
-  "lease_until": "2026-08-29T11:46:04.005Z"
+  "lease_until": "2026-08-29T11:46:04.005Z",
+  "completed_at": "2026-08-29T11:01:12.987Z"
 }
