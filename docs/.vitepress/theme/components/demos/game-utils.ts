@@ -1,5 +1,4 @@
-import { manhattanDistance } from '../../../../../src/engine/geometry.js';
-import { mulberry32 } from '../../../../../src/engine/random.js';
+import { manhattanDistance, mulberry32 } from '../../../../../src/engine/index.js';
 
 export type Point = { x: number; y: number };
 

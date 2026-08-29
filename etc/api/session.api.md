@@ -726,6 +726,7 @@ interface ReducerBase<TLevel, TState, TView extends SessionView = TickView> {
     // (undocumented)
     init(level: TLevel, seed: number): TState;
     replayMetrics?(state: TState): ReplayMetrics;
+    sessionView?(state: TState): SessionView;
     validateCommand?(state: TState, seat: string, action: SubmittedAction): void;
     // (undocumented)
     view(state: TState): TView;
@@ -1443,6 +1444,7 @@ export interface SessionKernelOptions<TLevel, TState, TCommand extends JsonValue
 export interface SessionLimits {
     checkpointInterval?: number;
     maxCatchUpTicks?: number;
+    maxCheckpointObjects?: number;
     maxExtensionBytes?: number;
     maxFutureTicks?: number;
     maxOpenCommitmentsPerSeat?: number;

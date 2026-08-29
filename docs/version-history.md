@@ -4,20 +4,26 @@ GAOS used the v0.x line to refine its contracts before v1.0. Products should
 review the migration notes before adopting the stable surface.
 
 ::: tip Next release: v1.0.0
-The complete implemented SDK—including RFC-017 through RFC-020—is prepared as
+The complete implemented SDK—including RFC-017 through RFC-022—is prepared as
 one stable release. Replay v1.0–v1.3 compatibility is unchanged; unified
 command sessions emit replay v1.4.
 :::
 
 ## v1.0.0: stable complete SDK
 
-Prepared August 1, 2026. v1.0 includes the previously planned v0.27 and v0.29
-scope without publishing intermediate packages. It freezes the neutral API,
+Release candidate refreshed August 29, 2026. v1.0 includes the previously
+planned v0.27 and v0.29 scope without publishing intermediate packages. It
+freezes the neutral API,
 removes the scheduled `Grid*`/grid-named aliases, and ships unified sessions,
 portal-aware paths, unified actor control sources, self-reported benchmark
 resource observations, unified command effects, historical verifier kits, and
-the full quality gate. Historical replay, signature, schema, and verifier
-semantics remain compatible.
+provider-neutral room-agent contracts and runtime orchestration for guides,
+NPCs, referees, and audience interaction, including privacy-bounded routing,
+channel transcripts, interruption, speech/caption adapters, reconnect,
+services, committed watchers, deterministic polls, and durable streamed runs
+with progress, checkpoints, continuation, deadlines, and recovery. A
+presentation-cue bridge adds retry-safe browser/native effects. Historical
+replay, signature, schema, and verifier semantics remain compatible.
 
 [Migration and release notes →](/releases#v100)
 

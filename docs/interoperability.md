@@ -27,9 +27,9 @@ epoch. A patch without its base triggers snapshot repair.
 
 | Engine | Authority boundary | Projection and reconnect |
 | --- | --- | --- |
-| Unity | The C# client decodes GAOS observations. GameObjects, Animator state, camera, and input are presentation only. Unity must not run a competing authoritative reducer. | Map stable entity ids to GameObjects. Apply durable state before animation, deduplicate presentation-event ids, and clear old cue queues when a repair snapshot arrives. |
-| Godot | GDScript or C# decodes the same fixture over WebSocket. Nodes/scenes are projections; GAOS remains authoritative. | Map stable ids to Nodes. Preserve unknown optional fields, request repair after a missing base/digest mismatch, replace durable projection, and do not replay old cues. |
-| Unreal Engine | C++ decodes GAOS messages and projects entities into Actors/UObjects. Native replication may distribute the projection but must not become a second simulation authority. | Emit Blueprint events only for unseen presentation-event ids. On reconnect, reconcile the snapshot and retain engine-native objects only when their stable ids still exist. |
+| Unity | The C# client decodes GAOS observations. GameObjects, Animator state, camera, and input are presentation only. Unity must not run a competing authoritative reducer. | Map stable entity ids to GameObjects. Apply durable state before animation. Feed product cue types through the `PresentationCueClient` algorithm, acknowledge each cue, and request replay or a snapshot on repair. |
+| Godot | GDScript or C# decodes the same fixture over WebSocket. Nodes/scenes are projections; GAOS remains authoritative. | Map stable ids to Nodes. Preserve unknown optional fields. Mirror `PresentationCueClient` sequence/idempotency state for scene, video, particle, and emergency-stop cues; replace the durable projection when retention requires a snapshot. |
+| Unreal Engine | C++ decodes GAOS messages and projects entities into Actors/UObjects. Native replication may distribute the projection but must not become a second simulation authority. | Reconcile durable snapshots by stable ID. Mirror `PresentationCueClient` before emitting Blueprint effects so retries are idempotent and reconnect gaps are repaired. |
 
 The executable examples live under `examples/clients`. The release test compiles
 and runs TypeScript/Node, C#/.NET, C++17, and GDScript/Godot against
@@ -37,6 +37,12 @@ and runs TypeScript/Node, C#/.NET, C++17, and GDScript/Godot against
 unknown optional field so integrations can verify compatible minor-field
 preservation. These examples intentionally do not prescribe a UI, art, camera,
 animation, or input framework.
+
+The separate [`gaos.presentation-cue.v1`](/presentation-cues) lane carries
+ephemeral product effects without turning a renderer into an authority. The
+TypeScript host and client implementations define ordering, acknowledgement,
+bounded replay, snapshot repair, and emergency interruption; native engines
+mirror that small state machine around their own product-defined cue handlers.
 
 ## Dynamic controller evidence
 

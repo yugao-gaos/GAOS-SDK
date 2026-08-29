@@ -107,6 +107,8 @@ export interface SessionLimits {
   maxExtensionBytes?: number;
   /** Resolved ticks between audit checkpoint events. */
   checkpointInterval?: number;
+  /** Maximum distinct objects in one immutable checkpoint graph. */
+  maxCheckpointObjects?: number;
   /** Maximum unresolved commitments retained for one seat. */
   maxOpenCommitmentsPerSeat?: number;
 }
@@ -920,6 +922,7 @@ const DEFAULT_LIMITS = Object.freeze({
   receiptRetention: 64,
   maxExtensionBytes: 65_536,
   checkpointInterval: 1,
+  maxCheckpointObjects: 100_000,
   maxOpenCommitmentsPerSeat: 64,
 });
 const utf8Encoder = new TextEncoder();
@@ -956,7 +959,11 @@ function isReplayTickTimeoutPolicy(value: unknown): value is ReplayTickTimeoutPo
     && Object.keys(value).every((key) => key === 'mode' || key === 'windowTicks');
 }
 
-function deepFreeze<T>(value: T, maximumObjects = 100_000): T {
+function deepFreeze<T>(
+  value: T,
+  maximumObjects = 100_000,
+  label = 'prepared value',
+): T {
   if (value === null || typeof value !== 'object') return value;
   const pending: object[] = [value];
   const visited = new WeakSet<object>();
@@ -967,7 +974,7 @@ function deepFreeze<T>(value: T, maximumObjects = 100_000): T {
     visited.add(current);
     visitedObjects++;
     if (visitedObjects > maximumObjects) {
-      throw new RangeError('prepared value exceeds the deep-freeze object limit');
+      throw new RangeError(`${label} exceeds the deep-freeze object limit`);
     }
     for (const child of Object.values(current)) {
       if (child !== null && typeof child === 'object') pending.push(child);
@@ -1309,7 +1316,7 @@ class SessionKernelImpl<
     KernelState<TState, TCommand, TView>,
     TState
   >();
-  private live: KernelState<TState, TCommand, TView>;
+  private live!: KernelState<TState, TCommand, TView>;
   private compactedRetentionFloor = 0;
 
   constructor(
@@ -1404,6 +1411,8 @@ class SessionKernelImpl<
       receiptRetention: options.limits?.receiptRetention ?? DEFAULT_LIMITS.receiptRetention,
       maxExtensionBytes: options.limits?.maxExtensionBytes ?? DEFAULT_LIMITS.maxExtensionBytes,
       checkpointInterval: options.limits?.checkpointInterval ?? DEFAULT_LIMITS.checkpointInterval,
+      maxCheckpointObjects: options.limits?.maxCheckpointObjects
+        ?? DEFAULT_LIMITS.maxCheckpointObjects,
       maxOpenCommitmentsPerSeat: options.limits?.maxOpenCommitmentsPerSeat
         ?? DEFAULT_LIMITS.maxOpenCommitmentsPerSeat,
     };
@@ -1477,6 +1486,12 @@ class SessionKernelImpl<
         || typeof this.historyLookup.saltIdentity !== 'function')) {
       throw new TypeError('historyLookup must provide gameplay, interest, and salt lookups');
     }
+    this.header = sessionHeaderFor(options);
+    if (checkpoint !== undefined) {
+      this.restoreCheckpoint(checkpoint);
+      if (transcript !== undefined) this.rehydrate(transcript);
+      return;
+    }
     const levelSeed = options.seedPolicy === 'gaos.run-level-seed.v1'
       ? runLevelSeed(options.seed, 0)
       : options.seed;
@@ -1490,7 +1505,6 @@ class SessionKernelImpl<
         + ` (${error instanceof Error ? error.message : String(error)})`,
       );
     }
-    this.header = sessionHeaderFor(options);
     const initialView = options.reducer.view(initialState);
     try {
       replayMetricsFor(options.reducer, initialState, initialView);
@@ -1551,8 +1565,12 @@ class SessionKernelImpl<
       controls: new Map(),
       intentActions: new Map(),
     };
-    if (checkpoint !== undefined) this.restoreCheckpoint(checkpoint);
     if (transcript !== undefined) this.rehydrate(transcript);
+  }
+
+  private sessionView(state: TState): SessionView {
+    return this.options.reducer.sessionView?.(state)
+      ?? this.options.reducer.view(state);
   }
 
   private viewFor(state: TState, seat: string): TView {
@@ -1562,9 +1580,13 @@ class SessionKernelImpl<
       : this.options.reducer.view(state);
   }
 
-  private replayMetrics(state: TState, view: TView): ReplayMetrics {
+  private replayMetrics(state: TState, view: SessionView): ReplayMetrics {
     try {
-      return replayMetricsFor(this.options.reducer, state, view);
+      return replayMetricsFor(
+        this.options.reducer,
+        state,
+        view as TView,
+      );
     } catch (error) {
       throw new SessionAdvanceError(
         'invalid_view',
@@ -1683,7 +1705,7 @@ class SessionKernelImpl<
     return { view: usesFullView ? view : structuredClone(view), canonical };
   }
 
-  private validatedParticipantsForView(view: TView): string[] {
+  private validatedParticipantsForView(view: SessionView): string[] {
     if (view.status === 'ended' && view.stars !== undefined) {
       throw new SessionAdvanceError(
         'invalid_view',
@@ -1948,7 +1970,7 @@ class SessionKernelImpl<
       ) !== undefined) {
       throw new SessionConflictError('unknown_submission', 'receipt retention has expired');
     }
-    if (this.options.reducer.view(this.live.reducerState).status !== 'playing') {
+    if (this.sessionView(this.live.reducerState).status !== 'playing') {
       throw new SessionAdvanceError('terminal', 'session is already terminal');
     }
     const classificationDraft = this.isolation.fork(this.live.reducerState);
@@ -2086,7 +2108,7 @@ class SessionKernelImpl<
       }
     }
     validateIntentSubmission(this.live.window, submission);
-    if (this.options.reducer.view(this.live.reducerState).status !== 'playing') {
+    if (this.sessionView(this.live.reducerState).status !== 'playing') {
       throw new SessionAdvanceError('terminal', 'session is already terminal');
     }
     if (this.live.expiredReceiptKeys.has(key)
@@ -2427,7 +2449,9 @@ class SessionKernelImpl<
     );
     draft.cursor++;
     draft.tick++;
-    const view = this.options.reducer.view(draft.reducerState);
+    const view = this.options.reducer.replayMetrics === undefined
+      ? this.options.reducer.view(draft.reducerState)
+      : this.sessionView(draft.reducerState);
     const replayMetrics = this.replayMetrics(draft.reducerState, view);
     const deltas: ObservationDelta<TView>[] = [];
     for (const seat of this.options.seats) {
@@ -2582,7 +2606,7 @@ class SessionKernelImpl<
     const rejections: ObservationRejectionNotice[] = [];
     const warnings: SessionWarning[] = [];
     try {
-      const currentView = this.options.reducer.view(draft.reducerState);
+      const currentView = this.sessionView(draft.reducerState);
       if (currentView.status !== 'playing') {
         throw new SessionAdvanceError('terminal', 'session is already terminal');
       }
@@ -2655,7 +2679,7 @@ class SessionKernelImpl<
           deltas.push(...resolved.deltas);
           resolutions++;
         }
-        if (this.options.reducer.view(draft.reducerState).status !== 'playing') break;
+        if (this.sessionView(draft.reducerState).status !== 'playing') break;
         if (this.tickTimeoutPolicy !== undefined
           && !draft.window.participants.every(
             (seat) => Object.hasOwn(draft.window.intents, seat),
@@ -2793,7 +2817,7 @@ class SessionKernelImpl<
     }
     const draft = this.forkLive();
     try {
-      if (this.options.reducer.view(draft.reducerState).status !== 'playing') {
+      if (this.sessionView(draft.reducerState).status !== 'playing') {
         throw new SessionAdvanceError('terminal', 'session is already terminal');
       }
       const windowRef = draft.cursor;
@@ -2855,7 +2879,7 @@ class SessionKernelImpl<
   }
 
   prepareExtension(lane: string, record: JsonObject): Prepared<void, TView> {
-    if (this.options.reducer.view(this.live.reducerState).status !== 'playing') {
+    if (this.sessionView(this.live.reducerState).status !== 'playing') {
       throw new SessionAdvanceError('terminal', 'session is already terminal');
     }
     if (typeof lane !== 'string' || lane.length === 0) {
@@ -2938,7 +2962,7 @@ class SessionKernelImpl<
         throw error;
       }
     }
-    if (this.options.reducer.view(this.live.reducerState).status !== 'playing') {
+    if (this.sessionView(this.live.reducerState).status !== 'playing') {
       throw new SessionAdvanceError('terminal', 'session is already terminal');
     }
     const draft = this.forkLive();
@@ -2954,7 +2978,7 @@ class SessionKernelImpl<
           tick: draft.tick,
         },
       );
-      const fullView = this.options.reducer.view(draft.reducerState);
+      const fullView = this.sessionView(draft.reducerState);
       this.validatedParticipantsForView(fullView);
       const deltas: ObservationDelta<TView>[] = [];
       for (const seat of this.options.seats) {
@@ -3036,7 +3060,7 @@ class SessionKernelImpl<
       draft.reducerState = nextState;
       this.draftForks.set(draft, nextState);
       if (priorDraft !== nextState) this.isolation.discard?.(priorDraft);
-      const fullView = this.options.reducer.view(draft.reducerState);
+      const fullView = this.sessionView(draft.reducerState);
       const participants = this.validatedParticipantsForView(fullView);
       if (canonicalJson(participants) !== canonicalJson(draft.window.participants)) {
         throw new SessionConflictError(
@@ -3531,12 +3555,16 @@ class SessionKernelImpl<
       retentionFloor: this.compactedRetentionFloor,
       stateDigest: this.digestState(this.live),
     };
-    return deepFreeze({
-      ...withoutIntegrity,
-      integrityDigest: checkpointIntegrityDigest(
-        withoutIntegrity as Omit<KernelCheckpoint, 'integrityDigest'>,
-      ),
-    });
+    return deepFreeze(
+      {
+        ...withoutIntegrity,
+        integrityDigest: checkpointIntegrityDigest(
+          withoutIntegrity as Omit<KernelCheckpoint, 'integrityDigest'>,
+        ),
+      },
+      this.limits.maxCheckpointObjects,
+      'checkpoint',
+    );
   }
 
   compact(
@@ -3819,7 +3847,7 @@ class SessionKernelImpl<
     if (this.digestState(this.live) !== checkpoint.stateDigest) {
       throw new TypeError('checkpoint final state digest mismatch');
     }
-    const restoredView = this.options.reducer.view(this.live.reducerState);
+    const restoredView = this.sessionView(this.live.reducerState);
     this.validatedParticipantsForView(restoredView);
   }
 
@@ -3958,7 +3986,7 @@ class SessionKernelImpl<
           throw new TypeError('recorded interaction no longer classifies as an interaction');
         }
         this.live.reducerState = effect.state;
-        const fullView = this.options.reducer.view(this.live.reducerState);
+        const fullView = this.sessionView(this.live.reducerState);
         const participants = this.validatedParticipantsForView(fullView);
         if (canonicalJson(participants) !== canonicalJson(this.live.window.participants)) {
           throw new TypeError('interaction changed the open-window participant set');
@@ -4070,7 +4098,7 @@ class SessionKernelImpl<
             tick: event.tick,
           },
         );
-        const fullView = this.options.reducer.view(this.live.reducerState);
+        const fullView = this.sessionView(this.live.reducerState);
         this.validatedParticipantsForView(fullView);
         for (const seat of this.options.seats) {
           const seatView = this.viewFor(this.live.reducerState, seat);
@@ -4159,7 +4187,7 @@ class SessionKernelImpl<
         );
         this.live.cursor = event.cursor + 1;
         this.live.tick = event.tick + 1;
-        const view = this.options.reducer.view(this.live.reducerState);
+        const view = this.sessionView(this.live.reducerState);
         this.live.window = createIntentWindow(
           this.options.sessionId,
           this.live.cursor,

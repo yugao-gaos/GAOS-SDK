@@ -50,6 +50,22 @@
       "types": "./dist/control.d.ts",
       "import": "./dist/control.js"
     },
+    "./room-agent": {
+      "types": "./dist/room-agent.d.ts",
+      "import": "./dist/room-agent.js"
+    },
+    "./room-agent-runtime": {
+      "types": "./dist/room-agent-runtime.d.ts",
+      "import": "./dist/room-agent-runtime.js"
+    },
+    "./room-interaction": {
+      "types": "./dist/room-interaction.d.ts",
+      "import": "./dist/room-interaction.js"
+    },
+    "./presentation-cues": {
+      "types": "./dist/presentation-cues.d.ts",
+      "import": "./dist/presentation-cues.js"
+    },
     "./benchmark": {
       "types": "./dist/benchmark.d.ts",
       "import": "./dist/benchmark.js"
@@ -90,6 +106,7 @@
     "./fixtures/signatures/gaos.submission.ed25519.v2.vectors.json": "./fixtures/signatures/gaos.submission.ed25519.v2.vectors.json",
     "./fixtures/dmath/dmath-1.vectors.json": "./fixtures/dmath/dmath-1.vectors.json",
     "./schemas/gaos.presentation-frame-v1.schema.json": "./schemas/gaos.presentation-frame-v1.schema.json",
+    "./schemas/gaos.presentation-cue-v1.schema.json": "./schemas/gaos.presentation-cue-v1.schema.json",
     "./schemas/gaos.benchmark-manifest-v1.schema.json": "./schemas/gaos.benchmark-manifest-v1.schema.json",
     "./fixtures/ecosystem/presentation-frame-v1.golden.json": "./fixtures/ecosystem/presentation-frame-v1.golden.json",
     "./fixtures/ecosystem/presentation-client-v1.golden.json": "./fixtures/ecosystem/presentation-client-v1.golden.json",

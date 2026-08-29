@@ -1,102 +1,89 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { withBase } from 'vitepress';
+import {
+  LAST_LIGHT_ACTIONS,
+  LAST_LIGHT_ROUTES,
+  LAST_LIGHT_SOCKETS,
+  LAST_LIGHT_TOWERS,
+  chooseLastLightAction,
+  createLastLightEnvironment,
+  describeLastLightAction,
+  type LastLightBuildOption,
+  type LastLightPoint,
+  type LastLightTower,
+  type LastLightTowerKind,
+  type LastLightView,
+  type LastLightZombieView,
+} from '../../../../../examples/demos/last-light';
 
-type TowerKind = 'rifle' | 'floodlight' | 'molotov';
-type Tower = { socket: number; kind: TowerKind; cooldown: number };
-type Zombie = { id: number; type: 'Shambler' | 'Runner' | 'Brute' | 'Screamer'; route: number; segment: number; progress: number; hp: number; maxHp: number; speed: number };
-type MapPoint = { x: number; y: number };
 type CombatEffectKind = 'rifle' | 'molotov';
-type ShotEffect = { id: number; kind: CombatEffectKind; from: MapPoint; to: MapPoint };
-type ImpactEffect = { id: number; kind: CombatEffectKind; point: MapPoint; lethal: boolean };
+type ShotEffect = { id: number; kind: CombatEffectKind; from: LastLightPoint; to: LastLightPoint };
+type ImpactEffect = { id: number; kind: CombatEffectKind; point: LastLightPoint; lethal: boolean };
 
-const routes: MapPoint[][] = [
-  [{ x: 4, y: 50 }, { x: 28, y: 50 }, { x: 48, y: 24 }, { x: 72, y: 50 }, { x: 96, y: 50 }],
-  [{ x: 4, y: 50 }, { x: 28, y: 50 }, { x: 48, y: 77 }, { x: 72, y: 50 }, { x: 96, y: 50 }],
-];
-const sockets: MapPoint[] = [
-  { x: 20, y: 35 }, { x: 20, y: 67 }, { x: 43, y: 48 },
-  { x: 55, y: 12 }, { x: 56, y: 88 }, { x: 69, y: 31 }, { x: 69, y: 70 }, { x: 84, y: 35 },
-];
+const routes = LAST_LIGHT_ROUTES;
+const sockets = LAST_LIGHT_SOCKETS;
 const towerInfo = {
   rifle: {
-    name: 'Rifle nest',
-    cost: 35,
-    range: 20,
+    ...LAST_LIGHT_TOWERS.rifle,
     sprite: withBase('/images/last-light/tower-rifle.png'),
-    description: 'Fires at the zombie closest to the safehouse.',
-    stats: '2 damage · Fast',
   },
   floodlight: {
-    name: 'Floodlight',
-    cost: 30,
-    range: 18,
+    ...LAST_LIGHT_TOWERS.floodlight,
     sprite: withBase('/images/last-light/tower-floodlight.png'),
-    description: 'Slows every zombie in its glow to 55% speed. Deals no damage.',
-    stats: 'Area slow · No damage',
   },
   molotov: {
-    name: 'Molotov post',
-    cost: 50,
-    range: 23,
+    ...LAST_LIGHT_TOWERS.molotov,
     sprite: withBase('/images/last-light/tower-molotov.png'),
-    description: 'Scorches up to 3 zombies with each throw.',
-    stats: '2 damage · 3 targets',
   },
 };
 
-const zombies = ref<Zombie[]>([]);
-const towers = ref<Tower[]>([]);
-const selectedTower = ref<TowerKind>('rifle');
-const scrap = ref(90);
-const safehouseHp = ref(12);
-const wave = ref(1);
-const tick = ref(0);
-const spawned = ref(0);
+const seed = ref(907);
+const selectedTower = ref<LastLightTowerKind>('rifle');
 const paused = ref(false);
 const speed = ref(1);
 const agentBuilder = ref(false);
+const pendingAction = ref<LastLightBuildOption['action'] | null>(null);
+const decisionOverride = ref<string | null>(null);
 const shots = ref<ShotEffect[]>([]);
 const impacts = ref<ImpactEffect[]>([]);
 const breachPulse = ref(0);
-const message = ref('Build around the road network before the horde reaches the safehouse.');
-const decision = ref('Human controls construction');
 const mapBackground = withBase('/images/last-light/battlefield-background.jpg');
-let zombieId = 0;
+let environment = createLastLightEnvironment(seed.value);
+const observation = ref<LastLightView>(environment.reset().observation);
 let effectId = 0;
 let timer: ReturnType<typeof setInterval> | undefined;
 const effectTimers = new Set<ReturnType<typeof setTimeout>>();
 
-const waveQuota = computed(() => 5 + wave.value * 3);
-const gameOver = computed(() => safehouseHp.value <= 0);
-const victory = computed(() => wave.value > 3 && zombies.value.length === 0);
+const zombies = computed(() => observation.value.zombies);
+const towers = computed(() => observation.value.towers);
+const scrap = computed(() => observation.value.scrap);
+const safehouseHp = computed(() => observation.value.safehouseHp);
+const wave = computed(() => observation.value.wave);
+const tick = computed(() => observation.value.tick);
+const gameOver = computed(() => observation.value.gameOver);
+const victory = computed(() => observation.value.victory);
+const message = computed(() => observation.value.message);
+const decision = computed(() => decisionOverride.value ?? observation.value.decision);
 
-function lineStyle(a: MapPoint, b: MapPoint) {
+function lineStyle(a: LastLightPoint, b: LastLightPoint) {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   return {
-    left: `${a.x}%`, top: `${a.y}%`,
+    left: `${a.x}%`,
+    top: `${a.y}%`,
     width: `${Math.hypot(dx, dy)}%`,
     transform: `rotate(${Math.atan2(dy, dx) * 180 / Math.PI}deg)`,
   };
 }
 
-function zombiePoint(zombie: Zombie) {
-  const route = routes[zombie.route];
-  const from = route[Math.min(zombie.segment, route.length - 1)];
-  const to = route[Math.min(zombie.segment + 1, route.length - 1)];
-  const t = zombie.progress / 100;
-  return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
-}
-
-function zombieStyle(zombie: Zombie) {
-  const point = zombiePoint(zombie);
-  return { left: `${point.x}%`, top: `${point.y}%` };
+function zombieStyle(zombie: LastLightZombieView) {
+  return { left: `${zombie.point.x}%`, top: `${zombie.point.y}%` };
 }
 
 function shotPath(shot: ShotEffect) {
   const distance = Math.hypot(shot.to.x - shot.from.x, shot.to.y - shot.from.y);
-  const lift = Math.min(18, 7 + distance * .18);
+  const lift = Math.min(18, 7 + distance * 0.18);
   const middle = {
     x: (shot.from.x + shot.to.x) / 2,
     y: Math.min(shot.from.y, shot.to.y) - lift,
@@ -112,7 +99,7 @@ function scheduleEffect(callback: () => void, delay: number) {
   effectTimers.add(effectTimer);
 }
 
-function launchShot(kind: CombatEffectKind, from: MapPoint, to: MapPoint) {
+function launchShot(kind: CombatEffectKind, from: LastLightPoint, to: LastLightPoint) {
   const id = ++effectId;
   shots.value.push({ id, kind, from: { ...from }, to: { ...to } });
   scheduleEffect(() => {
@@ -120,7 +107,11 @@ function launchShot(kind: CombatEffectKind, from: MapPoint, to: MapPoint) {
   }, kind === 'rifle' ? 280 : 680);
 }
 
-function launchImpact(kind: CombatEffectKind, point: MapPoint, lethal: boolean) {
+function launchImpact(
+  kind: CombatEffectKind,
+  point: LastLightPoint,
+  lethal: boolean,
+) {
   const delay = kind === 'rifle' ? 90 : 390;
   scheduleEffect(() => {
     const id = ++effectId;
@@ -139,184 +130,127 @@ function clearCombatEffects() {
 }
 
 function towerFiring(socketIndex: number) {
-  const socket = sockets[socketIndex];
+  const socket = sockets[socketIndex]!;
   return shots.value.some((shot) => (
-    Math.abs(shot.from.x - socket.x) < .01 && Math.abs(shot.from.y - socket.y) < .01
+    Math.abs(shot.from.x - socket.x) < 0.01
+    && Math.abs(shot.from.y - socket.y) < 0.01
   ));
 }
 
-function towerAt(socketIndex: number) {
+function towerAt(socketIndex: number): LastLightTower | undefined {
   return towers.value.find((tower) => tower.socket === socketIndex);
 }
 
-function towerAimAngle(tower: Tower) {
+function towerAimAngle(tower: LastLightTower) {
   if (tower.kind === 'floodlight') return 0;
-  const target = nearestTargets(sockets[tower.socket], towerInfo[tower.kind].range)[0];
+  const target = observation.value.towerTargets[String(tower.socket)];
   if (!target) return 0;
-  const from = sockets[tower.socket];
-  // The source art faces left, so zero degrees keeps towers aimed at the breach.
-  return Math.atan2(target.point.y - from.y, target.point.x - from.x) * 180 / Math.PI - 180;
+  const from = sockets[tower.socket]!;
+  return Math.atan2(target.y - from.y, target.x - from.x) * 180 / Math.PI - 180;
 }
 
-function isZombieSlowed(zombie: Zombie) {
-  const point = zombiePoint(zombie);
-  return towers.value.some((tower) => {
-    if (tower.kind !== 'floodlight') return false;
-    const socket = sockets[tower.socket];
-    return Math.hypot(point.x - socket.x, point.y - socket.y) <= towerInfo.floodlight.range;
-  });
+function build(socket: number) {
+  if (paused.value || agentBuilder.value || pendingAction.value || gameOver.value || victory.value) {
+    return;
+  }
+  const option = observation.value.legalBuilds.find((candidate) => (
+    candidate.socket === socket && candidate.kind === selectedTower.value
+  ));
+  if (!option) return;
+  pendingAction.value = { ...option.action };
+  decisionOverride.value = `${towerInfo[option.kind].name} queued at defense socket ${socket + 1}`;
 }
 
-function build(socket: number, kind = selectedTower.value) {
-  if (paused.value || towers.value.some((tower) => tower.socket === socket) || scrap.value < towerInfo[kind].cost || gameOver.value || victory.value) return;
-  scrap.value -= towerInfo[kind].cost;
-  towers.value.push({ socket, kind, cooldown: 0 });
-  message.value = kind === 'floodlight'
-    ? 'Floodlight online: zombies in its glow move at 55% speed.'
-    : `${towerInfo[kind].name} constructed for ${towerInfo[kind].cost} scrap.`;
+function isStillLegal(action: LastLightBuildOption['action']) {
+  return observation.value.legalBuilds.some((option) => (
+    option.action.id === action.id && option.action.index === action.index
+  ));
 }
 
-function spawnZombie() {
-  const order: Zombie['type'][] = ['Shambler', 'Runner', 'Shambler', 'Screamer', 'Brute'];
-  const type = order[(spawned.value + wave.value) % order.length];
-  const stats = {
-    Shambler: { hp: 4, speed: 1.15 },
-    Runner: { hp: 3, speed: 1.9 },
-    Brute: { hp: 10, speed: .72 },
-    Screamer: { hp: 5, speed: 1.05 },
-  }[type];
-  zombies.value.push({
-    id: ++zombieId, type, route: spawned.value % 2, segment: 0, progress: 0,
-    hp: stats.hp + wave.value - 1, maxHp: stats.hp + wave.value - 1, speed: stats.speed,
-  });
-  spawned.value += 1;
-}
-
-function nearestTargets(socket: MapPoint, range: number) {
-  return zombies.value
-    .filter((zombie) => zombie.hp > 0)
-    .map((zombie) => ({ zombie, point: zombiePoint(zombie) }))
-    .filter(({ point }) => Math.hypot(point.x - socket.x, point.y - socket.y) <= range)
-    .sort((a, b) => {
-      const progressA = a.zombie.segment * 100 + a.zombie.progress;
-      const progressB = b.zombie.segment * 100 + b.zombie.progress;
-      return progressB - progressA;
-    });
-}
-
-function runTowers() {
-  for (const tower of towers.value) {
-    if (tower.cooldown > 0) {
-      tower.cooldown -= 1;
-      continue;
-    }
-    const socket = sockets[tower.socket];
-    const targets = nearestTargets(socket, towerInfo[tower.kind].range);
-    if (!targets.length || tower.kind === 'floodlight') continue;
-    if (tower.kind === 'rifle') {
-      const target = targets[0].zombie;
-      const point = { ...targets[0].point };
-      target.hp -= 2;
-      launchShot('rifle', socket, point);
-      launchImpact('rifle', point, target.hp <= 0);
-      tower.cooldown = 7;
-      message.value = `Rifle nest hit a ${target.type}.`;
-    } else {
-      const victims = targets.slice(0, 3);
-      launchShot('molotov', socket, victims[0].point);
-      for (const { zombie, point } of victims) {
-        zombie.hp -= 2;
-        launchImpact('molotov', point, zombie.hp <= 0);
-      }
-      tower.cooldown = 15;
-      message.value = 'Molotov burst scorched the horde.';
+function applyTransitionEffects(transition: LastLightView['transition']) {
+  if (!transition) return;
+  for (const attack of transition.attacks) {
+    const from = sockets[attack.socket]!;
+    const first = attack.targets[0];
+    if (first) launchShot(attack.kind, from, first.point);
+    for (const target of attack.targets) {
+      launchImpact(attack.kind, target.point, target.lethal);
     }
   }
-  const defeated = zombies.value.filter((zombie) => zombie.hp <= 0);
-  if (defeated.length) scrap.value += defeated.reduce((sum, zombie) => sum + (zombie.type === 'Brute' ? 8 : 4), 0);
-  zombies.value = zombies.value.filter((zombie) => zombie.hp > 0);
-}
-
-function moveZombies() {
-  for (const zombie of zombies.value) {
-    const point = zombiePoint(zombie);
-    const slowed = isZombieSlowed(zombie);
-    const screamerBoost = zombies.value.some((other) => other.type === 'Screamer' && other.id !== zombie.id && Math.hypot(zombiePoint(other).x - point.x, zombiePoint(other).y - point.y) < 12);
-    zombie.progress += zombie.speed * (slowed ? .55 : 1) * (screamerBoost ? 1.25 : 1);
-    if (zombie.progress >= 100) {
-      zombie.segment += 1;
-      zombie.progress -= 100;
-      if (zombie.segment >= routes[zombie.route].length - 1) {
-        safehouseHp.value -= zombie.type === 'Brute' ? 3 : 1;
-        breachPulse.value += 1;
-        zombie.hp = 0;
-        message.value = `${zombie.type} reached the safehouse.`;
-      }
-    }
-  }
-  zombies.value = zombies.value.filter((zombie) => zombie.hp > 0);
-}
-
-function agentBuild() {
-  const open = sockets.map((_, index) => index).filter((index) => !towers.value.some((tower) => tower.socket === index));
-  if (!open.length) return;
-  const kind: TowerKind = towers.value.every((tower) => tower.kind !== 'floodlight') && scrap.value >= towerInfo.floodlight.cost
-    ? 'floodlight'
-    : scrap.value >= towerInfo.molotov.cost && wave.value >= 2 ? 'molotov' : 'rifle';
-  if (scrap.value >= towerInfo[kind].cost) {
-    const socket = open[Math.floor(open.length / 2)];
-    build(socket, kind);
-    decision.value = `Builder agent placed ${towerInfo[kind].name} at defense socket ${socket + 1}`;
-  }
+  breachPulse.value += transition.breaches.length;
 }
 
 function advance() {
-  if (paused.value || gameOver.value || victory.value || (typeof document !== 'undefined' && document.hidden)) return;
-  for (let frame = 0; frame < speed.value; frame += 1) {
-    tick.value += 1;
-    if (wave.value <= 3 && spawned.value < waveQuota.value && tick.value % Math.max(10, 20 - wave.value * 2) === 0) spawnZombie();
-    runTowers();
-    moveZombies();
-    if (agentBuilder.value && tick.value % 30 === 0) agentBuild();
-    if (wave.value <= 3 && spawned.value >= waveQuota.value && zombies.value.length === 0) {
-      wave.value += 1;
-      spawned.value = 0;
-      scrap.value += 35;
-      message.value = wave.value > 3 ? 'Dawn breaks. The safehouse survived.' : `Wave ${wave.value} approaches. +35 scrap.`;
+  if (
+    paused.value
+    || gameOver.value
+    || victory.value
+    || (typeof document !== 'undefined' && document.hidden)
+  ) {
+    return;
+  }
+  for (
+    let frame = 0;
+    frame < speed.value && !observation.value.gameOver && !observation.value.victory;
+    frame += 1
+  ) {
+    const before = observation.value;
+    let action = { id: LAST_LIGHT_ACTIONS.hold } as LastLightBuildOption['action'];
+    let agentDescription: string | null = null;
+    if (pendingAction.value) {
+      if (isStillLegal(pendingAction.value)) action = pendingAction.value;
+      else decisionOverride.value = 'Queued construction expired before the next deterministic tick.';
+      pendingAction.value = null;
+    } else if (agentBuilder.value && before.tick > 0 && before.tick % 30 === 0) {
+      action = chooseLastLightAction(before);
+      agentDescription = describeLastLightAction(before, action);
+    }
+    const result = environment.step(action);
+    observation.value = result.observation;
+    applyTransitionEffects(result.observation.transition);
+    if (agentDescription) decisionOverride.value = agentDescription;
+    else if (action.id === LAST_LIGHT_ACTIONS.build) decisionOverride.value = null;
+    if (result.done && !observation.value.gameOver && !observation.value.victory) {
+      paused.value = true;
+      break;
     }
   }
+}
+
+function toggleAgent() {
+  agentBuilder.value = !agentBuilder.value;
+  pendingAction.value = null;
+  decisionOverride.value = agentBuilder.value
+    ? 'Builder agent will evaluate coverage on its next construction interval.'
+    : 'Manual construction restored. Select a defense and socket.';
 }
 
 function reset() {
   clearCombatEffects();
-  zombies.value = [];
-  towers.value = [];
-  scrap.value = 90;
-  safehouseHp.value = 12;
-  wave.value = 1;
-  tick.value = 0;
-  spawned.value = 0;
+  environment = createLastLightEnvironment(seed.value >>> 0);
+  observation.value = environment.reset().observation;
+  selectedTower.value = 'rifle';
   paused.value = false;
   agentBuilder.value = false;
-  decision.value = 'Human controls construction';
-  message.value = 'Build around the road network before the horde reaches the safehouse.';
-  zombieId = 0;
+  pendingAction.value = null;
+  decisionOverride.value = null;
   breachPulse.value = 0;
 }
 
-onMounted(() => { timer = setInterval(advance, 100); });
+onMounted(() => {
+  timer = setInterval(advance, 100);
+});
 onUnmounted(() => {
   if (timer) clearInterval(timer);
   clearCombatEffects();
 });
-reset();
 </script>
 
 <template>
   <section class="game-demo lastlight-demo">
     <header class="game-hero">
       <div>
-        <span class="game-eyebrow">Real-time zombie tower defense · road graph</span>
+        <span class="game-eyebrow">Real-time zombie tower defense · fixed SDK ticks</span>
         <h2>Last Light</h2>
         <p>Place survivor defenses around branching roads, slow the horde with floodlights, and keep the safehouse alive until dawn.</p>
       </div>
@@ -382,7 +316,7 @@ reset();
             v-for="zombie in zombies"
             :key="zombie.id"
             class="zombie"
-            :class="[zombie.type.toLowerCase(), { slowed: isZombieSlowed(zombie) }]"
+            :class="[zombie.type.toLowerCase(), { slowed: zombie.slowed }]"
             :style="zombieStyle(zombie)"
             role="img"
             :aria-label="`${zombie.type}, ${zombie.hp} of ${zombie.maxHp} health`"
@@ -443,7 +377,7 @@ reset();
         <div class="agent-decision"><span>Latest decision</span><p>{{ decision }}</p></div>
         <div class="agent-metrics"><div><span>Wave</span><strong>{{ Math.min(3, wave) }}</strong></div><div><span>Zombies</span><strong>{{ zombies.length }}</strong></div><div><span>Tick</span><strong>{{ tick }}</strong></div></div>
         <div class="game-actions">
-          <button class="primary-action" :disabled="gameOver || victory" @click="agentBuilder = !agentBuilder">{{ agentBuilder ? 'Take construction' : 'Watch builder agent' }}</button>
+          <button class="primary-action" :disabled="gameOver || victory" @click="toggleAgent">{{ agentBuilder ? 'Take construction' : 'Watch builder agent' }}</button>
           <button @click="paused = !paused">{{ paused ? 'Resume' : 'Pause' }}</button>
           <button @click="speed = speed === 1 ? 2 : 1">Simulation ×{{ speed === 1 ? 2 : 1 }}</button>
           <button @click="reset">Restart defense</button>

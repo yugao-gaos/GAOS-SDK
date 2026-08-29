@@ -47,6 +47,13 @@ Use the narrowest package surface:
 - `./session` — authoritative transitions and evidence capture
 - `./protocol` — product-neutral tick envelopes
 - `./control` — behavior-tree, human-input, and agent-input control sources
+- `./room-agent` and `./room-interaction` — conversational presences plus
+  privacy-bounded room messages, services, watchers, and audience polls
+- `./room-agent-runtime` — final-text routing, durable channel transcripts and
+  streamed runs, progress, continuation, interruption, speech arbitration,
+  captions, and reconnect state
+- `./presentation-cues` — ordered, idempotent host-to-renderer commands with
+  replay repair and emergency interruption
 - `./agent` and `./agent-cli` — the common session runner, model drivers, and
   MCP-capable CLIs
 - Python — hosted evaluation and replay exchange
@@ -57,8 +64,9 @@ Use the narrowest package surface:
 
 v1.0 freezes the product-neutral GAOS surface after the coordinated rename,
 unified session lifecycle, portal-aware paths, actor control sources,
-unified command effects, verifiable benchmark publication, and historical
-verifier kits. TypeScript and Python expose generic hosted-session clients
+unified command effects, in-room agents, audience interaction, durable agent
+runs, verifiable benchmark publication, and historical verifier kits.
+TypeScript and Python expose generic hosted-session clients
 over `gaos.ticks` v1.
 Product-specific observations, matchmaking, convenience endpoints, and
 environment adapters live with the product that defines them.

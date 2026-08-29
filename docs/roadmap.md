@@ -11,10 +11,12 @@ Published release notes remain the source of truth for shipped behavior.
 
 ### v1.0 — stable complete SDK
 
-v1.0 includes every implemented roadmap item through RFC-020: the canonical
+v1.0 includes every implemented roadmap item through RFC-022: the canonical
 GAOS identity, historical verifier kits, portal-aware paths, one durable
 session lifecycle, unified actor control sources, and verifiable benchmark
-publication. The scheduled neutral-core compatibility aliases are removed;
+publication, plus provider-neutral room-agent contracts, runtime orchestration,
+durable streamed runs, and presentation cues. The scheduled
+neutral-core compatibility aliases are removed;
 historical replay v1.0–v1.3 semantics remain stable, while replay v1.4 records
 ordered reducer-backed interactions.
 
@@ -141,6 +143,31 @@ path. Interactions preserve the open intent window and gameplay cursor;
 accepted intents freeze their canonical action. `gaos.replay` v1.4 records
 interactions in order and historical v1.0–v1.3 artifacts keep their original
 interpretation.
+
+### RFC-021 in-room agents — incorporated into v1.0
+
+[RFC-021](/rfcs/rfc-021-room-agents) wraps the unified actor-control seam with
+conversational room presences. A guide may answer without inventing a game
+action; a character, player bot, or referee may carry an optional actor/seat
+binding and return an untrusted canonical action proposal. Audience presence
+remains separate from seat authority. A companion `./room-interaction` surface
+adds explicit privacy-bounded messages and events, agent services, committed
+watchers, and deterministic audience polls without creating another authority
+path. `./room-agent-runtime` adds final-text routing, authenticated disclosure,
+durable store seams, channel-isolated provider work and transcripts,
+room-global speech arbitration, captions, and reconnect.
+`./presentation-cues` adds ordered host-to-renderer effects and repair.
+Provider-specific push-to-talk, STT, TTS, persistence, and networking stay in
+host adapters.
+
+### RFC-022 durable room-agent runs — incorporated into v1.0
+
+[RFC-022](/rfcs/rfc-022-durable-agent-runs) extends the room-agent runtime with
+provider-neutral long-running work. Atomic input admission, ordered durable
+events, checkpoints, progress, streamed assistant output, continuation,
+cooperative cancellation, persisted deadlines, replay, and crash recovery
+remain host-portable without exposing provider reasoning or weakening the
+RFC-021 disclosure and action-authority boundaries.
 
 ### Stable bridge contracts
 

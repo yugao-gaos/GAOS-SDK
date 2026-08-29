@@ -1922,6 +1922,7 @@ interface ReducerBase<TLevel, TState, TView extends SessionView = TickView> {
     // (undocumented)
     init(level: TLevel, seed: number): TState;
     replayMetrics?(state: TState): ReplayMetrics;
+    sessionView?(state: TState): SessionView;
     validateCommand?(state: TState, seat: string, action: SubmittedAction): void;
     // (undocumented)
     view(state: TState): TView;
