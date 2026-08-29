@@ -380,6 +380,24 @@ describe('portable GAOS replay JSONL', () => {
 describe('host controls', () => {
   const game: ReplayGameRef = { id: 'grid', version: '1', adapter: { id: 'a', version: '1' } };
 
+  const hostControlReducer: ActionReducer<Level, State & { restarted: boolean }> = {
+    init: () => ({ at: 0, actionsUsed: 0, restarted: false }),
+    apply: (state, action) => {
+      if (action.id === 'Restart') {
+        return { at: 0, actionsUsed: state.actionsUsed + 1, restarted: true };
+      }
+      if (action.id !== 'Action 1') throw new Error('illegal action');
+      return { ...state, at: state.at + 1, actionsUsed: state.actionsUsed + 1 };
+    },
+    view: (state): TickView => ({
+      actions: [{ id: 'Action 1', params: 'none' }],
+      systemActions: [{ id: 'Restart', params: 'none' }],
+      status: state.restarted && state.at >= 1 ? 'won' : 'playing',
+      ...(state.restarted && state.at >= 1 ? { stars: 3 } : {}),
+      hud: { actionsUsed: state.actionsUsed },
+    }),
+  };
+
   const artifact = (systemActions?: readonly string[]) => createReplayArtifact({
     sessionId: 'restart-run',
     game,
@@ -393,10 +411,10 @@ describe('host controls', () => {
       result: { status: 'won', stars: 3, actionsUsed: 2 },
     }],
     actions: [
-      { n: 0, levelIndex: 0, wireId: 'Action 1', canonicalId: 'Action 1' },
       // A restart changes world state but is never permuted, so it names
       // itself on both sides instead of indexing the alphabet.
-      { n: 1, levelIndex: 0, wireId: 'Restart', canonicalId: 'Restart' },
+      { n: 0, levelIndex: 0, wireId: 'Restart', canonicalId: 'Restart' },
+      { n: 1, levelIndex: 0, wireId: 'Action 1', canonicalId: 'Action 1' },
     ],
   });
 
@@ -405,6 +423,11 @@ describe('host controls', () => {
     expect(declared.header.formatVersion).toBe('1.5');
     expect(declared.header.systemActions).toEqual(['Restart']);
     expect(() => validateReplayArtifact(declared)).not.toThrow();
+    expect(recheckReplayArtifact(declared, () => hostControlReducer)).toMatchObject({
+      ok: true,
+      problems: [],
+      replayed: { statuses: ['won'], totalActionsUsed: 2 },
+    });
   });
 
   it('rejects a control the header never declared', () => {
@@ -417,17 +440,47 @@ describe('host controls', () => {
       game,
       seed: 7,
       perm: [0, 1],
-      systemActions: ['Restart'],
+      systemActions: ['Restart', 'Retry'],
       levels: [{
         id: 'level-a', version: 1, level: { id: 'level-a', goal: 1 },
         result: { status: 'won', stars: 3, actionsUsed: 2 },
       }],
       actions: [
         { n: 0, levelIndex: 0, wireId: 'Action 1', canonicalId: 'Action 1' },
-        { n: 1, levelIndex: 0, wireId: 'Restart', canonicalId: 'Action 2' },
+        { n: 1, levelIndex: 0, wireId: 'Restart', canonicalId: 'Retry' },
       ],
     });
-    expect(build).toThrow(/declared host control/);
+    expect(build).toThrow(/same declared host control/);
+  });
+
+  it('requires the same declared control in grouped resolution inputs', () => {
+    const grouped = artifact(['Restart', 'Retry']);
+    grouped.records = [{
+      kind: 'resolution',
+      n: 0,
+      levelIndex: 0,
+      tick: 0,
+      inputs: [{ wireId: 'Restart', canonicalId: 'Restart' }],
+      cause: 'complete',
+    }, {
+      kind: 'resolution',
+      n: 1,
+      levelIndex: 0,
+      tick: 1,
+      inputs: [{ wireId: 'Action 1', canonicalId: 'Action 1' }],
+      cause: 'complete',
+    }];
+    grouped.actions[0]!.canonicalId = 'Retry';
+    const first = grouped.records[0];
+    if (first?.kind === 'resolution') first.inputs[0]!.canonicalId = 'Retry';
+
+    const problems = validateReplayArtifact(grouped);
+    expect(problems).toContain(
+      'action 0 wireId and canonicalId must name the same declared host control',
+    );
+    expect(problems).toContain(
+      'resolution 0 input 0 wireId and canonicalId must name the same declared host control',
+    );
   });
 
   it('leaves an artifact without controls on its older version', () => {

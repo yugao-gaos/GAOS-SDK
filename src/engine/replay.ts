@@ -54,11 +54,11 @@ export interface RecheckOptions<TState> {
   applyEmptyTick?: (state: TState, tick: number) => TState;
 }
 
-/** Re-simulate a transcript and compare its deterministic recorded outcome. */
-export function recheckTranscript<TLevel, TState, TView extends SessionView>(
+function recheckTranscriptInternal<TLevel, TState, TView extends SessionView>(
   reducer: Reducer<TLevel, TState, TView>,
   header: TranscriptHeader<TLevel>,
   actions: TranscriptAction[],
+  systemActions: readonly string[],
   options: RecheckOptions<TState> = {},
 ): RecheckResult {
   const problems: string[] = [];
@@ -76,6 +76,7 @@ export function recheckTranscript<TLevel, TState, TView extends SessionView>(
       && (entry as number) >= 0 && (entry as number) < permutationLength)
     && new Set(permutation).size === permutationLength;
   if (!validPermutation) problems.push('perm must be a complete bijection over its declared length');
+  const systemActionRoster = new Set(systemActions);
 
   const actionValues: unknown[] = Array.isArray(actions) ? actions : [];
   if (!Array.isArray(actions)) problems.push('actions must be an array');
@@ -99,7 +100,21 @@ export function recheckTranscript<TLevel, TState, TView extends SessionView>(
     if (!Number.isSafeInteger(action.n) || sequenceBase === undefined || action.n !== sequenceBase + offset) {
       problems.push(`action at index ${offset} has non-contiguous sequence number ${String(action.n)}`);
     }
+    const wireHostControl = typeof action.wireId === 'string'
+      && systemActionRoster.has(action.wireId);
+    const canonicalHostControl = typeof action.canonicalId === 'string'
+      && systemActionRoster.has(action.canonicalId);
+    const hostControl = wireHostControl || canonicalHostControl;
+    const validHostControl = wireHostControl
+      && canonicalHostControl
+      && action.wireId === action.canonicalId;
+    if (hostControl && !validHostControl) {
+      problems.push(
+        `action ${String(action.n)} wireId and canonicalId must name the same declared host control`,
+      );
+    }
     const parseId = (value: unknown, field: string): number | undefined => {
+      if (hostControl) return undefined;
       if (typeof value !== 'string') {
         problems.push(`action ${String(action.n)} ${field} must use Action N syntax`);
         return undefined;
@@ -151,14 +166,14 @@ export function recheckTranscript<TLevel, TState, TView extends SessionView>(
     }
     const wire = parseId(action.wireId, 'wireId');
     const canonical = parseId(action.canonicalId, 'canonicalId');
-    if (validPermutation && wire !== undefined && canonical !== undefined
+    if (!hostControl && validPermutation && wire !== undefined && canonical !== undefined
       && permutation[wire] !== canonical) {
       problems.push(
         `action ${action.n}: wire ${action.wireId} → ${action.canonicalId} contradicts the session permutation`,
       );
     }
     return { action: action as TranscriptAction, effectiveTick: inferredTick,
-      valid: wire !== undefined && canonical !== undefined
+      valid: (hostControl ? validHostControl : wire !== undefined && canonical !== undefined)
       && ['x', 'y', 'index', 'tick'].every((field) => (
         action[field as 'x' | 'y' | 'index' | 'tick'] === undefined
         || (Number.isSafeInteger(action[field as 'x' | 'y' | 'index' | 'tick'])
@@ -251,6 +266,31 @@ export function recheckTranscript<TLevel, TState, TView extends SessionView>(
       actionsUsed,
     },
   };
+}
+
+/** Re-simulate a transcript and compare its deterministic recorded outcome. */
+export function recheckTranscript<TLevel, TState, TView extends SessionView>(
+  reducer: Reducer<TLevel, TState, TView>,
+  header: TranscriptHeader<TLevel>,
+  actions: TranscriptAction[],
+  options: RecheckOptions<TState> = {},
+): RecheckResult {
+  return recheckTranscriptInternal(reducer, header, actions, [], options);
+}
+
+/** Replay-format bridge for v1.5 controls without widening the legacy transcript API. @internal */
+export function recheckTranscriptWithSystemActions<
+  TLevel,
+  TState,
+  TView extends SessionView,
+>(
+  reducer: Reducer<TLevel, TState, TView>,
+  header: TranscriptHeader<TLevel>,
+  actions: TranscriptAction[],
+  systemActions: readonly string[],
+  options: RecheckOptions<TState> = {},
+): RecheckResult {
+  return recheckTranscriptInternal(reducer, header, actions, systemActions, options);
 }
 
 /** Deterministically derive one level seed from a multi-level run seed. */

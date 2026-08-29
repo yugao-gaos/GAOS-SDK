@@ -33,7 +33,7 @@ import {
   type SubmissionSignaturePolicy,
 } from './submission-signatures.js';
 import {
-  recheckTranscript,
+  recheckTranscriptWithSystemActions,
   runLevelSeed,
   type RecheckOptions,
   type RecheckResult,
@@ -1132,6 +1132,15 @@ export function validateReplayArtifact(value: unknown): string[] {
       }
       const hostControl = isDeclaredHostControl(header, action['wireId'])
         || isDeclaredHostControl(header, action['canonicalId']);
+      if (hostControl
+        && isDeclaredHostControl(header, action['wireId'])
+        && isDeclaredHostControl(header, action['canonicalId'])
+        && action['wireId'] !== action['canonicalId']) {
+        problems.push(
+          `action ${String(action['n'])} wireId and canonicalId must name `
+          + 'the same declared host control',
+        );
+      }
       const parseActionId = (field: 'wireId' | 'canonicalId'): number | undefined => {
         const value = action[field];
         if (typeof value !== 'string') {
@@ -1359,6 +1368,14 @@ export function validateReplayArtifact(value: unknown): string[] {
         // alphabet slot, so it skips the permutation cross-check below.
         const control = isDeclaredHostControl(header, candidate['wireId'])
           || isDeclaredHostControl(header, candidate['canonicalId']);
+        if (control
+          && isDeclaredHostControl(header, candidate['wireId'])
+          && isDeclaredHostControl(header, candidate['canonicalId'])
+          && candidate['wireId'] !== candidate['canonicalId']) {
+          problems.push(
+            `${label} wireId and canonicalId must name the same declared host control`,
+          );
+        }
         for (const field of ['wireId', 'canonicalId'] as const) {
           const id = candidate[field];
           if (control) {
@@ -2926,7 +2943,7 @@ export function recheckReplayArtifact<
           options.semanticAdapterForLevel?.(context),
           seenSalts,
         )
-      : recheckTranscript(
+      : recheckTranscriptWithSystemActions(
         reducer,
         {
           sessionId: artifact.header.sessionId,
@@ -2941,6 +2958,7 @@ export function recheckReplayArtifact<
             : { visibility: artifact.header.visibility }),
         },
         actions,
+        artifact.header.systemActions ?? [],
         options.optionsForLevel?.(context),
       );
     checks.push({ index: level.index, id: level.id, seed: level.seed, result });

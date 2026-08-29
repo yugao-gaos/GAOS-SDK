@@ -281,6 +281,94 @@ describe('./session kernel', () => {
     });
   });
 
+  it('finalizes and rechecks host controls in one level and a composed run', () => {
+    type HostCommand = { kind: 'restart' | 'advance' };
+    interface HostState {
+      progress: number;
+      restarts: number;
+      actionsUsed: number;
+    }
+    const hostReducer: TickReducer<null, HostState> = {
+      init: () => ({ progress: 0, restarts: 0, actionsUsed: 0 }),
+      advance: (state, inputs) => inputs.reduce((next, action) => {
+        if (action.id === 'Restart') {
+          return { progress: 0, restarts: next.restarts + 1, actionsUsed: next.actionsUsed + 1 };
+        }
+        if (action.id !== 'Action 1') throw new Error(`unexpected action ${action.id}`);
+        return { ...next, progress: next.progress + 1, actionsUsed: next.actionsUsed + 1 };
+      }, state),
+      view: (state): TickView => ({
+        actions: [{ id: 'Action 1', params: 'none' }],
+        systemActions: [{ id: 'Restart', params: 'none' }],
+        status: state.restarts > 0 && state.progress > 0 ? 'won' : 'playing',
+        ...(state.restarts > 0 && state.progress > 0 ? { stars: 3 } : {}),
+        participation: { mode: 'sequential', activeSeat: 'host' },
+        hud: { actionsUsed: state.actionsUsed },
+      }),
+    };
+    const runSeed = 8128;
+    const sessionId = 'host-control-run';
+    const kernel = createSessionKernel({
+      sessionId,
+      game,
+      levelId: 'restart-level',
+      reducer: hostReducer,
+      level: null,
+      seed: runLevelSeed(runSeed, 0),
+      seedPolicy: 'explicit',
+      seats: ['host'],
+      cadence: { mode: 'turns' },
+      hostTime: 'none',
+      commandToAction: (command: HostCommand, context) => ({
+        id: command.kind === 'restart' ? 'Restart' : 'Action 1',
+        seat: context.participantId,
+      }),
+    });
+    for (const [revision, command] of ([
+      { kind: 'restart' },
+      { kind: 'advance' },
+    ] as const).entries()) {
+      kernel.commit(kernel.prepareIngest({
+        protocol: PROTOCOL_ID,
+        protocolVersion: PROTOCOL_VERSION,
+        sessionId,
+        tickId: makeTickId(sessionId, revision),
+        revision,
+        participantId: 'host',
+        submissionId: `host-${revision}`,
+        command,
+      }));
+      kernel.commit(kernel.prepareAdvance());
+    }
+    const transcript = kernel.liveTranscript();
+    const finalized = finalizeReplay(transcript, {
+      perm: [0],
+      systemActions: ['Restart'],
+    });
+    expect(finalized.header).toMatchObject({
+      formatVersion: '1.5',
+      systemActions: ['Restart'],
+    });
+    expect(recheckReplayArtifact(finalized, () => hostReducer)).toMatchObject({
+      ok: true,
+      problems: [],
+    });
+
+    const run = finalizeRunReplay([transcript], {
+      seed: runSeed,
+      perm: [0],
+      systemActions: ['Restart'],
+    });
+    expect(run.header).toMatchObject({
+      formatVersion: '1.5',
+      systemActions: ['Restart'],
+    });
+    expect(recheckReplayArtifact(run, () => hostReducer)).toMatchObject({
+      ok: true,
+      problems: [],
+    });
+  });
+
   it('finalizes a reducer-replayable ended session without inventing an outcome', () => {
     const endedReducer: TickReducer<null, { ended: boolean }, SessionView> = {
       init: () => ({ ended: false }),
