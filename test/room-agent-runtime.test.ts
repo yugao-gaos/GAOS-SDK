@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   InMemoryRoomAgentRuntimeStore,
   RoomAgentRuntime,
+  waitWithRoomAgentProgress,
   type RoomAgentRuntimeContextSource,
   type RoomAgentRuntimeEvent,
   type RoomAgentRunAdmissionResult,
@@ -668,6 +669,61 @@ describe('room agent runtime', () => {
         { text: 'Welcome back.' },
       ],
     });
+  });
+
+  it('exposes only the product-selected progress rungs while long work is silent', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveWork!: (value: string) => void;
+      const work = new Promise<string>((resolve) => { resolveWork = resolve; });
+      const iterator = waitWithRoomAgentProgress(work, {
+        delaysMs: [6_000, 3_000, 6_000],
+        now: Date.now,
+      })[Symbol.asyncIterator]();
+
+      let firstSettled = false;
+      const first = iterator.next().then((entry) => {
+        firstSettled = true;
+        return entry;
+      });
+      await vi.advanceTimersByTimeAsync(5_999);
+      expect(firstSettled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(first).resolves.toEqual({
+        done: false,
+        value: { type: 'progress', rung: 1, elapsedMs: 6_000 },
+      });
+
+      const second = iterator.next();
+      await vi.advanceTimersByTimeAsync(3_000);
+      await expect(second).resolves.toEqual({
+        done: false,
+        value: { type: 'progress', rung: 2, elapsedMs: 9_000 },
+      });
+
+      const result = iterator.next();
+      resolveWork('understood');
+      await expect(result).resolves.toEqual({
+        done: false,
+        value: { type: 'result', value: 'understood' },
+      });
+      await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops a progress ladder silently when the run is aborted', async () => {
+    const controller = new AbortController();
+    const work = new Promise<string>(() => {});
+    const iterator = waitWithRoomAgentProgress(work, {
+      delaysMs: [],
+      signal: controller.signal,
+    })[Symbol.asyncIterator]();
+    const pending = iterator.next();
+    controller.abort('interrupted');
+    await expect(pending).resolves.toEqual({ done: true, value: undefined });
+    await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined });
   });
 
   it('streams durable progress and multiple outputs before completion without recording filler', async () => {

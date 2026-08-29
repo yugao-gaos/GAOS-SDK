@@ -299,6 +299,93 @@ export interface RoomAgentProgressPresenter {
   ): RoomAgentProgressPresentation | null | Promise<RoomAgentProgressPresentation | null>;
 }
 
+export interface RoomAgentProgressLadderOptions {
+  /** Consecutive silence intervals before each progress rung. No defaults are implied. */
+  delaysMs: readonly number[];
+  /** Stops the wait without exposing or manufacturing a result. */
+  signal?: AbortSignal;
+  /** Injectable elapsed-time clock for deterministic hosts and tests. */
+  now?: () => number;
+}
+
+export type RoomAgentProgressLadderEntry<T> =
+  | { type: 'progress'; rung: number; elapsedMs: number }
+  | { type: 'result'; value: T };
+
+/**
+ * Waits for product work while exposing an opt-in, bounded silence ladder.
+ * Rungs contain timing only: drivers yield truthful structured progress and
+ * products retain complete control over wording and presentation modality.
+ */
+export async function* waitWithRoomAgentProgress<T>(
+  work: PromiseLike<T>,
+  options: RoomAgentProgressLadderOptions,
+): AsyncGenerator<RoomAgentProgressLadderEntry<T>, void> {
+  const now = options.now ?? Date.now;
+  const isAborted = () => options.signal?.aborted === true;
+  const startedAt = now();
+  const settled = Promise.resolve(work).then(
+    (value) => ({ type: 'result' as const, value }),
+    (error: unknown) => ({ type: 'error' as const, error }),
+  );
+
+  for (let index = 0; index < options.delaysMs.length; index += 1) {
+    const delayMs = options.delaysMs[index];
+    if (typeof delayMs !== 'number' || !Number.isSafeInteger(delayMs) || delayMs < 0) {
+      throw new RangeError('room agent progress ladder delays must be non-negative safe integers');
+    }
+    if (isAborted()) return;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let removeAbortListener = () => {};
+    const rung = new Promise<{ type: 'rung' } | { type: 'aborted' }>((resolve) => {
+      const abort = () => resolve({ type: 'aborted' });
+      if (options.signal !== undefined) {
+        if (options.signal.aborted) {
+          resolve({ type: 'aborted' });
+          return;
+        }
+        options.signal.addEventListener('abort', abort, { once: true });
+        removeAbortListener = () => options.signal?.removeEventListener('abort', abort);
+      }
+      timer = setTimeout(() => resolve({ type: 'rung' }), delayMs);
+    });
+    const outcome = await Promise.race([settled, rung]);
+    if (timer !== undefined) clearTimeout(timer);
+    removeAbortListener();
+    if (isAborted()) return;
+
+    if (outcome.type === 'error') throw outcome.error;
+    if (outcome.type === 'result') {
+      yield outcome;
+      return;
+    }
+    if (outcome.type === 'aborted') return;
+    yield { type: 'progress', rung: index + 1, elapsedMs: Math.max(0, now() - startedAt) };
+  }
+
+  if (isAborted()) return;
+  let removeAbortListener = () => {};
+  const aborted = new Promise<{ type: 'aborted' }>((resolve) => {
+    if (options.signal === undefined) return;
+    const abort = () => resolve({ type: 'aborted' });
+    if (options.signal.aborted) {
+      resolve({ type: 'aborted' });
+      return;
+    }
+    options.signal.addEventListener('abort', abort, { once: true });
+    removeAbortListener = () => options.signal?.removeEventListener('abort', abort);
+  });
+  const outcome = options.signal === undefined
+    ? await settled
+    : await Promise.race([settled, aborted]);
+  removeAbortListener();
+  if (isAborted()) return;
+  if (outcome.type === 'aborted') return;
+  if (outcome.type === 'error') throw outcome.error;
+  yield outcome;
+}
+
 export interface RoomAgentRunInput extends RoomAgentRuntimeInput {
   /** Explicit proof that this input continues the named waiting run. */
   continuation?: { runId: string; token: string };
