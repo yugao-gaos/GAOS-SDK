@@ -77,7 +77,8 @@ jobs:
           EXPECTED_VERSION="${RELEASE_TAG#v}" python -c "
           import os, gaos_sdk
           assert gaos_sdk.__version__ == os.environ['EXPECTED_VERSION']
-          assert gaos_sdk.GAOS_REPLAY_FORMAT_VERSION == '1.4'
+          assert gaos_sdk.GAOS_REPLAY_FORMAT_VERSION == '1.5'
+          assert gaos_sdk.GAOS_REPLAY_INTERACTION_FORMAT_VERSION == '1.4'
           "
 
       - run: npm publish

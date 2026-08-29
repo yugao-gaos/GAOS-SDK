@@ -614,6 +614,7 @@ export interface CreateReplayArtifactInput<TLevel> {
     sessionId: string;
     // (undocumented)
     signaturePolicy?: JsonObject | SubmissionSignaturePolicy;
+    systemActions?: readonly string[];
     // (undocumented)
     timeoutPolicy?: JsonObject | ReplayTickTimeoutPolicy;
     // (undocumented)
@@ -972,7 +973,10 @@ export const GAOS_REPLAY_EXTENSION: "gaos-replay.jsonl";
 export const GAOS_REPLAY_FORMAT_ID: "gaos.replay";
 
 // @public
-export const GAOS_REPLAY_FORMAT_VERSION: "1.4";
+export const GAOS_REPLAY_FORMAT_VERSION: "1.5";
+
+// @public
+export const GAOS_REPLAY_INTERACTION_FORMAT_VERSION: "1.4";
 
 // @public
 export const GAOS_REPLAY_LEGACY_FORMAT_VERSION: "1.0";
@@ -2083,7 +2087,7 @@ export class ReplayFormatError extends Error {
 }
 
 // @public (undocumented)
-export type ReplayFormatVersion = typeof GAOS_REPLAY_LEGACY_FORMAT_VERSION | typeof GAOS_REPLAY_UNSIGNED_FORMAT_VERSION | typeof GAOS_REPLAY_SIGNED_FORMAT_VERSION | typeof GAOS_REPLAY_ENDED_FORMAT_VERSION | typeof GAOS_REPLAY_FORMAT_VERSION;
+export type ReplayFormatVersion = typeof GAOS_REPLAY_LEGACY_FORMAT_VERSION | typeof GAOS_REPLAY_UNSIGNED_FORMAT_VERSION | typeof GAOS_REPLAY_SIGNED_FORMAT_VERSION | typeof GAOS_REPLAY_ENDED_FORMAT_VERSION | typeof GAOS_REPLAY_INTERACTION_FORMAT_VERSION | typeof GAOS_REPLAY_FORMAT_VERSION;
 
 // @public
 export interface ReplayGameRef {
@@ -2119,6 +2123,7 @@ export interface ReplayHeader<TLevel> {
     // (undocumented)
     sessionId: string;
     signaturePolicy?: JsonObject | SubmissionSignaturePolicy;
+    systemActions?: readonly string[];
     timeoutPolicy?: JsonObject | ReplayTickTimeoutPolicy;
     // (undocumented)
     totals: ReplayTotals;

@@ -32,7 +32,8 @@ try {
     [
       "const sdk = '@yugao-gaos/gaos-sdk';",
       "const engine = await import(`${sdk}/engine`);",
-      "if (engine.GAOS_REPLAY_FORMAT_VERSION !== '1.4') process.exit(1);",
+      "if (engine.GAOS_REPLAY_FORMAT_VERSION !== '1.5') process.exit(1);",
+      "if (engine.GAOS_REPLAY_INTERACTION_FORMAT_VERSION !== '1.4') process.exit(1);",
       "for (const entry of ['session-host', 'benchmark', 'ecosystem', 'evidence',",
       "  'leaderboard', 'presentation-client', 'seat-control', 'room-agent',",
       "  'room-agent-runtime', 'room-interaction', 'presentation-cues']) {",
