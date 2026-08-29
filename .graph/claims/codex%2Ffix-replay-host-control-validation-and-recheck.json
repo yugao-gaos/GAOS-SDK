@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/fix-replay-host-control-validation-and-recheck",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "root-replay-host-control-20260829-runtime-fix",
+  "branch": "orch/attempt/codex-fix-replay-host-control-validation-and-recheck",
+  "status": "claimed",
+  "claimed_at": "2026-08-29T14:05:38.768Z",
+  "lease_until": "2026-08-29T15:05:38.768Z"
+}
