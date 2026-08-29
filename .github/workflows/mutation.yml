@@ -18,6 +18,17 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      - name: Install Godot 4.7 stable
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 \
+            --output "$RUNNER_TEMP/godot.zip" \
+            https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_linux.x86_64.zip
+          unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP/godot"
+          sudo install -m 0755 \
+            "$RUNNER_TEMP/godot/Godot_v4.7-stable_linux.x86_64" \
+            /usr/local/bin/godot
+          godot --version
       - run: npm run test:mutation
       - uses: actions/upload-artifact@v6
         if: always()

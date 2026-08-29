@@ -11,11 +11,11 @@ Published release notes remain the source of truth for shipped behavior.
 
 ### v1.0 — stable complete SDK
 
-v1.0 includes every implemented roadmap item through RFC-021: the canonical
+v1.0 includes every implemented roadmap item through RFC-022: the canonical
 GAOS identity, historical verifier kits, portal-aware paths, one durable
 session lifecycle, unified actor control sources, and verifiable benchmark
 publication, plus provider-neutral room-agent contracts, runtime orchestration,
-and presentation cues. The scheduled
+durable streamed runs, and presentation cues. The scheduled
 neutral-core compatibility aliases are removed;
 historical replay v1.0–v1.3 semantics remain stable, while replay v1.4 records
 ordered reducer-backed interactions.
@@ -159,6 +159,15 @@ room-global speech arbitration, captions, and reconnect.
 `./presentation-cues` adds ordered host-to-renderer effects and repair.
 Provider-specific push-to-talk, STT, TTS, persistence, and networking stay in
 host adapters.
+
+### RFC-022 durable room-agent runs — incorporated into v1.0
+
+[RFC-022](/rfcs/rfc-022-durable-agent-runs) extends the room-agent runtime with
+provider-neutral long-running work. Atomic input admission, ordered durable
+events, checkpoints, progress, streamed assistant output, continuation,
+cooperative cancellation, persisted deadlines, replay, and crash recovery
+remain host-portable without exposing provider reasoning or weakening the
+RFC-021 disclosure and action-authority boundaries.
 
 ### Stable bridge contracts
 

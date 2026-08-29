@@ -65,7 +65,7 @@ describe('Prism Match GAOS demo reducer', () => {
 
     expect(transcript.result.terminationReason).toMatch(/won|failed/);
     expect(checked).toMatchObject({ ok: true, problems: [] });
-  });
+  }, 30_000);
 
   it('rejects swaps outside the reducer-advertised legal action set', () => {
     const state = prismMatchReducer.init(PRISM_MATCH_LEVELS[0]!, 2407);

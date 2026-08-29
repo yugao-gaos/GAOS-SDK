@@ -27,10 +27,10 @@ change has been reviewed.
 ## Mutation testing
 
 `npm run test:mutation` uses Stryker against deterministic randomness,
-commitment, settlement, and submission-signature code. The measured baseline is
-64; a score below 63 fails to allow one point of timing variance from timeout
-classification. This floor must only move upward, and the first ratchet target
-is a stable 65, with particular attention to surviving signature verification
+commitment, settlement, and submission-signature code. The v1.0 candidate
+measures 65.35; a score below 63 fails to allow limited timing variance from
+timeout classification. This floor must only move upward after the candidate
+repeats on CI, with particular attention to surviving signature verification
 mutants. The weekly mutation workflow retains the detailed report as a build
 artifact.
 
@@ -49,7 +49,7 @@ Record the evidence and named owner for every item in the release pull request.
 
 - [ ] The intended v1.0 export surface is captured and reviewed.
 - [ ] Deprecated aliases scheduled for v1.0 are removed, with a migration table.
-- [ ] RFC-017 through RFC-021 completion tests remain green.
+- [ ] RFC-017 through RFC-022 completion tests remain green.
 - [ ] Historical replay v1.0–v1.3 retains its documented interpretation, and
       replay v1.4 interaction records, schemas, signatures, and verifier
       semantics remain green.
