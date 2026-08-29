@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/merge-replay-host-controls-into-v1.0-candidate",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "root-merge-host-control-into-v1-20260829",
+  "branch": "orch/attempt/codex-merge-replay-host-controls-into-v1.0-candidate",
+  "status": "claimed",
+  "claimed_at": "2026-08-29T15:00:20.378Z",
+  "lease_until": "2026-08-29T16:00:20.378Z"
+}
