@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/align-replay-v1.5-schemas-and-cross-language-compatibility",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "root-replay-host-control-20260829-compat-fix",
+  "branch": "orch/attempt/codex-align-replay-v1.5-schemas-and-cross-language-compatibility",
+  "status": "claimed",
+  "claimed_at": "2026-08-29T14:05:56.137Z",
+  "lease_until": "2026-08-29T15:05:56.137Z"
+}
