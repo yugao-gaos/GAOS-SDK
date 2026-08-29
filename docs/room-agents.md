@@ -79,7 +79,8 @@ private, and internal agent channels must use separate provider memories.
 | Audience vote | Pure eligible-ballot tally and stable tie-break | Own poll lifecycle and narrate/route the result |
 | Private help | Participant-scoped disclosure | Authenticate participant and isolate channel memory |
 
-The router uses FIFO delivery, envelope-ID deduplication, and a default
+The router uses FIFO delivery within each room/channel lane, permits unrelated
+lanes to run concurrently, deduplicates envelope IDs, and applies a default
 eight-hop bound for derived exchanges. It never performs semantic LLM routing
 or broadcasts to every agent. Agent responses return drafts; the host derives
 and enqueues them so source identity and causation cannot be invented by a
@@ -95,6 +96,10 @@ Services and watchers produce data or events, not reducer mutations. If an
 agent decides that an interaction should affect the game, it must return the
 same optional actor/seat action proposal described above. The host validates
 that proposal normally.
+
+A service call ID is retry-stable only within its original room, agent,
+channel, and disclosure boundary. Reuse with a different channel or disclosure
+is rejected before a cached result can cross a privacy context.
 
 ## Audience interaction
 
@@ -181,11 +186,14 @@ ephemeral by default and therefore do not enter the durable channel transcript
 or later model history unless the product explicitly selects `record`.
 
 An `input_requested` event durably changes the run to `waiting_for_input`.
-The next input on the same channel continues that run, or a client can echo the
-run ID and continuation token for strict correlation. `checkpoint` supplies
-product-owned recovery state; `resumeRun()` invokes the driver again with that
-checkpoint after a host restart. `cancelRun()` and persisted epoch deadlines
-produce replayable terminal states. `replayRun()` returns ordered events without
+The next input from the same authenticated speaker on the same channel and
+agent continues that run, or a client can echo the run ID and continuation
+token for strict correlation. Continuation intersects its new disclosure with
+the waiting run's persisted disclosure, so restored checkpoint or transcript
+context cannot become more visible. `checkpoint` supplies product-owned
+recovery state; `resumeRun()` invokes the driver again with that checkpoint
+after a host restart. `cancelRun()` and persisted epoch deadlines produce
+replayable terminal states. `replayRun()` returns ordered events without
 replaying speech, cues, actions, or provider calls.
 
 Driver `assistant_output.outputId` values are logical IDs local to an attempt.

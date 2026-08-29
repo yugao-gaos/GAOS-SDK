@@ -301,7 +301,7 @@ export class RoomInteractionRouter {
   private readonly handlers = new Map<string, RoomInteractionHandler>();
   private readonly seen = new Set<string>();
   private readonly maxHops: number;
-  private tail: Promise<void> = Promise.resolve();
+  private readonly tails = new Map<string, Promise<void>>();
 
   constructor(private readonly options: RoomInteractionRouterOptions) {
     if (typeof options?.createId !== 'function') {
@@ -429,7 +429,9 @@ export class RoomInteractionRouter {
       resolveDelivery = resolve;
       rejectDelivery = reject;
     });
-    this.tail = this.tail.then(async () => {
+    const laneKey = canonicalJson([envelope.roomId, envelope.channelId]);
+    const previous = this.tails.get(laneKey) ?? Promise.resolve();
+    const operation = previous.then(async () => {
       try {
         const deliveries: RoomInteractionDelivery<TResult>[] = [];
         for (const { target, handler } of handlers) {
@@ -441,6 +443,11 @@ export class RoomInteractionRouter {
       } catch (error) {
         rejectDelivery(error);
       }
+    });
+    const tail = operation.then(() => undefined, () => undefined);
+    this.tails.set(laneKey, tail);
+    void tail.then(() => {
+      if (this.tails.get(laneKey) === tail) this.tails.delete(laneKey);
     });
     return await delivery;
   }
@@ -511,7 +518,10 @@ export interface RoomAgentService {
   ): RoomAgentServiceResponse | Promise<RoomAgentServiceResponse>;
 }
 
-/** Capability-checked, retry-stable service invocation. Services cannot return game actions. */
+/**
+ * Capability-checked, retry-stable service invocation. Call identity is bound
+ * to its channel and disclosure; services cannot return game actions.
+ */
 export class RoomAgentServiceRegistry {
   private readonly services = new Map<string, RoomAgentService>();
   private readonly calls = new Map<
@@ -569,7 +579,15 @@ export class RoomAgentServiceRegistry {
     }
     const service = this.services.get(request.serviceId);
     if (service === undefined) throw new Error(`unknown room agent service: ${request.serviceId}`);
+    const disclosure = envelope.disclosure.kind === 'participants'
+      ? {
+        kind: envelope.disclosure.kind,
+        participantIds: [...envelope.disclosure.participantIds].sort(),
+      }
+      : envelope.disclosure;
     const fingerprint = canonicalJson({
+      channelId: envelope.channelId,
+      disclosure,
       serviceId: request.serviceId,
       operation: request.operation,
       ...(request.input === undefined ? {} : { input: request.input }),
@@ -627,10 +645,17 @@ export interface RoomWatcherEmission {
   drafts: readonly RoomInteractionDraft[];
 }
 
-/** Watchers run once per committed room revision and only see the supplied projection. */
+/**
+ * Watchers run once per successful in-process committed-revision batch and
+ * only see the supplied projection. Failed batches remain retryable.
+ */
 export class RoomInteractionWatcherRegistry<TObservation = unknown> {
   private readonly watchers = new Map<string, RoomInteractionWatcher<TObservation>>();
   private readonly seen = new Set<string>();
+  private readonly inFlight = new Map<
+    string,
+    Promise<readonly RoomWatcherEmission[]>
+  >();
 
   constructor(watchers: readonly RoomInteractionWatcher<TObservation>[] = []) {
     for (const watcher of watchers) this.register(watcher);
@@ -671,6 +696,26 @@ export class RoomInteractionWatcherRegistry<TObservation = unknown> {
       || context.transitionRevision < 0) {
       throw new RangeError('watcher tick and transitionRevision must be non-negative');
     }
+    const batchKey = JSON.stringify([context.roomId, context.transitionRevision]);
+    const existing = this.inFlight.get(batchKey);
+    if (existing !== undefined) {
+      await existing;
+      return [];
+    }
+    const delivery = Promise.resolve().then(
+      async () => await this.raiseCommittedBatch(context),
+    );
+    this.inFlight.set(batchKey, delivery);
+    try {
+      return await delivery;
+    } finally {
+      if (this.inFlight.get(batchKey) === delivery) this.inFlight.delete(batchKey);
+    }
+  }
+
+  private async raiseCommittedBatch(
+    context: RoomCommittedInteractionContext<TObservation>,
+  ): Promise<readonly RoomWatcherEmission[]> {
     const emissions: RoomWatcherEmission[] = [];
     const completedKeys: string[] = [];
     for (const watcher of this.watchers.values()) {

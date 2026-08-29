@@ -148,11 +148,22 @@ This supports six v1.0 patterns without making the router a workflow engine:
 6. A participant and agent use a private channel whose response disclosure
    cannot widen beyond that participant set.
 
-The router uses a FIFO delivery queue, rejects unknown or implicit targets,
+The router uses one FIFO delivery queue per room/channel lane, permits unrelated
+lanes to execute concurrently, rejects unknown or implicit targets,
 deduplicates envelope IDs, and bounds derived chains to eight hops by default.
 Products should also set a per-root emission budget in the host when fan-out
 is possible. Drivers do not recursively dispatch from inside delivery; they
 return drafts for the host to derive and enqueue.
+
+The watcher registry coalesces concurrent delivery attempts for one committed
+room revision within a process. A failed batch does not consume the revision
+and is retried as a whole; watcher callbacks therefore remain pure draft
+producers. Process-restart guarantees require the host to durably record a
+watcher/revision delivery receipt before routing those drafts.
+
+Service call idempotency is bound to the originating room, agent, channel, and
+participant disclosure. Reusing a call ID with different service input or a
+different privacy context is rejected instead of returning a cached result.
 
 `channelId` is an isolation boundary, not only a delivery label. Provider
 memory for a public room, a private participant-to-agent thread, and an

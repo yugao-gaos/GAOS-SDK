@@ -159,14 +159,17 @@ future turns. Ordinary answers and questions default to `record`.
 ## 6 — Multi-turn continuation
 
 `input_requested` changes the run to `waiting_for_input` and stores its request
-ID and opaque token. The next input on the same channel and agent continues the
-sole waiting run automatically. A network client may also echo `{ runId,
-token }`; a mismatch is rejected before transcript admission.
+ID and opaque token. The next input from the same authenticated speaker on the
+same channel and agent continues the sole waiting run automatically. A network
+client may also echo `{ runId, token }`; a run, token, or speaker mismatch is
+rejected before transcript admission.
 
 Continuation preserves the run ID and root input, increments `attempt`, keeps
 the checkpoint and journal, supplies the new final input, and clears the prior
-continuation before execution. Completion or cancellation clears it
-permanently.
+continuation before execution. Its effective disclosure is the intersection of
+the persisted run disclosure and the new authenticated input disclosure, so a
+continuation cannot expose earlier private context. Completion or cancellation
+clears it permanently.
 
 ## 7 — Cancellation and deadlines
 
@@ -218,7 +221,7 @@ or only when `final` closes the message.
 8. Replaying events does not repeat speech, cues, actions, or provider calls.
 9. A continuation token correlates a waiting run; it is not authentication.
 10. Checkpoints contain only product-approved, serializable recovery state.
-11. A durable run persists its authenticated disclosure, and continuation or
-    idempotent retry cannot widen it under the same input identity.
+11. A durable run persists its authenticated disclosure; continuation
+    intersects that boundary and idempotent retry must reproduce it exactly.
 12. Admission, supersession, and cancellation are isolated by channel;
     unrelated durable provider work remains active.

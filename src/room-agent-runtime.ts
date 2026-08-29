@@ -1218,12 +1218,21 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       if (open === undefined
         || open.id !== request.continuation.runId
         || open.status !== 'waiting_for_input'
+        || open.agentId !== agentId
         || open.continuation?.token !== request.continuation.token) {
         throw new Error('room agent continuation does not match a waiting run');
       }
     }
+    const sameContinuationSpeaker = open !== undefined
+      && (open.latestInput.speakerKind ?? 'participant')
+        === (request.input.speakerKind ?? 'participant')
+      && open.latestInput.speakerId === request.input.speakerId;
+    if (request.continuation !== undefined && !sameContinuationSpeaker) {
+      throw new Error('room agent continuation speaker does not match the waiting run');
+    }
     const continuesOpen = open?.status === 'waiting_for_input'
       && open.agentId === agentId
+      && sameContinuationSpeaker
       && (request.continuation === undefined || request.continuation.runId === open.id);
     if (continuesOpen && open !== undefined) {
       continuation = open.continuation;
@@ -1233,10 +1242,14 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
         throw new RangeError('room agent run deadlineMs must be non-negative');
       }
       const now = this.wallNow();
+      const disclosure = intersectRoomDisclosures(open.disclosure, request.disclosure);
+      if (disclosure.kind === 'none') {
+        throw new Error('room agent continuation has no shared disclosure');
+      }
       run = {
         ...omitRunFields(open, 'continuation', 'deadlineAt', 'deadlineMs', 'failureCode'),
         latestInput: structuredClone(request.input),
-        disclosure: copyDisclosure(request.disclosure),
+        disclosure,
         attempt: open.attempt + 1,
         status: 'active',
         updatedAt: now,
