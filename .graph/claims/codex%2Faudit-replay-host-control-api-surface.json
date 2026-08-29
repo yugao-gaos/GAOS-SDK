@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/audit-replay-host-control-api-surface",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "root-replay-host-control-20260829-api",
+  "branch": "orch/attempt/codex-audit-replay-host-control-api-surface",
+  "status": "claimed",
+  "claimed_at": "2026-08-29T14:01:48.471Z",
+  "lease_until": "2026-08-29T15:01:48.471Z"
+}
