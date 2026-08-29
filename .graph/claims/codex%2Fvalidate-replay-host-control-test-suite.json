@@ -3,7 +3,8 @@
   "git_user": "yugao-gaos <yu.gao@gaos.ca>",
   "session_id": "root-replay-host-control-20260829-tests",
   "branch": "orch/attempt/codex-validate-replay-host-control-test-suite",
-  "status": "claimed",
+  "status": "tested",
   "claimed_at": "2026-08-29T14:01:12.966Z",
-  "lease_until": "2026-08-29T15:01:12.966Z"
+  "lease_until": "2026-08-29T15:01:12.966Z",
+  "completed_at": "2026-08-29T14:03:11.587Z"
 }
