@@ -1,6 +1,6 @@
 # GAOS SDK — RFC sequence and release roadmap
 
-Status: RFC-001 through RFC-021 implemented and incorporated into v1.0;
+Status: RFC-001 through RFC-022 implemented and incorporated into v1.0;
 RFC-017 through RFC-019 retain their historical target milestones ·
 Target: v0.13 → v1.0 arc · Baseline: v0.12.0 export surface
 
@@ -11,7 +11,8 @@ RFC-018 were implemented for the historical v0.27 target and RFC-019 for the
 historical v0.29 target; all are incorporated into v1.0. RFC-020 adds one
 command path with authoritative interaction-or-intent classification and
 complete interaction replay. RFC-021 adds in-room agents and audience
-interaction for v1.0. For supported APIs and current
+interaction, and RFC-022 adds durable streamed runs and continuation for v1.0.
+For supported APIs and current
 terminology, use the
 [architecture map](/architecture), [capability map](/capabilities), and
 [mechanism reference](/mechanisms/).
@@ -61,6 +62,7 @@ Two standing design rules govern every RFC in this batch:
 | [019](rfc-019-unified-actor-control-sources.md) | Unified actor control sources | v0.29 | 001, 003, 006, 013, 014, 018 |
 | [020](rfc-020-unified-command-effects.md) | Unified command effects: authoritative interaction-or-intent classification | v1.0 | 006, 010, 016, 018 |
 | [021](rfc-021-room-agents.md) | In-room agents and audience interaction | v1.0 | 003, 006, 013, 019, 020 |
+| [022](rfc-022-durable-agent-runs.md) | Durable room-agent runs, progress, and continuation | v1.0 | 021 |
 
 Sequencing rationale: RFC-001/002 are contract-level and mostly mechanical —
 they unblock naming and addressing for everything else. RFC-003 is the one
@@ -101,6 +103,10 @@ presence. It preserves action-oriented `AgentDriver` semantics, treats room
 presence as separate from seat authority, and standardizes the portable
 boundary between final authenticated text, scoped game context, utterances,
 and optional canonical action proposals.
+RFC-022 extends that boundary to long-running work with atomic admission,
+ordered durable events, progress, output streaming, checkpoints, continuation,
+deadlines, cancellation, replay, and recovery while preserving RFC-021's
+disclosure and authority invariants.
 
 The [batch implementation review](implementation-review.md) maps every
 normative requirement and test-plan fixture to its shipped API and evidence.

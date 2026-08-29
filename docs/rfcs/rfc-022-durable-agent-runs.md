@@ -1,8 +1,7 @@
 # RFC-022: Durable room-agent runs, progress, and continuation
 
-Status: Accepted  
-Target: GAOS SDK 1.x additive surface  
-Depends on: RFC-021 room agents
+Status: **implemented** · Ships in: **v1.0** · Compatibility: additive runtime
+surface · Depends on: [RFC-021](rfc-021-room-agents.md)
 
 ## 1 — Summary
 

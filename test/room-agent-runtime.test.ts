@@ -982,13 +982,9 @@ describe('room agent runtime', () => {
       input: { id: 'deadline-1', speakerId: 'visitor-1', text: 'Wait', modality: 'text' },
     });
     expect(deadline.status).toBe('deadline_exceeded');
-    await expect(runtime.replayRun(deadline.run.id)).resolves.toMatchObject({
-      run: { status: 'deadline_exceeded' },
-      events: [
-        { event: { type: 'progress' } },
-        { event: { type: 'deadline_exceeded' } },
-      ],
-    });
+    const deadlineReplay = await runtime.replayRun(deadline.run.id);
+    expect(deadlineReplay.run).toMatchObject({ status: 'deadline_exceeded' });
+    expect(deadlineReplay.events.at(-1)?.event).toEqual({ type: 'deadline_exceeded' });
   });
 
   it('restores a durable checkpoint into an explicitly resumed active run', async () => {

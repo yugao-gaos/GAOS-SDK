@@ -5,12 +5,14 @@ For the public chronological changelog, see the
 
 ## v1.0.0
 
-Prepared August 1, 2026. v1.0 freezes the complete product-neutral SDK after
-the v0.26 release and includes all subsequently implemented work: RFC-017
+Release candidate refreshed August 29, 2026. v1.0 freezes the complete
+product-neutral SDK after the v0.26 release and includes all subsequently
+implemented work: RFC-017
 portal-aware pathfinding, RFC-018 unified sessions, RFC-019 unified actor
 control sources, benchmark resource reporting, and the 1.0 quality and
 architecture gates, plus RFC-020 unified command effects and RFC-021 in-room
-agent contracts. No separate v0.27 or v0.29 package was published.
+agent contracts, and RFC-022 durable room-agent runs. No separate v0.27 or
+v0.29 package was published.
 
 - Normal, guided, autonomous, watched, and benchmark play share one
   `create/attach → observe/act → finalize → close` session lifecycle.
@@ -33,6 +35,9 @@ agent contracts. No separate v0.27 or v0.29 package was published.
   authenticated disclosure, channel-partitioned transcript persistence and
   provider cancellation, one room-global speech lane, captions, operational
   events, and reconnect behind host adapters.
+- The same runtime supports durable streamed runs with atomic input admission,
+  ordered event journals, truthful progress, checkpoints, continuation,
+  cooperative cancellation, persisted deadlines, replay, and crash recovery.
 - The additive `./presentation-cues` surface carries ordered, idempotent
   product effects to browser and native renderers with acknowledgements,
   bounded replay repair, and emergency interruption.
