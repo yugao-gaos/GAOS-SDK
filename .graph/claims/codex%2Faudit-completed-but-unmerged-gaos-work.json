@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/audit-completed-but-unmerged-gaos-work",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "root-audit-done-unmerged-20260829",
+  "branch": "orch/attempt/codex-audit-completed-but-unmerged-gaos-work",
+  "status": "claimed",
+  "claimed_at": "2026-08-29T15:17:20.534Z",
+  "lease_until": "2026-08-29T16:17:20.534Z"
+}
