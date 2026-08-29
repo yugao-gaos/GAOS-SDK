@@ -3,7 +3,8 @@
   "git_user": "yugao-gaos <yu.gao@gaos.ca>",
   "session_id": "codex-mcp-44491-1121ee41311bc27b3df643afd0482c00",
   "branch": "orch/attempt/codex-promote-room-agent-isolation-fixes-to-main",
-  "status": "claimed",
+  "status": "tested",
   "claimed_at": "2026-08-29T10:25:26.859Z",
-  "lease_until": "2026-08-29T11:25:26.859Z"
+  "lease_until": "2026-08-29T11:25:26.859Z",
+  "completed_at": "2026-08-29T10:25:42.594Z"
 }
