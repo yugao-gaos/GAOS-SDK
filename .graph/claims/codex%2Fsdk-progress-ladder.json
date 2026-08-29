@@ -3,7 +3,8 @@
   "git_user": "yugao-gaos <yu.gao@gaos.ca>",
   "session_id": "codex-mcp-71035-1e507a3b5dd37a78acc63fb6d4c23742",
   "branch": "orch/attempt/codex-sdk-progress-ladder",
-  "status": "claimed",
+  "status": "tested",
   "claimed_at": "2026-08-29T21:14:10.272Z",
-  "lease_until": "2026-08-29T22:14:10.272Z"
+  "lease_until": "2026-08-29T22:14:10.272Z",
+  "completed_at": "2026-08-29T21:20:38.279Z"
 }
