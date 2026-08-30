@@ -3,6 +3,40 @@
 For the public chronological changelog, see the
 [complete version history](/version-history).
 
+## v1.0.1
+
+Patch release prepared August 30, 2026. It keeps all v1.0 contracts compatible
+and adds durable, product-selected handling for speech that resumes after a
+local final-transcript boundary.
+
+- Correlated active-run supersession can choose `replace` or `append` input
+  semantics. Append mode carries the predecessor's unconsumed final text into
+  the replacement's atomically admitted input.
+- Complete restatements are de-duplicated, optional length bounds retain the
+  newest fragment, and exact retries reproduce the same durable input.
+- A waiting-for-input transition that wins the cancellation race remains
+  authoritative and receives the new input as its next answer, without
+  inheriting prior answer text.
+- The existing progress ladder, checkpoint seeding, provider cancellation,
+  stale-output fencing, and recovery fixes developed after v1.0.0 are included.
+
+### Migration to v1.0.1
+
+Update TypeScript and Python pins to `v1.0.1`. Existing callers need no code
+change. Hands-free voice products may opt into fragment carry-forward only when
+their own interaction state knows the interrupted input was not consumed:
+
+```ts
+supersession: {
+  runId: activeRun.id,
+  checkpoint,
+  inputPolicy: { mode: 'append', maxLength: 2_000 },
+}
+```
+
+Omit `inputPolicy` (or use `replace`) for a correction. Omit supersession for an
+ordinary new turn.
+
 ## v1.0.0
 
 Release candidate refreshed August 29, 2026. v1.0 freezes the complete

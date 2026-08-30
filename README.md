@@ -36,7 +36,7 @@ around them.
 ## Install
 
 ```sh
-npm install 'git+https://github.com/yugao-gaos/GAOS-SDK.git#v1.0.0'
+npm install 'git+https://github.com/yugao-gaos/GAOS-SDK.git#v1.0.1'
 ```
 
 Use the narrowest package surface:

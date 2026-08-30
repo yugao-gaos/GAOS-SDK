@@ -34,7 +34,7 @@ npm install @yugao-gaos/gaos-sdk
 Or install the exact Git tag directly:
 
 ```sh
-npm install 'git+https://github.com/yugao-gaos/GAOS-SDK.git#v1.0.0'
+npm install 'git+https://github.com/yugao-gaos/GAOS-SDK.git#v1.0.1'
 ```
 
 ## Build a reducer

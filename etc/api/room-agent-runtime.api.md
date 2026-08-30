@@ -122,6 +122,9 @@ interface LocationRef {
     coord: LocationCoord;
 }
 
+// @public
+export function mergeRoomAgentInputFragments(previousText: string, latestText: string, maxLength?: number): string;
+
 // @public (undocumented)
 interface RevealEnvelope {
     // (undocumented)
@@ -232,6 +235,23 @@ interface RoomAgentInput {
     speakerKind?: RoomEndpointKind;
     // (undocumented)
     text: string;
+}
+
+// @public (undocumented)
+export type RoomAgentProgressLadderEntry<T> = {
+    type: 'progress';
+    rung: number;
+    elapsedMs: number;
+} | {
+    type: 'result';
+    value: T;
+};
+
+// @public (undocumented)
+export interface RoomAgentProgressLadderOptions {
+    delaysMs: readonly number[];
+    now?: () => number;
+    signal?: AbortSignal;
 }
 
 // @public (undocumented)
@@ -348,6 +368,11 @@ export interface RoomAgentRunInput extends RoomAgentRuntimeInput {
     };
     deadlineMs?: number;
     onEvent?(entry: RoomAgentRunJournalEntry): void | Promise<void>;
+    supersession?: {
+        runId: string;
+        checkpoint: JsonValue;
+        inputPolicy?: RoomAgentSupersessionInputPolicy;
+    };
 }
 
 // @public
@@ -678,6 +703,14 @@ export interface RoomAgentRuntimeStore {
 }
 
 // @public (undocumented)
+export type RoomAgentSupersessionInputPolicy = {
+    mode: 'replace';
+} | {
+    mode: 'append';
+    maxLength?: number;
+};
+
+// @public (undocumented)
 export interface RoomAgentTranscriptAppendResult {
     // (undocumented)
     duplicate: boolean;
@@ -906,6 +939,9 @@ interface SubmittedAction {
     y?: number;
     zoneId?: string;
 }
+
+// @public
+export function waitWithRoomAgentProgress<T>(work: PromiseLike<T>, options: RoomAgentProgressLadderOptions): AsyncGenerator<RoomAgentProgressLadderEntry<T>, void>;
 
 // (No @packageDocumentation comment for this package)
 

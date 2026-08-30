@@ -3,11 +3,20 @@
 GAOS used the v0.x line to refine its contracts before v1.0. Products should
 review the migration notes before adopting the stable surface.
 
-::: tip Next release: v1.0.0
-The complete implemented SDK—including RFC-017 through RFC-022—is prepared as
-one stable release. Replay v1.0–v1.3 compatibility is unchanged; unified
-command sessions emit replay v1.4.
+::: tip Latest release: v1.0.1
+The additive patch carries unfinished final speech fragments through correlated
+run supersession while preserving v1.0 replay, session, and room-agent
+contracts.
 :::
+
+## v1.0.1: speech supersession patch
+
+Prepared August 30, 2026. Hosts can select append semantics for an unfinished
+speech segment, replace semantics for a correction, or ordinary admission for a
+new turn. Fragment joining and durable replacement admission are deterministic,
+bounded, retry-safe, and preserve a waiting transition that wins the race.
+
+[Migration and release notes →](/releases#v101)
 
 ## v1.0.0: stable complete SDK
 
