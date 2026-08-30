@@ -393,12 +393,25 @@ export interface RoomAgentRunInput extends RoomAgentRuntimeInput {
    * Correlates a new logical run to the active run it replaces and supplies
    * that replacement's initial, JSON-safe recovery checkpoint.
    */
-  supersession?: { runId: string; checkpoint: JsonValue };
+  supersession?: {
+    runId: string;
+    checkpoint: JsonValue;
+    /**
+     * How an unfinished predecessor input contributes to this replacement.
+     * Omit (or use `replace`) for a correction. `append` carries a resumed
+     * speech fragment into the replacement before its atomic admission.
+     */
+    inputPolicy?: RoomAgentSupersessionInputPolicy;
+  };
   /** Per-run override. Zero disables the default deadline. */
   deadlineMs?: number;
   /** Per-call live delivery, invoked after each event is durably appended. */
   onEvent?(entry: RoomAgentRunJournalEntry): void | Promise<void>;
 }
+
+export type RoomAgentSupersessionInputPolicy =
+  | { mode: 'replace' }
+  | { mode: 'append'; maxLength?: number };
 
 export interface RoomAgentRunResult {
   status: RoomAgentRunStatus | 'duplicate';
@@ -427,6 +440,39 @@ function assertText(value: unknown, label: string): asserts value is string {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new TypeError(`${label} must not be empty`);
   }
+}
+
+/**
+ * Deterministically joins final speech fragments for an active-run
+ * supersession. Complete restatements are not duplicated. When bounded, the
+ * newest fragment is preserved and the predecessor is shortened first.
+ */
+export function mergeRoomAgentInputFragments(
+  previousText: string,
+  latestText: string,
+  maxLength?: number,
+): string {
+  assertText(previousText, 'previous room agent input fragment');
+  assertText(latestText, 'latest room agent input fragment');
+  if (maxLength !== undefined
+    && (!Number.isSafeInteger(maxLength) || maxLength < 1)) {
+    throw new RangeError('room agent input fragment maxLength must be a positive integer');
+  }
+  const previous = previousText.trim().replace(/\s+/gu, ' ');
+  const latest = latestText.trim().replace(/\s+/gu, ' ');
+  let merged: string;
+  if (latest === previous || latest.startsWith(previous)) {
+    merged = latest;
+  } else if (previous.endsWith(latest)) {
+    merged = previous;
+  } else {
+    merged = `${previous} ${latest}`;
+  }
+  if (maxLength === undefined || merged.length <= maxLength) return merged;
+  if (latest.length >= maxLength) return latest.slice(0, maxLength);
+  const previousLength = maxLength - latest.length - 2;
+  if (previousLength < 1) return latest.slice(0, maxLength);
+  return `${previous.slice(0, previousLength)}… ${latest}`;
 }
 
 function copyDescriptor(descriptor: RoomAgentDescriptor): RoomAgentDescriptor {
@@ -1295,16 +1341,24 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       if (canonicalJson(duplicate.disclosure) !== canonicalJson(request.disclosure)) {
         throw new Error('room agent input id was reused with a different disclosure');
       }
+      let duplicateInput = request.input;
       if (request.supersession !== undefined) {
         const superseded = await this.loadCorrelatedSupersessionRun(
           request.channelId,
           agentId,
           request.supersession.runId,
         );
-        await this.assertDurableSupersessionCancellation(superseded);
+        if (duplicate.id === superseded.id) {
+          if (duplicate.rootInputId === request.input.id) {
+            throw new Error('room agent supersession cannot replace itself');
+          }
+        } else {
+          await this.assertDurableSupersessionCancellation(superseded);
+          duplicateInput = this.supersessionInput(request, superseded);
+        }
       }
       const retried = await runStore.admitRunInput(
-        this.inputTranscriptDraft(request),
+        this.inputTranscriptDraft(request, duplicateInput),
         duplicate,
       );
       return { duplicate: true, run: retried.run };
@@ -1314,6 +1368,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     let continuation: RoomAgentRunRecord['continuation'];
     let run: RoomAgentRunRecord;
     let supersededRunId: string | undefined;
+    let correlatedSupersession: RoomAgentRunRecord | undefined;
     if (request.continuation !== undefined) {
       if (open === undefined
         || open.id !== request.continuation.runId
@@ -1329,6 +1384,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
         agentId,
         request.supersession.runId,
       );
+      correlatedSupersession = correlated;
       if (open !== undefined && open.id !== correlated.id) {
         throw new Error('room agent supersession does not match the open run');
       }
@@ -1387,6 +1443,9 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       };
     } else {
       supersededRunId = open?.id;
+      const replacementInput = correlatedSupersession === undefined
+        ? request.input
+        : this.supersessionInput(request, correlatedSupersession);
       const now = this.wallNow();
       const deadlineMs = request.deadlineMs ?? this.options.runDeadlineMs;
       if (deadlineMs !== undefined
@@ -1401,8 +1460,8 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
         roomId: this.options.roomId,
         channelId: request.channelId,
         agentId,
-        rootInputId: request.input.id,
-        latestInput: structuredClone(request.input),
+        rootInputId: replacementInput.id,
+        latestInput: structuredClone(replacementInput),
         disclosure: copyDisclosure(request.disclosure),
         attempt: 1,
         status: 'active',
@@ -1423,7 +1482,10 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       // at either boundary cannot leave two open runs on the channel.
       await this.cancelRun(supersededRunId, 'superseded_by_new_input');
     }
-    const admission = await runStore.admitRunInput(this.inputTranscriptDraft(request), run);
+    const admission = await runStore.admitRunInput(
+      this.inputTranscriptDraft(request, run.latestInput),
+      run,
+    );
     if (admission.duplicate) return { duplicate: true, run: admission.run };
     if (this.activeTurns.get(request.channelId)?.runId !== admission.run.id) {
       await this.interruptChannel(request.channelId, 'superseded_by_new_input');
@@ -1945,6 +2007,33 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     if (request.supersession === undefined) return;
     assertText(request.supersession.runId, 'room agent supersession runId');
     assertJsonValue(request.supersession.checkpoint, 'room agent supersession checkpoint');
+    const inputPolicy = request.supersession.inputPolicy;
+    if (inputPolicy === undefined || inputPolicy.mode === 'replace') return;
+    if (inputPolicy.mode !== 'append') {
+      throw new TypeError('room agent supersession input policy is unsupported');
+    }
+    if (inputPolicy.maxLength !== undefined
+      && (!Number.isSafeInteger(inputPolicy.maxLength) || inputPolicy.maxLength < 1)) {
+      throw new RangeError(
+        'room agent supersession input maxLength must be a positive integer',
+      );
+    }
+  }
+
+  private supersessionInput(
+    request: RoomAgentRunInput,
+    predecessor: RoomAgentRunRecord,
+  ): RoomAgentInput {
+    const inputPolicy = request.supersession?.inputPolicy;
+    if (inputPolicy?.mode !== 'append') return structuredClone(request.input);
+    return {
+      ...structuredClone(request.input),
+      text: mergeRoomAgentInputFragments(
+        predecessor.latestInput.text,
+        request.input.text,
+        inputPolicy.maxLength,
+      ),
+    };
   }
 
   private async loadCorrelatedSupersessionRun(
@@ -2019,20 +2108,23 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     return snapshot;
   }
 
-  private inputTranscriptDraft(request: RoomAgentRuntimeInput): RoomAgentTranscriptDraft {
+  private inputTranscriptDraft(
+    request: RoomAgentRuntimeInput,
+    input: RoomAgentInput = request.input,
+  ): RoomAgentTranscriptDraft {
     return {
-      id: request.input.id,
+      id: input.id,
       roomId: this.options.roomId,
       channelId: request.channelId,
-      turnId: request.input.id,
+      turnId: input.id,
       direction: 'input',
       endpoint: {
-        kind: request.input.speakerKind ?? 'participant',
-        id: request.input.speakerId,
+        kind: input.speakerKind ?? 'participant',
+        id: input.speakerId,
       },
       disclosure: copyDisclosure(request.disclosure),
-      text: request.input.text,
-      modality: request.input.modality,
+      text: input.text,
+      modality: input.modality,
     };
   }
 

@@ -19,7 +19,7 @@ upgrading. v1.0.0 uses the canonical package name:
 ```json
 {
   "dependencies": {
-    "@yugao-gaos/gaos-sdk": "git+https://github.com/yugao-gaos/GAOS-SDK.git#v1.0.0"
+    "@yugao-gaos/gaos-sdk": "git+https://github.com/yugao-gaos/GAOS-SDK.git#v1.0.1"
   }
 }
 ```

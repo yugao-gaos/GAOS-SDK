@@ -238,6 +238,18 @@ checkpoint; the proposed supersession seed is ignored. An exact retry after a
 loss between cancellation and admission can recover only from the correlated
 run's durable `superseded_by_new_input` cancellation event.
 
+Hands-free speech can end one local segment before the speaker has actually
+finished. For that case, the host may add
+`inputPolicy: { mode: 'append', maxLength }` to the correlated supersession.
+The runtime deterministically joins the predecessor's unconsumed final text
+with the new fragment, avoids duplicating a complete restatement, and atomically
+persists the merged input with the replacement run. `replace` (and omission)
+means the new input is a correction. Omitting supersession altogether starts an
+ordinary new turn. Products still decide which semantic mode applies; the SDK
+does not guess whether a phrase is a correction. If a waiting transition wins
+the race, the input is continued normally and is not appended to the prior
+answer.
+
 Driver `assistant_output.outputId` values are logical IDs local to an attempt.
 The runtime replaces them in journal and live events with opaque delivery IDs
 allocated uniquely against all existing output IDs in that run, and adds

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   InMemoryRoomAgentRuntimeStore,
+  mergeRoomAgentInputFragments,
   RoomAgentRuntime,
   waitWithRoomAgentProgress,
   type RoomAgentRuntimeContextSource,
@@ -178,6 +179,27 @@ async function seedRecoveryOutput(
 }
 
 describe('room agent runtime', () => {
+  it('merges resumed input fragments without duplicating restatements', () => {
+    expect(mergeRoomAgentInputFragments(
+      '我在火山里看到一条蛇',
+      '它的眼睛很大，还给了我一枚戒指',
+    )).toBe('我在火山里看到一条蛇 它的眼睛很大，还给了我一枚戒指');
+    expect(mergeRoomAgentInputFragments(
+      'I see a volcano',
+      'I see a volcano and a snake',
+    )).toBe('I see a volcano and a snake');
+    expect(mergeRoomAgentInputFragments(
+      'earlier '.repeat(40),
+      'the ring is in my hand',
+      80,
+    )).toHaveLength(80);
+    expect(mergeRoomAgentInputFragments(
+      'earlier '.repeat(40),
+      'the ring is in my hand',
+      80,
+    )).toMatch(/the ring is in my hand$/);
+  });
+
   it('routes explicit address, participant focus, phase policy, then fallback', async () => {
     const calls: string[] = [];
     const registry = new RoomAgentRegistry<Observation>([
@@ -2008,6 +2030,63 @@ describe('room agent runtime', () => {
     expect('checkpoint' in ordinary.run).toBe(false);
   });
 
+  it('atomically appends unfinished speech to its correlated replacement', async () => {
+    const store = new InMemoryRoomAgentRuntimeStore();
+    const oldRun = {
+      ...activeRecoveryRun('speech-fragment-old', 'speech-fragment-channel'),
+      latestInput: {
+        id: 'speech-fragment-first',
+        speakerId: 'visitor-1',
+        text: 'I see a volcano and a giant snake',
+        modality: 'speech' as const,
+      },
+    };
+    await store.createRun(oldRun);
+    const seenInputs: string[] = [];
+    const registry = new RoomAgentRegistry<Observation>([{
+      descriptor: { id: 'oracle', label: 'Oracle', role: 'character' },
+      driver: {
+        run: async function* (context) {
+          seenInputs.push(context.input.text);
+          yield { type: 'completed' };
+        },
+      },
+    }]);
+    const runtime = new RoomAgentRuntime({
+      roomId: 'room-1', registry, store, runStore: store,
+      contextSource: contextSource(), createId: idFactory(), fallbackAgentId: 'oracle',
+    });
+
+    const replacement = await runtime.handleRunInput({
+      channelId: oldRun.channelId,
+      disclosure: privateDisclosure,
+      supersession: {
+        runId: oldRun.id,
+        checkpoint: { round: 1 },
+        inputPolicy: { mode: 'append', maxLength: 240 },
+      },
+      input: {
+        id: 'speech-fragment-second',
+        speakerId: 'visitor-1',
+        text: 'It gives me a ring from its tongue',
+        modality: 'speech',
+      },
+    });
+
+    const combined = 'I see a volcano and a giant snake It gives me a ring from its tongue';
+    expect(replacement).toMatchObject({
+      status: 'completed',
+      run: { latestInput: { id: 'speech-fragment-second', text: combined } },
+    });
+    expect(seenInputs).toEqual([combined]);
+    await expect(store.loadTranscript(oldRun.roomId, oldRun.channelId)).resolves.toMatchObject([
+      { id: 'speech-fragment-second', text: combined, modality: 'speech' },
+    ]);
+    await expect(store.loadRun(oldRun.roomId, oldRun.id)).resolves.toMatchObject({
+      status: 'canceled',
+    });
+  });
+
   it('preserves an authoritative waiting transition that wins the supersession race', async () => {
     class WaitingRaceStore extends InMemoryRoomAgentRuntimeStore {
       private transition = true;
@@ -2069,6 +2148,7 @@ describe('room agent runtime', () => {
       supersession: {
         runId: oldRun.id,
         checkpoint: { mustNotReplace: true },
+        inputPolicy: { mode: 'append' as const },
       },
       input: {
         id: 'waiting-race-input',
@@ -2085,6 +2165,7 @@ describe('room agent runtime', () => {
         rootInputId: oldRun.rootInputId,
         attempt: 2,
         checkpoint: { authoritative: 'waiting-run' },
+        latestInput: { text: 'The answer arrived as waiting settled' },
       },
     });
     expect(invocations).toEqual([
@@ -2255,6 +2336,7 @@ describe('room agent runtime', () => {
       supersession: {
         runId: oldRun.id,
         checkpoint: { recovered: ['after-cancel', 'after-admit'] },
+        inputPolicy: { mode: 'append' as const },
       },
       input: {
         id: 'crash-replacement-input',
@@ -2284,6 +2366,7 @@ describe('room agent runtime', () => {
     expect(admitted).toMatchObject({
       status: 'active',
       checkpoint: { recovered: ['after-cancel', 'after-admit'] },
+      latestInput: { text: 'Recover the replacement' },
     });
 
     const duplicate = await new RoomAgentRuntime(options).handleRunInput(request);
@@ -2335,6 +2418,16 @@ describe('room agent runtime', () => {
       supersession: { runId: oldRun.id, checkpoint: { valid: true } },
       input,
     })).rejects.toThrow(/mutually exclusive/i);
+    await expect(runtime.handleRunInput({
+      channelId: oldRun.channelId,
+      disclosure: privateDisclosure,
+      supersession: {
+        runId: oldRun.id,
+        checkpoint: { valid: true },
+        inputPolicy: { mode: 'append', maxLength: 0 },
+      },
+      input,
+    })).rejects.toThrow(/positive integer/i);
     await expect(store.loadRun(oldRun.roomId, oldRun.id)).resolves.toMatchObject({
       status: 'active',
     });

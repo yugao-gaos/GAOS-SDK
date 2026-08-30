@@ -191,6 +191,7 @@ await runtime.handleRunInput({
   supersession: {
     runId: activeRun.id,
     checkpoint: { stage: 'threshold', observations: [] },
+    inputPolicy: { mode: 'append', maxLength: 2_000 },
   },
 });
 ```
@@ -210,6 +211,19 @@ terminal run ends in the durable `run_canceled` event whose reason is exactly
 the ordinary input-to-run index and returns the admitted run as a duplicate.
 Late provider output remains scoped to the old run ID and stale journal
 sequence; it cannot be spoken, appended to, or terminalize the replacement.
+
+`inputPolicy` is product-selected. Its default `replace` behavior preserves
+the original supersession contract. `append` is intended for final speech
+segments that resume an input the provider has not consumed: the runtime joins
+the correlated run's latest input and the replacement input before atomic
+admission. Exact/full restatements are de-duplicated. An optional positive
+integer `maxLength` shortens the predecessor first so the newest fragment is
+retained. The public `mergeRoomAgentInputFragments()` helper exposes the same
+deterministic operation for product-owned checkpoints that mirror current
+input text. Products must still choose append, replace, or an ordinary new turn
+from their own interaction state; the runtime never infers semantics from
+language. A waiting transition that wins admission uses the new input as the
+next answer and ignores both the seed and append policy.
 
 ## 7 — Cancellation and deadlines
 
@@ -265,3 +279,5 @@ or only when `final` closes the message.
     intersects that boundary and idempotent retry must reproduce it exactly.
 12. Admission, supersession, and cancellation are isolated by channel;
     unrelated durable provider work remains active.
+13. Append-mode supersession persists one merged current input atomically; a
+    waiting-race continuation never inherits the prior answer text.

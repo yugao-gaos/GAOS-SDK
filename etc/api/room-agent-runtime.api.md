@@ -122,6 +122,9 @@ interface LocationRef {
     coord: LocationCoord;
 }
 
+// @public
+export function mergeRoomAgentInputFragments(previousText: string, latestText: string, maxLength?: number): string;
+
 // @public (undocumented)
 interface RevealEnvelope {
     // (undocumented)
@@ -368,6 +371,7 @@ export interface RoomAgentRunInput extends RoomAgentRuntimeInput {
     supersession?: {
         runId: string;
         checkpoint: JsonValue;
+        inputPolicy?: RoomAgentSupersessionInputPolicy;
     };
 }
 
@@ -697,6 +701,14 @@ export interface RoomAgentRuntimeStore {
     // (undocumented)
     saveState(state: RoomAgentRuntimeState): Promise<void>;
 }
+
+// @public (undocumented)
+export type RoomAgentSupersessionInputPolicy = {
+    mode: 'replace';
+} | {
+    mode: 'append';
+    maxLength?: number;
+};
 
 // @public (undocumented)
 export interface RoomAgentTranscriptAppendResult {
