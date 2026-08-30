@@ -64,6 +64,7 @@ export default defineConfig({
           { text: 'Real-time games', link: '/high-frequency' },
           { text: 'Agentic play', link: '/agentic-play' },
           { text: 'Room agents', link: '/room-agents' },
+          { text: 'Speech input boundaries', link: '/speech-input' },
           { text: 'Presentation cues', link: '/presentation-cues' },
         ],
       },

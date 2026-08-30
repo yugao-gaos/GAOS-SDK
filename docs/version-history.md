@@ -3,11 +3,19 @@
 GAOS used the v0.x line to refine its contracts before v1.0. Products should
 review the migration notes before adopting the stable surface.
 
-::: tip Latest release: v1.0.1
-The additive patch carries unfinished final speech fragments through correlated
-run supersession while preserving v1.0 replay, session, and room-agent
+::: tip Latest release: v1.0.2
+The compatible patch adds transport-neutral adaptive speech boundaries for
+hands-free room agents while preserving v1.0 replay, session, and room-agent
 contracts.
 :::
+
+## v1.0.2: adaptive speech input boundaries
+
+Prepared August 30, 2026. Adds the transport-neutral adaptive PCM/level
+segmenter used by hands-free voice products, including a distinct assistant-
+playback barge-in gate and product-selected release duration.
+
+[Migration and release notes →](/releases#v102)
 
 ## v1.0.1: speech supersession patch
 

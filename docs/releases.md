@@ -3,6 +3,26 @@
 For the public chronological changelog, see the
 [complete version history](/version-history).
 
+## v1.0.2
+
+Patch release prepared August 30, 2026. It adds a browser-safe, transport-
+neutral adaptive speech boundary primitive for hands-free room agents.
+
+- `@yugao-gaos/gaos-sdk/speech-input` emits push-to-talk-compatible
+  `segment_start` and `segment_end` events from PCM16 or level frames.
+- Products choose release duration and thresholds. A distinct assistant-
+  playback onset gate suppresses ordinary speaker echo while retaining
+  deliberate barge-in.
+- Segment cancellation preserves noise calibration; reset clears it. No audio
+  or transcript content is retained by the SDK.
+
+### Migration to v1.0.2
+
+Existing callers need no code change. Hands-free products can replace local
+RMS timers with `AdaptiveSpeechSegmenter` and map its events into their voice
+transport. Push-to-talk products can continue to produce the same boundaries
+directly.
+
 ## v1.0.1
 
 Patch release prepared August 30, 2026. It keeps all v1.0 contracts compatible
