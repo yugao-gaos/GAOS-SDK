@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/gaos-adaptive-speech-boundaries-v2",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "/root/sdk_voice_boundaries_v2",
+  "branch": "orch/attempt/codex-gaos-adaptive-speech-boundaries-v2",
+  "status": "claimed",
+  "claimed_at": "2026-08-30T18:47:31.967Z",
+  "lease_until": "2026-08-30T19:47:31.967Z"
+}
