@@ -226,6 +226,18 @@ after a host restart. `cancelRun()` and persisted epoch deadlines produce
 replayable terminal states. `replayRun()` returns ordered events without
 replaying speech, cues, actions, or provider calls.
 
+When an authenticated input must replace a specifically correlated active run,
+the host may supply `supersession: { runId, checkpoint }`. The checkpoint must
+be a plain JSON value. The runtime durably cancels that active run before it
+atomically admits a new logical run with a cloned initial checkpoint. This is
+not a general initial-checkpoint option: a different open run, an unrelated
+terminal run, or a strict continuation combined with supersession is rejected.
+If the correlated run becomes `waiting_for_input` before cancellation wins,
+that authoritative transition is preserved and continued with its existing
+checkpoint; the proposed supersession seed is ignored. An exact retry after a
+loss between cancellation and admission can recover only from the correlated
+run's durable `superseded_by_new_input` cancellation event.
+
 Driver `assistant_output.outputId` values are logical IDs local to an attempt.
 The runtime replaces them in journal and live events with opaque delivery IDs
 allocated uniquely against all existing output IDs in that run, and adds
