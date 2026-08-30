@@ -155,6 +155,14 @@ durable conversation transcript or later model history. A product must opt in
 with `history: 'record'` when progress wording is semantically important to
 future turns. Ordinary answers and questions default to `record`.
 
+Long provider silence may be bridged with the optional
+`waitWithRoomAgentProgress()` driver helper. The product supplies a finite list
+of consecutive delays and maps each timing rung to a truthful `progress`
+event. The SDK supplies neither a default cadence nor filler wording, and the
+helper never carries model scratchpad, reasoning tokens, invented milestones,
+or estimated completion. It stops silently on abort and returns a completed
+provider value as soon as that value is available.
+
 ## 6 — Multi-turn continuation
 
 `input_requested` changes the run to `waiting_for_input` and stores its request
@@ -169,6 +177,39 @@ continuation before execution. Its effective disclosure is the intersection of
 the persisted run disclosure and the new authenticated input disclosure, so a
 continuation cannot expose earlier private context. Completion or cancellation
 clears it permanently.
+
+### Correlated active-run supersession
+
+`RoomAgentRunInput.supersession` lets a host replace one specifically named
+active run while seeding the replacement's recovery state:
+
+```ts
+await runtime.handleRunInput({
+  channelId,
+  disclosure,
+  input,
+  supersession: {
+    runId: activeRun.id,
+    checkpoint: { stage: 'threshold', observations: [] },
+  },
+});
+```
+
+The checkpoint is recursively validated as plain JSON and copied before
+persistence. Supersession and strict continuation are mutually exclusive. The
+named run must belong to the same room, channel, and resolved agent and must be
+the current active open run. Cancellation commits before the new input and run
+are atomically admitted. If the active run's `input_requested` transition wins
+that race, the runtime preserves and continues the waiting run with its
+authoritative checkpoint and ignores the proposed seed.
+
+A caller loss after cancellation but before replacement admission leaves no
+second open run. An exact retry may cross that boundary only when the correlated
+terminal run ends in the durable `run_canceled` event whose reason is exactly
+`superseded_by_new_input`. A retry after replacement admission resolves through
+the ordinary input-to-run index and returns the admitted run as a duplicate.
+Late provider output remains scoped to the old run ID and stale journal
+sequence; it cannot be spoken, appended to, or terminalize the replacement.
 
 ## 7 — Cancellation and deadlines
 

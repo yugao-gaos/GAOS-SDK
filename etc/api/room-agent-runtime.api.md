@@ -235,6 +235,23 @@ interface RoomAgentInput {
 }
 
 // @public (undocumented)
+export type RoomAgentProgressLadderEntry<T> = {
+    type: 'progress';
+    rung: number;
+    elapsedMs: number;
+} | {
+    type: 'result';
+    value: T;
+};
+
+// @public (undocumented)
+export interface RoomAgentProgressLadderOptions {
+    delaysMs: readonly number[];
+    now?: () => number;
+    signal?: AbortSignal;
+}
+
+// @public (undocumented)
 export interface RoomAgentProgressPresentation {
     history?: 'ephemeral' | 'record';
     // (undocumented)
@@ -348,6 +365,10 @@ export interface RoomAgentRunInput extends RoomAgentRuntimeInput {
     };
     deadlineMs?: number;
     onEvent?(entry: RoomAgentRunJournalEntry): void | Promise<void>;
+    supersession?: {
+        runId: string;
+        checkpoint: JsonValue;
+    };
 }
 
 // @public
@@ -906,6 +927,9 @@ interface SubmittedAction {
     y?: number;
     zoneId?: string;
 }
+
+// @public
+export function waitWithRoomAgentProgress<T>(work: PromiseLike<T>, options: RoomAgentProgressLadderOptions): AsyncGenerator<RoomAgentProgressLadderEntry<T>, void>;
 
 // (No @packageDocumentation comment for this package)
 

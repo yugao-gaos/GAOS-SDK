@@ -1,4 +1,4 @@
-import { canonicalJson } from './protocol.js';
+import { assertJsonValue, canonicalJson, type JsonValue } from './protocol.js';
 import {
   RoomAgentRegistry,
   type RoomAgentContext,
@@ -299,9 +299,101 @@ export interface RoomAgentProgressPresenter {
   ): RoomAgentProgressPresentation | null | Promise<RoomAgentProgressPresentation | null>;
 }
 
+export interface RoomAgentProgressLadderOptions {
+  /** Consecutive silence intervals before each progress rung. No defaults are implied. */
+  delaysMs: readonly number[];
+  /** Stops the wait without exposing or manufacturing a result. */
+  signal?: AbortSignal;
+  /** Injectable elapsed-time clock for deterministic hosts and tests. */
+  now?: () => number;
+}
+
+export type RoomAgentProgressLadderEntry<T> =
+  | { type: 'progress'; rung: number; elapsedMs: number }
+  | { type: 'result'; value: T };
+
+/**
+ * Waits for product work while exposing an opt-in, bounded silence ladder.
+ * Rungs contain timing only: drivers yield truthful structured progress and
+ * products retain complete control over wording and presentation modality.
+ */
+export async function* waitWithRoomAgentProgress<T>(
+  work: PromiseLike<T>,
+  options: RoomAgentProgressLadderOptions,
+): AsyncGenerator<RoomAgentProgressLadderEntry<T>, void> {
+  const now = options.now ?? Date.now;
+  const isAborted = () => options.signal?.aborted === true;
+  const startedAt = now();
+  const settled = Promise.resolve(work).then(
+    (value) => ({ type: 'result' as const, value }),
+    (error: unknown) => ({ type: 'error' as const, error }),
+  );
+
+  for (let index = 0; index < options.delaysMs.length; index += 1) {
+    const delayMs = options.delaysMs[index];
+    if (typeof delayMs !== 'number' || !Number.isSafeInteger(delayMs) || delayMs < 0) {
+      throw new RangeError('room agent progress ladder delays must be non-negative safe integers');
+    }
+    if (isAborted()) return;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let removeAbortListener = () => {};
+    const rung = new Promise<{ type: 'rung' } | { type: 'aborted' }>((resolve) => {
+      const abort = () => resolve({ type: 'aborted' });
+      if (options.signal !== undefined) {
+        if (options.signal.aborted) {
+          resolve({ type: 'aborted' });
+          return;
+        }
+        options.signal.addEventListener('abort', abort, { once: true });
+        removeAbortListener = () => options.signal?.removeEventListener('abort', abort);
+      }
+      timer = setTimeout(() => resolve({ type: 'rung' }), delayMs);
+    });
+    const outcome = await Promise.race([settled, rung]);
+    if (timer !== undefined) clearTimeout(timer);
+    removeAbortListener();
+    if (isAborted()) return;
+
+    if (outcome.type === 'error') throw outcome.error;
+    if (outcome.type === 'result') {
+      yield outcome;
+      return;
+    }
+    if (outcome.type === 'aborted') return;
+    yield { type: 'progress', rung: index + 1, elapsedMs: Math.max(0, now() - startedAt) };
+  }
+
+  if (isAborted()) return;
+  let removeAbortListener = () => {};
+  const aborted = new Promise<{ type: 'aborted' }>((resolve) => {
+    if (options.signal === undefined) return;
+    const abort = () => resolve({ type: 'aborted' });
+    if (options.signal.aborted) {
+      resolve({ type: 'aborted' });
+      return;
+    }
+    options.signal.addEventListener('abort', abort, { once: true });
+    removeAbortListener = () => options.signal?.removeEventListener('abort', abort);
+  });
+  const outcome = options.signal === undefined
+    ? await settled
+    : await Promise.race([settled, aborted]);
+  removeAbortListener();
+  if (isAborted()) return;
+  if (outcome.type === 'aborted') return;
+  if (outcome.type === 'error') throw outcome.error;
+  yield outcome;
+}
+
 export interface RoomAgentRunInput extends RoomAgentRuntimeInput {
   /** Explicit proof that this input continues the named waiting run. */
   continuation?: { runId: string; token: string };
+  /**
+   * Correlates a new logical run to the active run it replaces and supplies
+   * that replacement's initial, JSON-safe recovery checkpoint.
+   */
+  supersession?: { runId: string; checkpoint: JsonValue };
   /** Per-run override. Zero disables the default deadline. */
   deadlineMs?: number;
   /** Per-call live delivery, invoked after each event is durably appended. */
@@ -1041,7 +1133,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
    */
   async handleRunInput(request: RoomAgentRunInput): Promise<RoomAgentRunResult> {
     await this.initialize();
-    this.assertRuntimeInput(request);
+    this.assertRunInput(request);
     const admission = await this.withIntakeLane(
       async () => await this.admitDurableRunInput(request),
     );
@@ -1203,6 +1295,14 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       if (canonicalJson(duplicate.disclosure) !== canonicalJson(request.disclosure)) {
         throw new Error('room agent input id was reused with a different disclosure');
       }
+      if (request.supersession !== undefined) {
+        const superseded = await this.loadCorrelatedSupersessionRun(
+          request.channelId,
+          agentId,
+          request.supersession.runId,
+        );
+        await this.assertDurableSupersessionCancellation(superseded);
+      }
       const retried = await runStore.admitRunInput(
         this.inputTranscriptDraft(request),
         duplicate,
@@ -1210,7 +1310,7 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       return { duplicate: true, run: retried.run };
     }
 
-    const open = await runStore.loadOpenRun(this.options.roomId, request.channelId);
+    let open = await runStore.loadOpenRun(this.options.roomId, request.channelId);
     let continuation: RoomAgentRunRecord['continuation'];
     let run: RoomAgentRunRecord;
     let supersededRunId: string | undefined;
@@ -1221,6 +1321,29 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
         || open.agentId !== agentId
         || open.continuation?.token !== request.continuation.token) {
         throw new Error('room agent continuation does not match a waiting run');
+      }
+    }
+    if (request.supersession !== undefined) {
+      const correlated = await this.loadCorrelatedSupersessionRun(
+        request.channelId,
+        agentId,
+        request.supersession.runId,
+      );
+      if (open !== undefined && open.id !== correlated.id) {
+        throw new Error('room agent supersession does not match the open run');
+      }
+      if (open?.status === 'active') {
+        const settled = await this.cancelActiveRunForSupersession(open.id);
+        if (settled.status === 'waiting_for_input') {
+          open = settled;
+        } else if (settled.status === 'canceled') {
+          await this.assertDurableSupersessionCancellation(settled);
+          open = undefined;
+        } else {
+          throw new Error('room agent supersession lost authority before cancellation');
+        }
+      } else if (open === undefined) {
+        await this.assertDurableSupersessionCancellation(correlated);
       }
     }
     const sameContinuationSpeaker = open !== undefined
@@ -1234,6 +1357,11 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       && open.agentId === agentId
       && sameContinuationSpeaker
       && (request.continuation === undefined || request.continuation.runId === open.id);
+    if (request.supersession !== undefined
+      && open?.status === 'waiting_for_input'
+      && !continuesOpen) {
+      throw new Error('room agent supersession cannot replace an authoritative waiting run');
+    }
     if (continuesOpen && open !== undefined) {
       continuation = open.continuation;
       const deadlineMs = request.deadlineMs ?? open.deadlineMs ?? this.options.runDeadlineMs;
@@ -1284,6 +1412,9 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
           ? {}
           : { deadlineMs, deadlineAt: now + deadlineMs }),
         lastSequence: 0,
+        ...(request.supersession === undefined
+          ? {}
+          : { checkpoint: structuredClone(request.supersession.checkpoint) }),
       };
     }
 
@@ -1294,7 +1425,9 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
     }
     const admission = await runStore.admitRunInput(this.inputTranscriptDraft(request), run);
     if (admission.duplicate) return { duplicate: true, run: admission.run };
-    await this.interruptChannel(request.channelId, 'superseded_by_new_input');
+    if (this.activeTurns.get(request.channelId)?.runId !== admission.run.id) {
+      await this.interruptChannel(request.channelId, 'superseded_by_new_input');
+    }
     const controller = new AbortController();
     this.activeTurns.set(request.channelId, { controller, runId: admission.run.id });
     return {
@@ -1802,6 +1935,88 @@ export class RoomAgentRuntime<TObservation = unknown, TKnowledge = unknown> {
       throw new TypeError('room agent input modality is unsupported');
     }
     copyDisclosure(request.disclosure);
+  }
+
+  private assertRunInput(request: RoomAgentRunInput): void {
+    this.assertRuntimeInput(request);
+    if (request.continuation !== undefined && request.supersession !== undefined) {
+      throw new Error('room agent continuation and supersession are mutually exclusive');
+    }
+    if (request.supersession === undefined) return;
+    assertText(request.supersession.runId, 'room agent supersession runId');
+    assertJsonValue(request.supersession.checkpoint, 'room agent supersession checkpoint');
+  }
+
+  private async loadCorrelatedSupersessionRun(
+    channelId: string,
+    agentId: string,
+    runId: string,
+  ): Promise<RoomAgentRunRecord> {
+    const run = await this.requireRunStore().loadRun(this.options.roomId, runId);
+    if (run === undefined
+      || run.channelId !== channelId
+      || run.agentId !== agentId) {
+      throw new Error('room agent supersession run correlation is invalid');
+    }
+    return run;
+  }
+
+  private async assertDurableSupersessionCancellation(
+    run: RoomAgentRunRecord,
+  ): Promise<void> {
+    const events = await this.requireRunStore().loadRunEvents(run.roomId, run.id);
+    const terminal = events.at(-1);
+    if (run.status !== 'canceled'
+      || terminal?.sequence !== run.lastSequence
+      || terminal.event.type !== 'run_canceled'
+      || terminal.event.reason !== 'superseded_by_new_input') {
+      throw new Error('room agent supersession lacks its durable cancellation proof');
+    }
+  }
+
+  private async cancelActiveRunForSupersession(
+    runId: string,
+  ): Promise<RoomAgentRunRecord> {
+    const runStore = this.requireRunStore();
+    let snapshot = await runStore.loadRun(this.options.roomId, runId);
+    if (snapshot === undefined) throw new Error(`unknown room agent run: ${runId}`);
+    while (snapshot.status === 'active') {
+      const eventId = this.options.createId();
+      assertText(eventId, 'created room agent terminal event id');
+      try {
+        const appended = await runStore.commitRunEvent({
+          ...omitRunFields(snapshot, 'continuation', 'failureCode'),
+          status: 'canceled',
+        }, {
+          id: eventId,
+          runId: snapshot.id,
+          roomId: snapshot.roomId,
+          channelId: snapshot.channelId,
+          agentId: snapshot.agentId,
+          inputId: snapshot.latestInput.id,
+          recordedAt: this.wallNow(),
+          event: { type: 'run_canceled', reason: 'superseded_by_new_input' },
+        });
+        const active = this.activeTurns.get(snapshot.channelId);
+        if (active?.runId === runId) {
+          active.controller.abort('superseded_by_new_input');
+          await this.speechArbiter.interrupt(snapshot.channelId);
+        }
+        await this.options.runObserver?.publish(appended.entry);
+        return appended.run;
+      } catch (error) {
+        const current = await runStore.loadRun(this.options.roomId, runId);
+        if (current === undefined) throw error;
+        if (current.status === 'waiting_for_input') return current;
+        if (current.status === 'active'
+          && current.lastSequence !== snapshot.lastSequence) {
+          snapshot = current;
+          continue;
+        }
+        throw error;
+      }
+    }
+    return snapshot;
   }
 
   private inputTranscriptDraft(request: RoomAgentRuntimeInput): RoomAgentTranscriptDraft {
