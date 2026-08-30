@@ -1,0 +1,9 @@
+{
+  "task_key": "codex/sdk-seed-superseding-run-checkpoint",
+  "git_user": "yugao-gaos <yu.gao@gaos.ca>",
+  "session_id": "01a05099-2727-7f61-af8d-ee6747eaee4a",
+  "branch": "orch/attempt/codex-sdk-seed-superseding-run-checkpoint",
+  "status": "claimed",
+  "claimed_at": "2026-08-30T14:00:35.519Z",
+  "lease_until": "2026-08-30T15:00:35.519Z"
+}
