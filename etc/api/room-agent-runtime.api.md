@@ -365,6 +365,10 @@ export interface RoomAgentRunInput extends RoomAgentRuntimeInput {
     };
     deadlineMs?: number;
     onEvent?(entry: RoomAgentRunJournalEntry): void | Promise<void>;
+    supersession?: {
+        runId: string;
+        checkpoint: JsonValue;
+    };
 }
 
 // @public
