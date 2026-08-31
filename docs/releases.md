@@ -3,6 +3,25 @@
 For the public chronological changelog, see the
 [complete version history](/version-history).
 
+## v1.0.4
+
+Patch release prepared August 31, 2026. It adds product-neutral provider
+profiles for experiences that may run in cloud, local, or hybrid environments.
+
+- `@yugao-gaos/gaos-sdk/experience-providers` defines operational contracts
+  for reasoning, speech recognition, speech synthesis, live worlds, and replay
+  video.
+- Profiles contain only ordered provider IDs. Products retain ownership of
+  credentials, transports, prompts, UI, recordings, and failover policy.
+- The package continues to include the v1.0.2 adaptive speech-input surface and
+  all v1 room-agent runtime behavior.
+
+### Migration to v1.0.4
+
+Existing callers need no code change. Products that need a China-local or
+museum-local runtime can define a profile and supply concrete adapters without
+forking their room-agent logic.
+
 ## v1.0.2
 
 Patch release prepared August 30, 2026. It adds a browser-safe, transport-

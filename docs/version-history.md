@@ -3,11 +3,19 @@
 GAOS used the v0.x line to refine its contracts before v1.0. Products should
 review the migration notes before adopting the stable surface.
 
-::: tip Latest release: v1.0.2
-The compatible patch adds transport-neutral adaptive speech boundaries for
-hands-free room agents while preserving v1.0 replay, session, and room-agent
-contracts.
+::: tip Latest release: v1.0.4
+The compatible patch adds replaceable cloud/local experience providers while
+preserving the v1.0.2 speech boundaries and all v1 replay, session, and
+room-agent contracts.
 :::
+
+## v1.0.4: replaceable experience providers
+
+Prepared August 31, 2026. Adds product-neutral operational contracts and
+ordered profiles for reasoning, speech recognition, speech synthesis, live
+worlds, and replay video.
+
+[Migration and release notes →](/releases#v104)
 
 ## v1.0.2: adaptive speech input boundaries
 
