@@ -9,8 +9,10 @@ The portable agent API is exported from
 `@yugao-gaos/gaos-sdk/room-agent`. Common room messages, events, services,
 watchers, and votes are exported from
 `@yugao-gaos/gaos-sdk/room-interaction`. The provider-neutral hosting runtime
-is exported from `@yugao-gaos/gaos-sdk/room-agent-runtime`. Voice, network,
-durable-storage implementations, and model providers remain host-owned.
+is exported from `@yugao-gaos/gaos-sdk/room-agent-runtime`. Replaceable
+reasoning, speech, and generated-media contracts are exported separately from
+`@yugao-gaos/gaos-sdk/experience-providers`; concrete voice, network,
+durable-storage, and model implementations remain host-owned.
 
 ## Agent roles
 
