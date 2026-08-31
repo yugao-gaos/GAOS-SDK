@@ -225,8 +225,9 @@ The package family is:
   mechanisms;
 - `@yugao-gaos/gaos-sdk/room-agent-runtime` — stable room lifecycle and
   orchestration; and
-- provider adapters such as STT, TTS, and model integrations behind runtime
-  interfaces.
+- `@yugao-gaos/gaos-sdk/experience-providers` — provider-neutral reasoning,
+  STT, TTS, live-world, replay-video, registry, and profile contracts. Concrete
+  integrations remain host-owned (see RFC-023).
 
 This is one SDK product with optional packages, not two competing rule or
 session SDKs.
