@@ -10,22 +10,45 @@ import {
   PROTOCOL_VERSION,
   assertJsonObject,
   assertJsonValue,
+  assertSubmissionSigningPosition,
   canonicalJson,
   isParticipantId,
   type CommandSubmission,
   type JsonObject,
   type JsonValue,
   type ProtocolExtensions,
+  type SubmissionSigningPosition,
   type TickCursor,
   type TickResult,
 } from './protocol.js';
 import { bytesToHex, sha256 } from './engine/commitment.js';
+import {
+  signatureBytesFromBase64,
+  submissionChainHashV1,
+  submissionGenesisHashV1,
+  submissionPreimageV1,
+  submissionRosterHashV1,
+  type SubmissionSeatKey,
+} from './engine/submission-signatures.js';
+
+/** Roster material a signing client declares, without pulling in `./engine`. */
+export {
+  SUBMISSION_SIGNATURE_ALGORITHM,
+  SUBMISSION_SIGNATURE_SCHEME,
+} from './engine/submission-signatures.js';
+export type {
+  SubmissionSeatKey,
+  SubmissionSignaturePolicy,
+  SubmissionSigningTier,
+} from './engine/submission-signatures.js';
 
 export interface SessionBinding extends TickCursor {
   protocol: typeof PROTOCOL_ID;
   protocolVersion: typeof PROTOCOL_VERSION;
   sessionId: string;
   participantId: string;
+  /** Carried from the envelope this binding was remembered from. */
+  signingPosition?: SubmissionSigningPosition;
 }
 
 export interface SessionStart<TObservation = unknown> {
@@ -135,10 +158,61 @@ export interface SessionResult<TOutcome = JsonValue> {
   extensions?: ProtocolExtensions;
 }
 
+/** Durable per-(session, seat) RFC-010 chain position. Plain JSON. */
+export interface SubmissionChainState {
+  schema: 'gaos.submission-chain.v1';
+  sessionId: string;
+  seat: string;
+  /** Roster hash every link in this chain is bound to. */
+  rosterHash: string;
+  /** Canonical base64 hash the next submission must carry as `prevChainHash`. */
+  chainHead: string;
+  /** Submissions this chain has already advanced past. */
+  submissions: number;
+}
+
+/** Identifies the submission a `sign` callback is being asked to authenticate. */
+export interface SubmissionSigningContext {
+  sessionId: string;
+  seat: string;
+  submissionId: string;
+  cursor: number;
+  tick: number;
+  clientTime: number;
+}
+
+export interface SubmissionSigningOptions {
+  /** Seat this client signs for. Defaults to the session binding's seat. */
+  seat?: string;
+  /** Roster declared in the session header; every chain binds to its hash. */
+  seatKeys: readonly SubmissionSeatKey[];
+  /**
+   * Produce canonical padded base64 of the 64-byte Ed25519 signature over
+   * `preimage`. The SDK never sees, holds, or derives the private key.
+   */
+  sign(
+    preimage: Uint8Array,
+    context: SubmissionSigningContext,
+  ): Promise<string> | string;
+  /** Client clock in UTC epoch milliseconds. Defaults to `Date.now`. */
+  now?: () => number;
+  /**
+   * Chain position to continue from. Required when resuming a session this
+   * client attached to, so an interrupted run continues its seat chain
+   * instead of restarting at genesis and breaking every later link.
+   */
+  resume?: SubmissionChainState;
+}
+
 export interface SubmitCommandOptions {
   participantId?: string;
   submissionId?: string;
   cursor?: TickCursor;
+  /**
+   * Episode-local signing coordinates, when the host publishes them outside
+   * the envelope. Overrides the envelope's own `signingPosition`.
+   */
+  signingPosition?: SubmissionSigningPosition;
   signal?: AbortSignal;
 }
 
@@ -236,6 +310,88 @@ export function parseSessionBinding(value: unknown): SessionBinding {
     tickId: binding['tickId'],
     revision: binding['revision'] as number,
     participantId: binding['participantId'],
+    ...(Object.hasOwn(binding, 'signingPosition')
+      ? { signingPosition: parseSigningPosition(binding['signingPosition']) }
+      : {}),
+  };
+}
+
+function parseSigningPosition(value: unknown): SubmissionSigningPosition {
+  try {
+    assertSubmissionSigningPosition(value);
+  } catch (error) {
+    throw new ProtocolMismatchError(
+      error instanceof Error ? error.message : 'signingPosition is invalid',
+    );
+  }
+  return { cursor: value.cursor, tick: value.tick };
+}
+
+/**
+ * Start one seat's RFC-010 chain at its roster-bound genesis link. Persist the
+ * returned state and hand it back as `resume` when a run continues in another
+ * process; a chain that silently restarts at genesis cannot be verified.
+ */
+export function createSubmissionChainState(
+  sessionId: string,
+  seat: string,
+  seatKeys: readonly SubmissionSeatKey[],
+): SubmissionChainState {
+  assertNonEmptyString(sessionId, 'sessionId');
+  if (!isParticipantId(seat)) {
+    throw new ProtocolMismatchError('seat must match the portable ASCII seat-id pattern');
+  }
+  const rosterHash = submissionRosterHashV1(seatKeys);
+  if (!seatKeys.some((entry) => entry.id === seat)) {
+    throw new ProtocolMismatchError(`seatKeys does not declare seat ${seat}`);
+  }
+  return {
+    schema: 'gaos.submission-chain.v1',
+    sessionId,
+    seat,
+    rosterHash,
+    chainHead: submissionGenesisHashV1(sessionId, seat, rosterHash),
+    submissions: 0,
+  };
+}
+
+/** Validate a persisted chain state against the session and roster it claims. */
+function parseSubmissionChainState(
+  value: unknown,
+  sessionId: string,
+  seat: string,
+  rosterHash: string,
+): SubmissionChainState {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ProtocolMismatchError('submission chain state must be an object');
+  }
+  const state = value as unknown as SubmissionChainState;
+  if (state.schema !== 'gaos.submission-chain.v1') {
+    throw new ProtocolMismatchError('submission chain state has an unsupported schema');
+  }
+  if (state.sessionId !== sessionId || state.seat !== seat) {
+    throw new ProtocolMismatchError('submission chain state names another session or seat');
+  }
+  if (state.rosterHash !== rosterHash) {
+    throw new ProtocolMismatchError('submission chain state was bound to a different roster');
+  }
+  if (!Number.isSafeInteger(state.submissions) || state.submissions < 0) {
+    throw new ProtocolMismatchError('submission chain state submissions must be a count');
+  }
+  try {
+    signatureBytesFromBase64(state.chainHead, 'chainHead', 32);
+  } catch (error) {
+    throw new ProtocolMismatchError(
+      error instanceof Error ? error.message : 'chainHead is invalid',
+    );
+  }
+  return {
+    schema: 'gaos.submission-chain.v1',
+    sessionId,
+    seat,
+    rosterHash,
+    chainHead: state.chainHead,
+    submissions: state.submissions,
   };
 }
 
@@ -381,6 +537,9 @@ export function parseTickResult<TObservation = unknown>(data: unknown): TickResu
         error instanceof Error ? error.message : 'response extensions invalid',
       );
     }
+  }
+  if (Object.hasOwn(value, 'signingPosition')) {
+    parseSigningPosition(value['signingPosition']);
   }
   if (value['kind'] === 'pending') {
     if (
@@ -529,9 +688,36 @@ async function readResponseText(response: Response, maxBytes: number): Promise<s
   return output + decoder.decode();
 }
 
+interface RegisteredSigner {
+  seat: string;
+  seatKeys: readonly SubmissionSeatKey[];
+  sign(
+    preimage: Uint8Array,
+    context: SubmissionSigningContext,
+  ): Promise<string> | string;
+  now: () => number;
+  state: SubmissionChainState;
+  /** Signed material per submissionId, so an exact retry resends it byte-identically. */
+  signed: Map<string, {
+    clientTime: number;
+    prevChainHash: string;
+    sig: string;
+    nextChainHead: string;
+    /** True once the host accepted it and the chain moved past this link. */
+    accepted: boolean;
+  }>;
+}
+
+function signerKey(sessionId: string, seat: string): string {
+  return `${sessionId}\u0000${seat}`;
+}
+
 export class SessionClient {
   private readonly bindings = new Map<string, SessionBinding>();
   private readonly commandSequences = new Map<string, number>();
+  private readonly signers = new Map<string, RegisteredSigner>();
+  /** Sessions this client joined rather than created; their chains pre-exist. */
+  private readonly attachedSessions = new Set<string>();
   private readonly request: typeof fetch;
   private readonly baseUrl: string;
 
@@ -568,6 +754,9 @@ export class SessionClient {
       tickId: result.tickId,
       revision: result.revision,
       participantId: participantId ?? previous?.participantId ?? 'player',
+      ...(result.signingPosition === undefined
+        ? {}
+        : { signingPosition: { ...result.signingPosition } }),
     };
     this.bindings.set(result.sessionId, binding);
     return binding;
@@ -582,6 +771,158 @@ export class SessionClient {
     const binding = parseSessionBinding(value);
     this.bindings.set(binding.sessionId, binding);
     return { ...binding };
+  }
+
+  /**
+   * Sign this seat's submissions to `sessionId` under RFC-010. The caller keeps
+   * the private key and supplies `sign`; the client keeps the per-(session,
+   * seat) chain, stamps `clientTime`, and attaches `prevChainHash` and `sig`.
+   *
+   * Returns the chain position now in force. Persist it — and every position
+   * returned by `submissionChainState` — so a resumed run can continue the
+   * same chain through `resume`.
+   */
+  useSubmissionSigning(
+    sessionId: string,
+    options: SubmissionSigningOptions,
+  ): SubmissionChainState {
+    assertNonEmptyString(sessionId, 'sessionId');
+    if (!options || typeof options !== 'object') {
+      throw new TypeError('submission signing options must be an object');
+    }
+    if (typeof options.sign !== 'function') {
+      throw new TypeError('submission signing requires a sign callback');
+    }
+    if (options.now !== undefined && typeof options.now !== 'function') {
+      throw new TypeError('submission signing now must be a function');
+    }
+    const seat = options.seat ?? this.bindings.get(sessionId)?.participantId;
+    if (seat === undefined) {
+      throw new ProtocolMismatchError(
+        'submission signing needs a seat: pass one or bind the session first',
+      );
+    }
+    const genesis = createSubmissionChainState(sessionId, seat, options.seatKeys);
+    let state: SubmissionChainState;
+    if (options.resume === undefined) {
+      if (this.attachedSessions.has(sessionId)) {
+        throw new ProtocolMismatchError(
+          `resuming signed session ${sessionId} requires the seat's saved chain state; `
+          + 'pass resume, or createSubmissionChainState(...) if this seat has not submitted',
+        );
+      }
+      state = genesis;
+    } else {
+      state = parseSubmissionChainState(
+        options.resume,
+        sessionId,
+        seat,
+        genesis.rosterHash,
+      );
+    }
+    this.signers.set(signerKey(sessionId, seat), {
+      seat,
+      seatKeys: structuredClone(options.seatKeys) as SubmissionSeatKey[],
+      sign: options.sign,
+      now: options.now ?? (() => Date.now()),
+      state,
+      signed: new Map(),
+    });
+    return { ...state };
+  }
+
+  /** Current chain position for a signing seat, for durable persistence. */
+  submissionChainState(
+    sessionId: string,
+    seat: string,
+  ): SubmissionChainState | undefined {
+    const signer = this.signers.get(signerKey(sessionId, seat));
+    return signer ? { ...signer.state } : undefined;
+  }
+
+  /** Stop signing for one seat and forget its in-memory chain position. */
+  stopSubmissionSigning(sessionId: string, seat: string): void {
+    this.signers.delete(signerKey(sessionId, seat));
+  }
+
+  /**
+   * Attach RFC-010 material to one submission. Exact retries reuse the bytes
+   * already signed for that `submissionId`; the chain advances only after the
+   * host accepts, so an abandoned submission does not orphan the chain.
+   */
+  private async signSubmission<TCommand>(
+    signer: RegisteredSigner,
+    submission: CommandSubmission<TCommand>,
+    position: SubmissionSigningPosition | undefined,
+  ): Promise<{ signed: CommandSubmission<TCommand>; commit: () => void }> {
+    const accept = (id: string): void => {
+      const material = signer.signed.get(id)!;
+      if (material.accepted) return;
+      material.accepted = true;
+      signer.state = {
+        ...signer.state,
+        chainHead: material.nextChainHead,
+        submissions: signer.state.submissions + 1,
+      };
+    };
+    const retry = signer.signed.get(submission.submissionId);
+    if (retry !== undefined) {
+      return {
+        signed: {
+          ...submission,
+          clientTime: retry.clientTime,
+          prevChainHash: retry.prevChainHash,
+          sig: retry.sig,
+        },
+        commit: () => accept(submission.submissionId),
+      };
+    }
+    if (position === undefined) {
+      throw new ProtocolMismatchError(
+        'signing requires the host to publish signingPosition on the tick envelope, '
+        + 'or the caller to pass SubmitCommandOptions.signingPosition',
+      );
+    }
+    const clientTime = signer.now();
+    if (!Number.isSafeInteger(clientTime) || clientTime < 0) {
+      throw new ProtocolMismatchError('clientTime must be a non-negative safe integer');
+    }
+    const envelope = {
+      sessionId: submission.sessionId,
+      seat: signer.seat,
+      submissionId: submission.submissionId,
+      cursor: position.cursor,
+      tick: position.tick,
+      clientTime,
+      command: submission.command as JsonValue,
+      prevChainHash: signer.state.chainHead,
+    };
+    const preimage = submissionPreimageV1(envelope);
+    const sig = await signer.sign(preimage, {
+      sessionId: envelope.sessionId,
+      seat: envelope.seat,
+      submissionId: envelope.submissionId,
+      cursor: envelope.cursor,
+      tick: envelope.tick,
+      clientTime,
+    });
+    signatureBytesFromBase64(sig, 'sig', 64);
+    signer.signed.set(submission.submissionId, {
+      clientTime,
+      prevChainHash: envelope.prevChainHash,
+      sig,
+      nextChainHead: submissionChainHashV1(envelope),
+      accepted: false,
+    });
+    return {
+      signed: {
+        ...submission,
+        clientTime,
+        prevChainHash: envelope.prevChainHash,
+        sig,
+      },
+      commit: () => accept(submission.submissionId),
+    };
   }
 
   private async call(
@@ -698,6 +1039,7 @@ export class SessionClient {
       throw new ProtocolMismatchError('attachment receipt changes controller identity');
     }
     this.bindings.set(sessionId, attachment.binding);
+    this.attachedSessions.add(sessionId);
     return attachment;
   }
 
@@ -861,6 +1203,9 @@ export class SessionClient {
         tickId: binding.tickId,
         revision: binding.revision,
         tick: structuredClone(projected.tick),
+        ...(binding.signingPosition === undefined
+          ? {}
+          : { signingPosition: { ...binding.signingPosition } }),
         ...(extensions === undefined ? {} : { extensions }),
       };
       receiptValue = Object.hasOwn(projected, 'receipt')
@@ -899,6 +1244,7 @@ export class SessionClient {
       throw new ProtocolMismatchError('existing session receipt does not match durable head');
     }
     this.bindings.set(existing.sessionId, binding);
+    if (attachReceipt !== undefined) this.attachedSessions.add(existing.sessionId);
     return new ClientSessionHandle<TCommand, TObservation, TOutcome>(
       this,
       existing.sessionId,
@@ -952,6 +1298,14 @@ export class SessionClient {
     if (options.submissionId === undefined) {
       this.commandSequences.set(sequenceKey, sequence + 1);
     }
+    const signer = this.signers.get(signerKey(sessionId, participantId));
+    // A signing client numbers generated ids from its durable chain position
+    // rather than a per-process counter, so they stay distinct across a resume
+    // even when the host restarts revisions at a level boundary. An unsent
+    // submission keeps its id, so a retry after a failure resends signed bytes.
+    const generatedId = signer === undefined
+      ? `${participantId}:${cursor.tickId}:${sequence}`
+      : `${participantId}:${cursor.tickId}:s${signer.state.submissions}`;
     const submission: CommandSubmission<TCommand> = {
       protocol: PROTOCOL_ID,
       protocolVersion: PROTOCOL_VERSION,
@@ -959,21 +1313,39 @@ export class SessionClient {
       tickId: cursor.tickId,
       revision: cursor.revision,
       participantId,
-      submissionId: options.submissionId
-        ?? `${participantId}:${cursor.tickId}:${sequence}`,
+      submissionId: options.submissionId ?? generatedId,
       command,
     };
+    let body = submission;
+    let commitChain: (() => void) | undefined;
+    if (signer !== undefined) {
+      const cursorPosition = options.cursor === undefined
+        ? undefined
+        : (options.cursor as SessionBinding).signingPosition;
+      const signed = await this.signSubmission(
+        signer,
+        submission,
+        options.signingPosition
+          ?? (cursorPosition === undefined
+            ? undefined
+            : parseSigningPosition(cursorPosition))
+          ?? binding?.signingPosition,
+      );
+      body = signed.signed;
+      commitChain = signed.commit;
+    }
     const result = parseTickResult<TObservation>(
       await this.call(
         'POST',
         `/v1/sessions/${encodeURIComponent(sessionId)}/actions`,
-        submission as unknown as JsonValue,
+        body as unknown as JsonValue,
         { signal: options.signal },
       ),
     );
     if (result.sessionId !== sessionId) {
       throw new ProtocolMismatchError('response session does not match request');
     }
+    commitChain?.();
     this.remember(result, participantId);
     return result;
   }
