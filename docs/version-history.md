@@ -3,11 +3,18 @@
 GAOS used the v0.x line to refine its contracts before v1.0. Products should
 review the migration notes before adopting the stable surface.
 
-::: tip Latest release: v1.0.4
-The compatible patch adds replaceable cloud/local experience providers while
-preserving the v1.0.2 speech boundaries and all v1 replay, session, and
+::: tip Latest release: v1.0.5
+The compatible patch lets a client produce RFC-010 seat-signed submissions,
+preserving the v1.0.4 experience providers and all v1 replay, session, and
 room-agent contracts.
 :::
+
+## v1.0.5: client submission signing
+
+Prepared September 1, 2026. Clients can sign their own submissions, so a run
+verifies as signed evidence rather than an unsigned replay.
+
+[Migration and release notes →](/releases#v105)
 
 ## v1.0.4: replaceable experience providers
 

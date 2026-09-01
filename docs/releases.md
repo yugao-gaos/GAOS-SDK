@@ -3,6 +3,30 @@
 For the public chronological changelog, see the
 [complete version history](/version-history).
 
+## v1.0.5
+
+Patch release prepared September 1, 2026. It closes the gap that left every
+run unsigned: the crypto, the wire reservation, and the verifier already
+existed, but no client could attach a signature.
+
+- `SessionClient.useSubmissionSigning()` signs each submission with a
+  caller-supplied `sign(preimage)` callback and the seat roster. The SDK never
+  handles private keys.
+- Tick envelopes may carry `signingPosition` — the episode-local `cursor` and
+  `tick` the signature preimage commits to. A host that rebases revisions
+  across a multi-level run exposes a wire revision that is **not** the recorded
+  cursor or tick, so a client signing the wire revision produces signatures
+  that verify on the first level and fail on every later one. Clients refuse to
+  sign when no position is available rather than guessing.
+- Chain state survives attach/resume via `createSubmissionChainState()`, and
+  signed bytes are cached per submission id so an exact retry re-sends them
+  instead of double-advancing the chain.
+- `transcriptToReplayArtifact` carries `seatKeys`/`signaturePolicy` and signed
+  submission rows, so a lifted transcript can prove signing.
+
+Existing artifacts and hosts are unaffected: every added field is optional and
+omitting `signingPosition` leaves envelopes byte-identical.
+
 ## v1.0.4
 
 Patch release prepared August 31, 2026. It adds product-neutral provider
