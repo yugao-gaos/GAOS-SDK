@@ -1,6 +1,6 @@
 [project]
 name = "gaos-sdk"
-version = "1.0.1"
+version = "1.0.4"
 description = "Product-neutral Python client and evidence tools for the Game-Agent Open Standard"
 readme = "README.md"
 license = "Apache-2.0"

@@ -3,6 +3,69 @@
 For the public chronological changelog, see the
 [complete version history](/version-history).
 
+## v1.0.5
+
+Patch release prepared September 1, 2026. It closes the gap that left every
+run unsigned: the crypto, the wire reservation, and the verifier already
+existed, but no client could attach a signature.
+
+- `SessionClient.useSubmissionSigning()` signs each submission with a
+  caller-supplied `sign(preimage)` callback and the seat roster. The SDK never
+  handles private keys.
+- Tick envelopes may carry `signingPosition` — the episode-local `cursor` and
+  `tick` the signature preimage commits to. A host that rebases revisions
+  across a multi-level run exposes a wire revision that is **not** the recorded
+  cursor or tick, so a client signing the wire revision produces signatures
+  that verify on the first level and fail on every later one. Clients refuse to
+  sign when no position is available rather than guessing.
+- Chain state survives attach/resume via `createSubmissionChainState()`, and
+  signed bytes are cached per submission id so an exact retry re-sends them
+  instead of double-advancing the chain.
+- `transcriptToReplayArtifact` carries `seatKeys`/`signaturePolicy` and signed
+  submission rows, so a lifted transcript can prove signing.
+
+Existing artifacts and hosts are unaffected: every added field is optional and
+omitting `signingPosition` leaves envelopes byte-identical.
+
+## v1.0.4
+
+Patch release prepared August 31, 2026. It adds product-neutral provider
+profiles for experiences that may run in cloud, local, or hybrid environments.
+
+- `@yugao-gaos/gaos-sdk/experience-providers` defines operational contracts
+  for reasoning, speech recognition, speech synthesis, live worlds, and replay
+  video.
+- Profiles contain only ordered provider IDs. Products retain ownership of
+  credentials, transports, prompts, UI, recordings, and failover policy.
+- The package continues to include the v1.0.2 adaptive speech-input surface and
+  all v1 room-agent runtime behavior.
+
+### Migration to v1.0.4
+
+Existing callers need no code change. Products that need a China-local or
+museum-local runtime can define a profile and supply concrete adapters without
+forking their room-agent logic.
+
+## v1.0.2
+
+Patch release prepared August 30, 2026. It adds a browser-safe, transport-
+neutral adaptive speech boundary primitive for hands-free room agents.
+
+- `@yugao-gaos/gaos-sdk/speech-input` emits push-to-talk-compatible
+  `segment_start` and `segment_end` events from PCM16 or level frames.
+- Products choose release duration and thresholds. A distinct assistant-
+  playback onset gate suppresses ordinary speaker echo while retaining
+  deliberate barge-in.
+- Segment cancellation preserves noise calibration; reset clears it. No audio
+  or transcript content is retained by the SDK.
+
+### Migration to v1.0.2
+
+Existing callers need no code change. Hands-free products can replace local
+RMS timers with `AdaptiveSpeechSegmenter` and map its events into their voice
+transport. Push-to-talk products can continue to produce the same boundaries
+directly.
+
 ## v1.0.1
 
 Patch release prepared August 30, 2026. It keeps all v1.0 contracts compatible

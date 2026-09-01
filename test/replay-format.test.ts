@@ -1,16 +1,26 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { canonicalJson } from '../src/protocol.js';
 import {
   GAOS_REPLAY_DERIVED_SEEDS,
   GAOS_REPLAY_EXTENSION,
   GAOS_REPLAY_MANIFEST_FORMAT,
   GAOS_REPLAY_MIME,
   ReplayFormatError,
+  SUBMISSION_SIGNATURE_ALGORITHM,
+  SUBMISSION_SIGNATURE_SCHEME,
   createReplayArtifact,
+  exportSubmissionPublicKey,
+  generateSubmissionKeyPair,
   parseReplayJsonl,
   recheckReplayArtifact,
+  recheckReplaySignatures,
   runLevelSeed,
   serializeReplayJsonl,
+  signSubmissionV1,
+  submissionChainHashV1,
+  submissionGenesisHashV1,
+  submissionRosterHashV1,
   transcriptToReplayArtifact,
   validateReplayArtifact,
   type ReplayArtifact,
@@ -355,6 +365,77 @@ describe('portable GAOS replay JSONL', () => {
       tick: 4,
     }]);
     expect(recheckReplayArtifact(artifact, () => reducer).ok).toBe(true);
+  });
+
+  it('carries a signing roster through a lifted transcript', async () => {
+    const pair = await generateSubmissionKeyPair();
+    const seatKeys = [{
+      id: 'red',
+      publicKey: await exportSubmissionPublicKey(pair.publicKey),
+      alg: SUBMISSION_SIGNATURE_ALGORITHM,
+      signingTier: { N: 8 },
+    }];
+    const command = { move: 1 };
+    const envelope = {
+      sessionId: 'legacy-signed',
+      seat: 'red',
+      submissionId: 'red-1',
+      cursor: 0,
+      tick: 0,
+      clientTime: 1_700_000_000_000,
+      command,
+      prevChainHash: submissionGenesisHashV1(
+        'legacy-signed',
+        'red',
+        submissionRosterHashV1(seatKeys),
+      ),
+    };
+    const header = {
+      sessionId: 'legacy-signed',
+      level: { id: 'only', goal: 1 },
+      seed: 9,
+      perm: [0],
+      status: 'won' as const,
+      stars: 1,
+      actionsUsed: 1,
+    };
+    const actions = [{
+      n: 1,
+      wireId: 'Action 1',
+      canonicalId: 'Action 1',
+      seat: 'red',
+      tick: 0,
+      submissionId: envelope.submissionId,
+      canonicalCommand: canonicalJson(command),
+      cursor: envelope.cursor,
+      clientTime: envelope.clientTime,
+      prevChainHash: envelope.prevChainHash,
+      sig: await signSubmissionV1(pair.privateKey, envelope),
+    }];
+
+    const unsigned = transcriptToReplayArtifact(header, actions, { game, levelId: 'only' });
+    expect(unsigned.header.seatKeys).toBeUndefined();
+    expect(recheckReplaySignatures(unsigned).state).toBe('unsigned');
+
+    const signed = transcriptToReplayArtifact(header, actions, {
+      game,
+      levelId: 'only',
+      seatKeys,
+      signaturePolicy: { scheme: SUBMISSION_SIGNATURE_SCHEME },
+    });
+    expect(signed.header.seatKeys).toEqual(seatKeys);
+    expect(signed.header.signaturePolicy).toEqual({ scheme: SUBMISSION_SIGNATURE_SCHEME });
+    const checked = recheckReplaySignatures(signed);
+    expect(checked.problems).toEqual([]);
+    expect(checked.state).toBe('signed');
+    expect(checked.seats).toEqual([{
+      seat: 'red',
+      submissions: 1,
+      validSignatures: 1,
+      chainReproduced: true,
+      policySatisfied: true,
+      chainHead: submissionChainHashV1(envelope),
+    }]);
   });
 
   it('rejects malformed and foreign JSONL with actionable errors', () => {

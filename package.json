@@ -1,6 +1,6 @@
 {
   "name": "@yugao-gaos/gaos-sdk",
-  "version": "1.0.1",
+  "version": "1.0.5",
   "description": "TypeScript SDK for the Game-Agent Open Standard.",
   "license": "Apache-2.0",
   "type": "module",
@@ -65,6 +65,14 @@
     "./presentation-cues": {
       "types": "./dist/presentation-cues.d.ts",
       "import": "./dist/presentation-cues.js"
+    },
+    "./speech-input": {
+      "types": "./dist/speech-input.d.ts",
+      "import": "./dist/speech-input.js"
+    },
+    "./experience-providers": {
+      "types": "./dist/experience-providers.d.ts",
+      "import": "./dist/experience-providers.js"
     },
     "./benchmark": {
       "types": "./dist/benchmark.d.ts",

@@ -300,6 +300,7 @@ interface EnvelopeBase extends TickCursor {
     protocolVersion: typeof PROTOCOL_VERSION;
     // (undocumented)
     sessionId: string;
+    signingPosition?: SubmissionSigningPosition;
 }
 
 // @public (undocumented)
@@ -779,6 +780,12 @@ interface SessionView {
     status: 'playing' | 'won' | 'failed' | 'ended';
 }
 
+// @public
+interface SubmissionSigningPosition {
+    cursor: number;
+    tick: number;
+}
+
 // @public (undocumented)
 interface SubmitCommandOptions {
     // (undocumented)
@@ -787,6 +794,7 @@ interface SubmitCommandOptions {
     participantId?: string;
     // (undocumented)
     signal?: AbortSignal;
+    signingPosition?: SubmissionSigningPosition;
     // (undocumented)
     submissionId?: string;
 }

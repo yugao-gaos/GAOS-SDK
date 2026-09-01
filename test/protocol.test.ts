@@ -4,6 +4,7 @@ import {
   PROTOCOL_VERSION,
   IntentCollectionError,
   GameRegistry,
+  assertSubmissionSigningPosition,
   canonicalJson,
   collectIntent,
   createIntentWindow,
@@ -169,6 +170,33 @@ describe('v1 simultaneous intent collection', () => {
       revision: 3,
       tick: { hand: ['A', 'K'], custom: { phase: 'bid' } },
     });
+  });
+
+  it('publishes the episode-local signing position a client must commit to', () => {
+    // A run-composing host rebases revisions, so the wire cursor and the
+    // recorded cursor/tick are different numbers on every level after the first.
+    expect(tickEnvelope('s1', 7, { board: 'x' }, undefined, { cursor: 2, tick: 2 }))
+      .toMatchObject({ revision: 7, signingPosition: { cursor: 2, tick: 2 } });
+    expect(tickEnvelope('s1', 7, { board: 'x' })).not.toHaveProperty('signingPosition');
+
+    const window = createIntentWindow('s1', 0, ['north', 'south']);
+    expect(pendingEnvelope(window, { board: 'x' }, undefined, undefined, {
+      cursor: 0,
+      tick: 0,
+    })).toMatchObject({ signingPosition: { cursor: 0, tick: 0 } });
+
+    for (const invalid of [
+      null,
+      [0, 0],
+      { cursor: 0 },
+      { cursor: 0, tick: 0, extra: 1 },
+      { cursor: -1, tick: 0 },
+      { cursor: 0, tick: 1.5 },
+    ]) {
+      expect(() => assertSubmissionSigningPosition(invalid)).toThrow(/signingPosition/);
+      expect(() => tickEnvelope('s1', 0, null, undefined, invalid as never))
+        .toThrow(/signingPosition/);
+    }
   });
 
   it('maps sequential and simultaneous participation to compatible intent windows', () => {

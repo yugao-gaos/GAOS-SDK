@@ -444,6 +444,7 @@ interface EnvelopeBase extends TickCursor {
     protocolVersion: typeof PROTOCOL_VERSION;
     // (undocumented)
     sessionId: string;
+    signingPosition?: SubmissionSigningPosition;
 }
 
 // @public (undocumented)
@@ -866,6 +867,12 @@ interface SessionRunResult<TOutcome> {
     status: 'terminal' | 'finalized';
 }
 
+// @public
+interface SubmissionSigningPosition {
+    cursor: number;
+    tick: number;
+}
+
 // @public (undocumented)
 export interface SubmissionVerificationFacts {
     // (undocumented)
@@ -908,6 +915,7 @@ interface SubmitCommandOptions {
     participantId?: string;
     // (undocumented)
     signal?: AbortSignal;
+    signingPosition?: SubmissionSigningPosition;
     // (undocumented)
     submissionId?: string;
 }

@@ -3,11 +3,34 @@
 GAOS used the v0.x line to refine its contracts before v1.0. Products should
 review the migration notes before adopting the stable surface.
 
-::: tip Latest release: v1.0.1
-The additive patch carries unfinished final speech fragments through correlated
-run supersession while preserving v1.0 replay, session, and room-agent
-contracts.
+::: tip Latest release: v1.0.5
+The compatible patch lets a client produce RFC-010 seat-signed submissions,
+preserving the v1.0.4 experience providers and all v1 replay, session, and
+room-agent contracts.
 :::
+
+## v1.0.5: client submission signing
+
+Prepared September 1, 2026. Clients can sign their own submissions, so a run
+verifies as signed evidence rather than an unsigned replay.
+
+[Migration and release notes →](/releases#v105)
+
+## v1.0.4: replaceable experience providers
+
+Prepared August 31, 2026. Adds product-neutral operational contracts and
+ordered profiles for reasoning, speech recognition, speech synthesis, live
+worlds, and replay video.
+
+[Migration and release notes →](/releases#v104)
+
+## v1.0.2: adaptive speech input boundaries
+
+Prepared August 30, 2026. Adds the transport-neutral adaptive PCM/level
+segmenter used by hands-free voice products, including a distinct assistant-
+playback barge-in gate and product-selected release duration.
+
+[Migration and release notes →](/releases#v102)
 
 ## v1.0.1: speech supersession patch
 

@@ -11,6 +11,9 @@ export function assertJsonObject(value: unknown, label?: string): asserts value 
 export function assertJsonValue(value: unknown, label?: string): asserts value is JsonValue;
 
 // @public
+export function assertSubmissionSigningPosition(value: unknown, label?: string): asserts value is SubmissionSigningPosition;
+
+// @public
 export function canonicalJson(value: unknown): string;
 
 // @public (undocumented)
@@ -59,6 +62,7 @@ interface EnvelopeBase extends TickCursor {
     protocolVersion: typeof PROTOCOL_VERSION;
     // (undocumented)
     sessionId: string;
+    signingPosition?: SubmissionSigningPosition;
 }
 
 // @public
@@ -164,7 +168,7 @@ export interface PendingEnvelope<TObservation = unknown> extends EnvelopeBase {
 }
 
 // @public (undocumented)
-export function pendingEnvelope<TObservation, TCommand>(window: IntentWindow<TCommand>, tick: TObservation, acceptedParticipantId?: string, extensions?: ProtocolExtensions): PendingEnvelope<TObservation>;
+export function pendingEnvelope<TObservation, TCommand>(window: IntentWindow<TCommand>, tick: TObservation, acceptedParticipantId?: string, extensions?: ProtocolExtensions, signingPosition?: SubmissionSigningPosition): PendingEnvelope<TObservation>;
 
 // @public
 export const PROTOCOL_ID: "gaos.ticks";
@@ -188,6 +192,12 @@ export interface SubmissionIntegrityReservation {
     sig?: string;
 }
 
+// @public
+export interface SubmissionSigningPosition {
+    cursor: number;
+    tick: number;
+}
+
 // @public (undocumented)
 export interface TickCursor {
     revision: number;
@@ -203,7 +213,7 @@ export interface TickEnvelope<TObservation = unknown> extends EnvelopeBase {
 }
 
 // @public (undocumented)
-export function tickEnvelope<TObservation>(sessionId: string, revision: number, tick: TObservation, extensions?: ProtocolExtensions): TickEnvelope<TObservation>;
+export function tickEnvelope<TObservation>(sessionId: string, revision: number, tick: TObservation, extensions?: ProtocolExtensions, signingPosition?: SubmissionSigningPosition): TickEnvelope<TObservation>;
 
 // @public (undocumented)
 export type TickResult<TObservation = unknown> = TickEnvelope<TObservation> | PendingEnvelope<TObservation>;
