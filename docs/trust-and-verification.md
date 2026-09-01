@@ -124,6 +124,53 @@ Persist the key, current chain head, and the exact signed envelope before
 sending. An exact network retry reuses all three. Retain signed chain heads
 after a run: they are the dispute evidence for a host-truncated tail.
 
+### Signing through SessionClient
+
+`SessionClient` runs that loop for a hosted session. The caller keeps the
+private key and supplies a `sign` callback; the SDK never handles key
+material. Registration returns the chain position now in force:
+
+```ts
+import { SessionClient } from '@yugao-gaos/gaos-sdk/client';
+import { signEd25519Base64 } from '@yugao-gaos/gaos-sdk/engine';
+
+const client = new SessionClient(baseUrl, token);
+const start = await client.createSession(request, seat);
+
+client.useSubmissionSigning(start.sessionId, {
+  seatKeys,
+  sign: (preimage) => signEd25519Base64(keys.privateKey, preimage),
+});
+
+await client.submitCommand(start.sessionId, command);
+const saved = client.submissionChainState(start.sessionId, seat);
+```
+
+Each `submitCommand` stamps `clientTime`, attaches the current
+`prevChainHash` and the signature, and advances the chain only after the host
+accepts the submission. An exact retry of the same `submissionId` resends the
+bytes already signed and advances the chain once.
+
+The `cursor` and `tick` a submission signs come from the envelope's
+[`signingPosition`](/protocol-v1#signing-position). A host that does not
+publish one cannot be signed against; pass
+`SubmitCommandOptions.signingPosition` if the host reports the pair some other
+way.
+
+Persist `submissionChainState` and hand it back through `resume` when a run is
+interrupted:
+
+```ts
+const resumed = new SessionClient(baseUrl, token);
+await resumed.attachSession(sessionId, { participantId: seat, requestId });
+resumed.useSubmissionSigning(sessionId, { seat, seatKeys, sign, resume: saved });
+```
+
+Signing a session this client attached to requires `resume`, because a chain
+that silently restarts at genesis breaks every link recorded before the
+interruption. Use `createSubmissionChainState(sessionId, seat, seatKeys)` as
+the explicit `resume` value when the seat genuinely has not submitted yet.
+
 Python provides equivalent zero-dependency helpers over a 32-byte private
 seed: `ed25519_public_key_from_seed`, `sign_submission_v1`, chain hashing, and
 synchronous verification.

@@ -55,6 +55,26 @@ attestation. Exact retries reuse the identical signed bytes.
 [Trust and verification](/trust-and-verification) defines the scheme and
 threat boundary.
 
+## Signing position
+
+The signed preimage commits to the episode-local `cursor` and `tick` a host
+records, which the wire `revision` does not report. A host composing a
+multi-level run keeps one kernel per level, so both counters restart at zero
+each level while the revision a client holds climbs across the whole run.
+
+A host that wants signed submissions therefore publishes the un-rebased pair
+on every envelope:
+
+```json
+{ "revision": 7, "signingPosition": { "cursor": 2, "tick": 2 } }
+```
+
+`tickEnvelope` and `pendingEnvelope` take it as a trailing argument. A client
+signing the wire `revision` instead produces signatures that verify on the
+first level and fail on every later one, so `SessionClient` refuses to sign
+without a position rather than guessing one. Omitting the field leaves the
+envelope byte-identical to protocol v1 as published.
+
 ## Simultaneous resolution
 
 The protocol collector stores one intent per participant without mutating its

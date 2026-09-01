@@ -241,6 +241,20 @@ const portable = transcriptToReplayArtifact(header, actions, {
 });
 ```
 
+Action rows may carry the RFC-010 material a signed transcript already holds
+(`submissionId`, `canonicalCommand`, `cursor`, `clientTime`, `prevChainHash`,
+`sig`). Pass `seatKeys` and `signaturePolicy` alongside them, or the converted
+artifact keeps no roster and can never resolve to anything but `unsigned`:
+
+```ts
+const signed = transcriptToReplayArtifact(header, actions, {
+  game: gameAndAdapterRef,
+  levelId: 'intro',
+  seatKeys,
+  signaturePolicy: { scheme: 'gaos.submission.ed25519.v1' },
+});
+```
+
 Arena's existing run header maps directly:
 
 | Arena run field | `gaos.replay` field |

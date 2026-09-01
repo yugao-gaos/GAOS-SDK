@@ -3197,6 +3197,9 @@ export interface TranscriptHeader<TLevel> {
     visibility?: TranscriptVisibility;
 }
 
+// @public
+export type TranscriptReplayAction = Omit<ReplayActionInput, 'levelIndex'>;
+
 // @public (undocumented)
 export interface TranscriptReplayOptions {
     // (undocumented)
@@ -3207,10 +3210,12 @@ export interface TranscriptReplayOptions {
     levelId: string;
     // (undocumented)
     levelVersion?: string | number;
+    seatKeys?: readonly SubmissionSeatKey[];
+    signaturePolicy?: SubmissionSignaturePolicy;
 }
 
 // @public
-export function transcriptToReplayArtifact<TLevel>(header: TranscriptHeader<TLevel>, actions: TranscriptAction[], options: TranscriptReplayOptions): ReplayArtifact<TLevel>;
+export function transcriptToReplayArtifact<TLevel>(header: TranscriptHeader<TLevel>, actions: TranscriptReplayAction[], options: TranscriptReplayOptions): ReplayArtifact<TLevel>;
 
 // @public (undocumented)
 export type TranscriptVisibility = 'full' | `seat:${string}`;

@@ -557,6 +557,22 @@ mismatch. After a level, advance the base by that episode's final cursor.
 This translation is transport state; portable replay retains per-level ticks
 and assigns the ordered `levelIndex`.
 
+A rebasing host that accepts signed submissions must also publish the
+un-rebased pair as the envelope's
+[`signingPosition`](/protocol-v1#signing-position):
+
+```ts
+tickEnvelope(sessionId, revisionBase + kernel.cursor(), observation, undefined, {
+  cursor: kernel.cursor(),
+  tick: kernel.tick(),
+});
+```
+
+RFC-010 signs the recorded `cursor` and `tick`, so without this a client can
+only sign the rebased revision, and every level after the first verifies as
+`rejected`. The seat's chain itself continues across the boundary unchanged:
+it is keyed by session and seat, not by level.
+
 ### Durable event sizing
 
 `SessionEvent` is the durable representation, not a compact in-memory trace.

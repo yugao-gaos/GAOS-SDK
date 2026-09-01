@@ -93,6 +93,9 @@ export function assertJsonObject(value: unknown, label?: string): asserts value 
 export function assertJsonValue(value: unknown, label?: string): asserts value is JsonValue;
 
 // @public
+export function assertSubmissionSigningPosition(value: unknown, label?: string): asserts value is SubmissionSigningPosition;
+
+// @public
 export function canonicalJson(value: unknown): string;
 
 // @public
@@ -150,6 +153,9 @@ export function createParticipationIntentWindow<TCommand>(sessionId: string, rev
 // @public (undocumented)
 export function createSessionAttachReceipt(receipt: Omit<SessionAttachReceipt, 'schema' | 'receiptDigest'>): SessionAttachReceipt;
 
+// @public
+export function createSubmissionChainState(sessionId: string, seat: string, seatKeys: readonly SubmissionSeatKey[]): SubmissionChainState;
+
 // @public (undocumented)
 export type CredentialProvider = string | (() => string | null | undefined | Promise<string | null | undefined>);
 
@@ -163,6 +169,7 @@ interface EnvelopeBase extends TickCursor {
     protocolVersion: typeof PROTOCOL_VERSION;
     // (undocumented)
     sessionId: string;
+    signingPosition?: SubmissionSigningPosition;
 }
 
 // @public (undocumented)
@@ -322,7 +329,7 @@ export interface PendingEnvelope<TObservation = unknown> extends EnvelopeBase {
 }
 
 // @public (undocumented)
-export function pendingEnvelope<TObservation, TCommand>(window: IntentWindow<TCommand>, tick: TObservation, acceptedParticipantId?: string, extensions?: ProtocolExtensions): PendingEnvelope<TObservation>;
+export function pendingEnvelope<TObservation, TCommand>(window: IntentWindow<TCommand>, tick: TObservation, acceptedParticipantId?: string, extensions?: ProtocolExtensions, signingPosition?: SubmissionSigningPosition): PendingEnvelope<TObservation>;
 
 // @public
 export const PROTOCOL_ID: "gaos.ticks";
@@ -442,6 +449,7 @@ export interface SessionBinding extends TickCursor {
     protocolVersion: typeof PROTOCOL_VERSION;
     // (undocumented)
     sessionId: string;
+    signingPosition?: SubmissionSigningPosition;
 }
 
 // @public (undocumented)
@@ -472,10 +480,13 @@ export class SessionClient {
     getTickEnvelope<TObservation = unknown>(sessionId: string, callOptions?: SessionCallOptions): Promise<TickResult<TObservation>>;
     // (undocumented)
     restoreSessionBinding(value: unknown): SessionBinding;
+    stopSubmissionSigning(sessionId: string, seat: string): void;
+    submissionChainState(sessionId: string, seat: string): SubmissionChainState | undefined;
     // (undocumented)
     submitCommand<TCommand = unknown, TObservation = unknown>(sessionId: string, command: TCommand, options?: SubmitCommandOptions): Promise<TickResult<TObservation>>;
     // @deprecated (undocumented)
     submitIntent<TCommand = unknown, TObservation = unknown>(sessionId: string, command: TCommand, options?: SubmitIntentOptions): Promise<TickResult<TObservation>>;
+    useSubmissionSigning(sessionId: string, options: SubmissionSigningOptions): SubmissionChainState;
 }
 
 // @public (undocumented)
@@ -676,6 +687,25 @@ export interface SessionStart<TObservation = unknown> {
     tick: TObservation;
 }
 
+// @public (undocumented)
+export const SUBMISSION_SIGNATURE_ALGORITHM: "Ed25519";
+
+// @public (undocumented)
+export const SUBMISSION_SIGNATURE_SCHEME: "gaos.submission.ed25519.v1";
+
+// @public
+export interface SubmissionChainState {
+    chainHead: string;
+    rosterHash: string;
+    // (undocumented)
+    schema: 'gaos.submission-chain.v1';
+    // (undocumented)
+    seat: string;
+    // (undocumented)
+    sessionId: string;
+    submissions: number;
+}
+
 // @public
 export interface SubmissionIntegrityReservation {
     clientTime?: number;
@@ -686,6 +716,60 @@ export interface SubmissionIntegrityReservation {
 }
 
 // @public (undocumented)
+export interface SubmissionSeatKey {
+    // (undocumented)
+    alg: typeof SUBMISSION_SIGNATURE_ALGORITHM;
+    // (undocumented)
+    id: string;
+    // (undocumented)
+    publicKey: string;
+    // (undocumented)
+    signingTier: SubmissionSigningTier;
+}
+
+// @public (undocumented)
+export interface SubmissionSignaturePolicy {
+    // (undocumented)
+    scheme: typeof SUBMISSION_SIGNATURE_SCHEME;
+}
+
+// @public
+export interface SubmissionSigningContext {
+    // (undocumented)
+    clientTime: number;
+    // (undocumented)
+    cursor: number;
+    // (undocumented)
+    seat: string;
+    // (undocumented)
+    sessionId: string;
+    // (undocumented)
+    submissionId: string;
+    // (undocumented)
+    tick: number;
+}
+
+// @public (undocumented)
+export interface SubmissionSigningOptions {
+    now?: () => number;
+    resume?: SubmissionChainState;
+    seat?: string;
+    seatKeys: readonly SubmissionSeatKey[];
+    sign(preimage: Uint8Array, context: SubmissionSigningContext): Promise<string> | string;
+}
+
+// @public
+export interface SubmissionSigningPosition {
+    cursor: number;
+    tick: number;
+}
+
+// @public (undocumented)
+export interface SubmissionSigningTier {
+    N: number;
+}
+
+// @public (undocumented)
 export interface SubmitCommandOptions {
     // (undocumented)
     cursor?: TickCursor;
@@ -693,6 +777,7 @@ export interface SubmitCommandOptions {
     participantId?: string;
     // (undocumented)
     signal?: AbortSignal;
+    signingPosition?: SubmissionSigningPosition;
     // (undocumented)
     submissionId?: string;
 }
@@ -735,7 +820,7 @@ export interface TickEnvelope<TObservation = unknown> extends EnvelopeBase {
 }
 
 // @public (undocumented)
-export function tickEnvelope<TObservation>(sessionId: string, revision: number, tick: TObservation, extensions?: ProtocolExtensions): TickEnvelope<TObservation>;
+export function tickEnvelope<TObservation>(sessionId: string, revision: number, tick: TObservation, extensions?: ProtocolExtensions, signingPosition?: SubmissionSigningPosition): TickEnvelope<TObservation>;
 
 // @public (undocumented)
 export type TickResult<TObservation = unknown> = TickEnvelope<TObservation> | PendingEnvelope<TObservation>;
