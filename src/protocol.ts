@@ -36,6 +36,26 @@ export interface SubmissionIntegrityReservation {
   sig?: string;
 }
 
+/**
+ * Episode-local coordinates an RFC-010 submission made against this cursor
+ * will be recorded at, and therefore the exact `cursor` and `tick` its
+ * signature preimage must commit to.
+ *
+ * The wire `revision` cannot stand in for either value. A host composing a
+ * multi-level run keeps one kernel per level, so both counters restart at
+ * zero each level while the revision a client holds climbs across the whole
+ * run; such a host adds a `revisionBase` outbound and subtracts it inbound.
+ * Signing the rebased revision produces signatures that verify only on the
+ * first level, so a host that wants signed submissions publishes the
+ * un-rebased values here.
+ */
+export interface SubmissionSigningPosition {
+  /** Episode-local intent-window cursor, as the host will record it. */
+  cursor: number;
+  /** Episode-local world tick, as the host will record it. */
+  tick: number;
+}
+
 export interface TickCursor {
   /** Stable identity of this revision, unique within a session. */
   tickId: string;
@@ -47,6 +67,8 @@ interface EnvelopeBase extends TickCursor {
   protocol: typeof PROTOCOL_ID;
   protocolVersion: typeof PROTOCOL_VERSION;
   sessionId: string;
+  /** Required before a client can sign a submission against this envelope. */
+  signingPosition?: SubmissionSigningPosition;
   extensions?: ProtocolExtensions;
 }
 
@@ -509,13 +531,36 @@ function stableJson(value: unknown): string {
   return canonicalJson(value);
 }
 
+/** Reject a signing position a client could not sign a valid preimage from. */
+export function assertSubmissionSigningPosition(
+  value: unknown,
+  label = 'signingPosition',
+): asserts value is SubmissionSigningPosition {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object`);
+  }
+  const position = value as Record<string, unknown>;
+  const names = Object.keys(position);
+  if (names.length !== 2 || !names.includes('cursor') || !names.includes('tick')) {
+    throw new TypeError(`${label} must contain exactly cursor and tick`);
+  }
+  for (const field of ['cursor', 'tick'] as const) {
+    const entry = position[field];
+    if (!Number.isSafeInteger(entry) || (entry as number) < 0) {
+      throw new TypeError(`${label}.${field} must be a non-negative safe integer`);
+    }
+  }
+}
+
 export function tickEnvelope<TObservation>(
   sessionId: string,
   revision: number,
   tick: TObservation,
   extensions?: ProtocolExtensions,
+  signingPosition?: SubmissionSigningPosition,
 ): TickEnvelope<TObservation> {
   if (extensions !== undefined) assertJsonObject(extensions, 'extensions');
+  if (signingPosition !== undefined) assertSubmissionSigningPosition(signingPosition);
   return {
     protocol: PROTOCOL_ID,
     protocolVersion: PROTOCOL_VERSION,
@@ -524,6 +569,9 @@ export function tickEnvelope<TObservation>(
     tickId: makeTickId(sessionId, revision),
     revision,
     tick,
+    ...(signingPosition
+      ? { signingPosition: { cursor: signingPosition.cursor, tick: signingPosition.tick } }
+      : {}),
     ...(extensions ? { extensions } : {}),
   };
 }
@@ -533,8 +581,10 @@ export function pendingEnvelope<TObservation, TCommand>(
   tick: TObservation,
   acceptedParticipantId?: string,
   extensions?: ProtocolExtensions,
+  signingPosition?: SubmissionSigningPosition,
 ): PendingEnvelope<TObservation> {
   if (extensions !== undefined) assertJsonObject(extensions, 'extensions');
+  if (signingPosition !== undefined) assertSubmissionSigningPosition(signingPosition);
   const submittedParticipants = window.participants.filter((id) => hasIntent(window, id));
   return {
     protocol: PROTOCOL_ID,
@@ -547,6 +597,9 @@ export function pendingEnvelope<TObservation, TCommand>(
     ...(acceptedParticipantId ? { acceptedParticipantId } : {}),
     submittedParticipants,
     awaitingParticipants: window.participants.filter((id) => !hasIntent(window, id)),
+    ...(signingPosition
+      ? { signingPosition: { cursor: signingPosition.cursor, tick: signingPosition.tick } }
+      : {}),
     ...(extensions ? { extensions } : {}),
   };
 }
