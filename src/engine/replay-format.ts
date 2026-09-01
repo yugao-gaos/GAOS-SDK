@@ -388,10 +388,17 @@ export interface CreateReplayArtifactInput<TLevel> {
   extensions?: JsonObject;
 }
 
+/** One lifted transcript row, including any RFC-010 material it carries. */
+export type TranscriptReplayAction = Omit<ReplayActionInput, 'levelIndex'>;
+
 export interface TranscriptReplayOptions {
   game: ReplayGameRef;
   levelId: string;
   levelVersion?: string | number;
+  /** RFC-010 roster; without it a converted artifact can never prove signing. */
+  seatKeys?: readonly SubmissionSeatKey[];
+  /** Required with `seatKeys`; fixes the complete signing construction. */
+  signaturePolicy?: SubmissionSignaturePolicy;
   extensions?: JsonObject;
 }
 
@@ -776,7 +783,7 @@ export function createReplayArtifact<TLevel>(
 /** Lift an existing single-level SDK transcript into the portable envelope. */
 export function transcriptToReplayArtifact<TLevel>(
   header: TranscriptHeader<TLevel>,
-  actions: TranscriptAction[],
+  actions: TranscriptReplayAction[],
   options: TranscriptReplayOptions,
 ): ReplayArtifact<TLevel> {
   return createReplayArtifact({
@@ -798,6 +805,12 @@ export function transcriptToReplayArtifact<TLevel>(
     }],
     actions: actions.map((action) => ({ ...action, levelIndex: 0 })),
     ...(header.visibility === undefined ? {} : { visibility: header.visibility }),
+    ...(options.seatKeys === undefined
+      ? {}
+      : { seatKeys: structuredClone(options.seatKeys) as SubmissionSeatKey[] }),
+    ...(options.signaturePolicy === undefined
+      ? {}
+      : { signaturePolicy: structuredClone(options.signaturePolicy) }),
     ...(options.extensions === undefined ? {} : { extensions: options.extensions }),
   });
 }

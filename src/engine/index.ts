@@ -294,6 +294,7 @@ export {
   type ReplaySeatIntegrityReservation,
   type ReplaySeatSignatureReservation,
   type ReplayTotals,
+  type TranscriptReplayAction,
   type TranscriptReplayOptions,
 } from './replay-format.js';
 export {
